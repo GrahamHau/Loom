@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    container_name: pm-copilot
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env.production
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
