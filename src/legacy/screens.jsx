@@ -9,7 +9,7 @@ const DemandThumb = globalThis.DemandThumb;
 const PLATFORM_LABEL = globalThis.PLATFORM_LABEL;
 const PLATFORM_ICON = globalThis.PLATFORM_ICON;
 const PLATFORM_KEY = globalThis.PLATFORM_KEY;
-const { useState, useMemo } = React;
+const { useState, useEffect, useMemo } = React;
 
 // ============ LOGIN ============
 function LoginScreen({ onLogin, error }) {
