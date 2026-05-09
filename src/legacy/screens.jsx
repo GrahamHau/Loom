@@ -61,6 +61,9 @@ window.LoginScreen = LoginScreen;
 function NewsScreen({ data, api, refreshData }) {
   const [tab, setTab] = useState("all");
   const [items, setItems] = useState(data.news);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  useEffect(() => setItems(data.news), [data.news]);
 
   const filtered = items.filter((n) => {
     if (tab === "all") return true;
@@ -82,6 +85,19 @@ function NewsScreen({ data, api, refreshData }) {
     }
   };
 
+  const collect = async () => {
+    setBusy(true);setNotice("");
+    try {
+      const result = await api("/api/news/collect", { method: "POST" });
+      setNotice(`采集完成：新增 ${result.inserted || 0} 条，更新 ${result.updated || 0} 条${result.errors?.length ? `，失败 ${result.errors.length} 个源` : ""}`);
+      await refreshData?.();
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <div className="news-tabs">
@@ -97,12 +113,13 @@ function NewsScreen({ data, api, refreshData }) {
         )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, padding: "6px 0" }}>
           <Btn size="sm" variant="ghost" icon="filter">筛选</Btn>
-          <Btn size="sm" variant="ghost" icon="sync">立即采集</Btn>
+          <Btn size="sm" variant="ghost" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>
         </div>
       </div>
 
       <div className="viewport">
         <div className="page" style={{ paddingTop: 8 }}>
+          {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
           {dates.map((d) =>
           <div key={d}>
               <div className="news-day">{formatDate(d)}</div>
@@ -248,6 +265,7 @@ function BulletListEditor({ items, onChange, tone = "default", placeholder = "�
 
 function ProductsScreen({ data, api, refreshData }) {
   const [products, setProducts] = useState(data.products);
+  const [notice, setNotice] = useState("");
   useEffect(() => setProducts(data.products), [data.products]);
   const updateSelected = async (patch) => {
     setProducts((ps) => ps.map((p) => p.id === selectedId ? { ...p, ...patch } : p));
@@ -268,6 +286,16 @@ function ProductsScreen({ data, api, refreshData }) {
   !query || p.name.toLowerCase().includes(query.toLowerCase()))
   );
   const selected = products.find((p) => p.id === selectedId);
+  const syncProducts = async () => {
+    setNotice("飞书同步中...");
+    try {
+      await api("/api/sync/feishu", { method: "POST", body: JSON.stringify({ kinds: ["products"] }) });
+      await refreshData?.();
+      setNotice("竞品库已同步到飞书。");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
 
   return (
     <div className="products-layout" style={{ height: "100%" }}>
@@ -286,10 +314,11 @@ function ProductsScreen({ data, api, refreshData }) {
           </select>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
             <Tag tone="outline">{filtered.length} 条</Tag>
-            <Btn size="sm" variant="ghost" icon="sync">同步飞书</Btn>
+            <Btn size="sm" variant="ghost" icon="sync" onClick={syncProducts}>同步飞书</Btn>
             <Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>添加竞品</Btn>
           </div>
         </div>
+        {notice && <div className="ai-block" style={{ margin: "0 12px 10px" }}>{notice}</div>}
 
         <div className="products-table-wrap">
           <table className="products-table">
@@ -455,7 +484,7 @@ function ProductsScreen({ data, api, refreshData }) {
             </div>
 
             <div className="detail-section">
-              <Btn variant="default" icon="sync" style={{ width: "100%", justifyContent: "center" }}>同步至飞书多维表格</Btn>
+              <Btn variant="default" icon="sync" onClick={syncProducts} style={{ width: "100%", justifyContent: "center" }}>同步至飞书多维表格</Btn>
             </div>
           </div>
         </div>
@@ -472,20 +501,34 @@ function AddProductModal({ onClose, api, refreshData }) {
   const [step, setStep] = useState("input"); // input | parsing | preview
   const [progress, setProgress] = useState(0);
   const [url, setUrl] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState("");
 
   const platforms = ["amazon", "taobao", "jd", "xiaohongshu", "kickstarter"];
   const [platform, setPlatform] = useState("amazon");
 
-  const startParse = () => {
-    setStep("parsing");setProgress(0);
+  const startParse = async () => {
+    setStep("parsing");setProgress(0);setError("");
     const tick = () => {
       setProgress((p) => {
-        if (p >= 3) {setTimeout(() => setStep("preview"), 400);return p;}
+        if (p >= 2) return p;
         setTimeout(tick, 700);
         return p + 1;
       });
     };
     setTimeout(tick, 500);
+    try {
+      const result = await api("/api/products/parse-url", {
+        method: "POST",
+        body: JSON.stringify({ url, platform }),
+      });
+      setPreview(result);
+      setProgress(3);
+      setStep("preview");
+    } catch (err) {
+      setError(err.message);
+      setStep("input");
+    }
   };
 
   const steps = [
@@ -526,6 +569,7 @@ function AddProductModal({ onClose, api, refreshData }) {
                 <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 6 }}>
                   AI 会自动提取商品名、售价、评分、首图与卖点。
                 </div>
+                {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 8 }}>{error}</div>}
               </div>
             </div>
           }
@@ -556,11 +600,10 @@ function AddProductModal({ onClose, api, refreshData }) {
                   <Placeholder label={"product\nimage"} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Aputure Amaran 200x S 双色温聚光灯</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>{preview?.name || "未命名竞品"}</div>
                   <div className="tag-row">
-                    <Tag tone="accent">灯光</Tag>
-                    <Tag>聚光灯</Tag>
-                    <Tag>双色温</Tag>
+                    <Tag tone="accent">{preview?.category || "未分类"}</Tag>
+                    {(preview?.tags || []).slice(0, 3).map((tag) => <Tag key={tag}>{tag}</Tag>)}
                   </div>
                   <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-3)" }}>
                     <Icon name="sparkles" size={11} /> AI 已填充 7 个字段,可逐项修改
@@ -569,8 +612,8 @@ function AddProductModal({ onClose, api, refreshData }) {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {[
-              ["售价", "$329.00"], ["参考成本", "¥1,180"], ["评分", "4.8 ★"],
-              ["评论数", "1,872"], ["月销估算", "320+/月"], ["平台", "Amazon"]].
+              ["售价", preview?.platforms?.[0]?.price || ""], ["参考成本", preview?.platforms?.[0]?.cost || ""], ["评分", preview?.platforms?.[0]?.rating || ""],
+              ["评论数", preview?.platforms?.[0]?.reviews || ""], ["月销估算", preview?.platforms?.[0]?.sales || ""], ["平台", PLATFORM_LABEL[preview?.platform] || preview?.platform || platform]].
               map(([k, v]) =>
               <div key={k}>
                     <label className="field-label">{k}</label>
@@ -581,10 +624,7 @@ function AddProductModal({ onClose, api, refreshData }) {
               <div>
                 <label className="field-label">核心卖点 (回车添加)</label>
                 <div className="tag-row" style={{ padding: 6, border: "1px solid var(--border)", borderRadius: 6, minHeight: 36 }}>
-                  <Tag tone="success">200W COB</Tag>
-                  <Tag tone="success">双色温</Tag>
-                  <Tag tone="success">蓝牙控制</Tag>
-                  <Tag tone="success">CRI 95+</Tag>
+                  {(preview?.selling_points || []).map((point) => <Tag key={point} tone="success">{point}</Tag>)}
                 </div>
               </div>
             </div>
@@ -599,15 +639,9 @@ function AddProductModal({ onClose, api, refreshData }) {
               await api("/api/products", {
                 method: "POST",
                 body: JSON.stringify({
-                  emoji: "💡",
-                  name: "Aputure Amaran 200x S 双色温聚光灯",
-                  category: "灯光",
-                  tags: ["聚光灯", "双色温"],
-                  status: "新录入",
-                  ai_summary: "AI 根据链接生成的竞品摘要，可在详情中继续修改。",
-                  selling_points: ["200W COB", "双色温", "蓝牙控制", "CRI 95+"],
-                  negative_keywords: [],
-                  platforms: [{ platform, url, price: "$329.00", cost: "¥1,180", rating: 4.8, reviews: 1872, sales: "320+/月" }],
+                  ...(preview || {}),
+                  platform,
+                  source_url: url,
                 }),
               });
               await refreshData?.();
@@ -628,6 +662,7 @@ function DemandsScreen({ data, api, refreshData }) {
   const [filterInnov, setFilterInnov] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [notice, setNotice] = useState("");
   const selected = demands.find((d) => d.id === selectedId);
 
   const filtered = demands.filter((d) =>
@@ -636,6 +671,16 @@ function DemandsScreen({ data, api, refreshData }) {
   );
   const allScenarios = ["", ...Array.from(new Set(demands.flatMap((d) => d.scenarios)))];
   const allInnov = ["", ...Array.from(new Set(demands.map((d) => d.innovation)))];
+  const syncDemands = async () => {
+    setNotice("飞书同步中...");
+    try {
+      await api("/api/sync/feishu", { method: "POST", body: JSON.stringify({ kinds: ["demands"] }) });
+      await refreshData?.();
+      setNotice("需求管理已同步到飞书。");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
 
   return (
     <div className="viewport">
@@ -646,10 +691,11 @@ function DemandsScreen({ data, api, refreshData }) {
             <div className="muted text-sm">{demands.length} 条已录入 · 上次同步 2026-05-09 23:08</div>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-            <Btn size="sm" icon="sync">同步飞书</Btn>
+            <Btn size="sm" icon="sync" onClick={syncDemands}>同步飞书</Btn>
             <Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>录入需求</Btn>
           </div>
         </div>
+        {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
 
         <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
           <Icon name="filter" size={13} style={{ color: "var(--text-3)" }} />
@@ -788,17 +834,31 @@ function AddDemandModal({ onClose, api, refreshData }) {
   const [step, setStep] = useState("input");
   const [progress, setProgress] = useState(0);
   const [url, setUrl] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState("");
 
-  const startParse = () => {
-    setStep("parsing");setProgress(0);
+  const startParse = async () => {
+    setStep("parsing");setProgress(0);setError("");
     const tick = () => {
       setProgress((p) => {
-        if (p >= 3) {setTimeout(() => setStep("preview"), 400);return p;}
+        if (p >= 2) return p;
         setTimeout(tick, 650);
         return p + 1;
       });
     };
     setTimeout(tick, 400);
+    try {
+      const result = await api("/api/demands/parse-url", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      });
+      setPreview(result);
+      setProgress(3);
+      setStep("preview");
+    } catch (err) {
+      setError(err.message);
+      setStep("input");
+    }
   };
   const steps = [
   { label: "采集链接内容 + 首图", detail: "Playwright headless" },
@@ -826,6 +886,7 @@ function AddDemandModal({ onClose, api, refreshData }) {
                 <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 6 }}>
                   AI 自动识别平台,提取首图与原文,匹配到场景/痛点/创新类型标签体系。
                 </div>
+                {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 8 }}>{error}</div>}
               </div>
               <div style={{ background: "var(--surface-2)", padding: 12, borderRadius: 6, fontSize: 11.5, color: "var(--text-3)" }}>
                 <div style={{ fontWeight: 500, color: "var(--text-2)", marginBottom: 6 }}>支持的平台</div>
@@ -861,7 +922,7 @@ function AddDemandModal({ onClose, api, refreshData }) {
                 <Icon name="link" size={11} style={{ color: "var(--text-3)" }} />
                 <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>来源：</span>
                 <span style={{ fontSize: 12, color: "var(--accent)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{url || "kickstarter.com/projects/..."}</span>
-                <Tag tone="outline">已采集 · Kickstarter</Tag>
+                <Tag tone="outline">已采集 · {PLATFORM_LABEL[preview?.source] || preview?.source || "网页"}</Tag>
               </div>
 
               <div className="drawer-hero" style={{ aspectRatio: "16/9", margin: 0 }}>
@@ -870,22 +931,21 @@ function AddDemandModal({ onClose, api, refreshData }) {
 
               <div className="detail-section">
                 <div className="detail-section-label">标题</div>
-                <input className="ghost-input" defaultValue="折叠口袋型 RGB 棒灯 + 磁吸支架"
+                <input className="ghost-input" defaultValue={preview?.title || "未命名需求"}
                   style={{ width: "100%", fontSize: 14, fontWeight: 600 }} />
               </div>
 
               <div className="detail-section">
                 <div className="detail-section-label"><Icon name="sparkles" size={11} /> AI 摘要 / 原文</div>
                 <textarea className="ghost-input"
-                  defaultValue="Kickstarter 项目，折叠收纳的 RGB 棒灯，自带磁吸支架可吸附金属表面。早鸟价 $79，众筹完成度 280%。评论区高频提到希望更长续航。"
+                  defaultValue={preview?.summary || ""}
                   style={{ width: "100%", minHeight: 70, lineHeight: 1.6, fontSize: 12.5, resize: "vertical" }} />
               </div>
 
               <div className="detail-section">
                 <div className="detail-section-label">创新类型 · 多选</div>
                 <div className="tag-row">
-                  <Tag tone="accent">形态创新</Tag>
-                  <Tag tone="accent">场景拓展</Tag>
+                  <Tag tone="accent">{preview?.innovation || "待分类"}</Tag>
                   <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
                 </div>
               </div>
@@ -893,8 +953,7 @@ function AddDemandModal({ onClose, api, refreshData }) {
               <div className="detail-section">
                 <div className="detail-section-label">使用场景 · 多选</div>
                 <div className="tag-row">
-                  <Tag>Vlog/自拍</Tag>
-                  <Tag>短视频创作</Tag>
+                  {(preview?.scenarios || []).map((tag) => <Tag key={tag}>{tag}</Tag>)}
                   <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
                 </div>
               </div>
@@ -902,8 +961,7 @@ function AddDemandModal({ onClose, api, refreshData }) {
               <div className="detail-section">
                 <div className="detail-section-label">用户痛点 · 多选</div>
                 <div className="tag-row">
-                  <Tag tone="danger">续航不足</Tag>
-                  <Tag tone="danger">收纳困难</Tag>
+                  {(preview?.painpoints || []).map((tag) => <Tag key={tag} tone="danger">{tag}</Tag>)}
                   <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
                 </div>
               </div>
@@ -924,14 +982,7 @@ function AddDemandModal({ onClose, api, refreshData }) {
               await api("/api/demands", {
                 method: "POST",
                 body: JSON.stringify({
-                  title: "折叠口袋型 RGB 棒灯 + 磁吸支架",
-                  thumbHue: 170,
-                  summary: "Kickstarter 项目，折叠收纳的 RGB 棒灯，自带磁吸支架可吸附金属表面。早鸟价 $79，众筹完成度 280%。评论区高频提到希望更长续航。",
-                  source: "kickstarter",
-                  date: new Date().toISOString().slice(0, 10),
-                  innovation: "形态创新",
-                  scenarios: ["Vlog/自拍", "短视频创作"],
-                  painpoints: ["续航不足", "收纳困难"],
+                  ...(preview || {}),
                   url,
                 }),
               });
@@ -946,13 +997,14 @@ function AddDemandModal({ onClose, api, refreshData }) {
 }
 
 // ============ RESEARCH ============
-function ResearchScreen({ data }) {
+function ResearchScreen({ data, api, refreshData }) {
   const [activeId, setActiveId] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
   const items = data.research;
 
   if (activeId) {
     const r = items.find((i) => i.id === activeId);
-    return <ResearchDetail data={data} research={r} onBack={() => setActiveId(null)} />;
+    return <ResearchDetail data={data} api={api} refreshData={refreshData} research={r} onBack={() => setActiveId(null)} />;
   }
 
   return (
@@ -964,7 +1016,7 @@ function ResearchScreen({ data }) {
             <div className="muted text-sm">从竞品库与需求管理中匹配数据,AI 生成结构化分析报告</div>
           </div>
           <div style={{ marginLeft: "auto" }}>
-            <Btn variant="primary" icon="plus">新建调研项目</Btn>
+            <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>新建调研项目</Btn>
           </div>
         </div>
 
@@ -988,18 +1040,41 @@ function ResearchScreen({ data }) {
             </div>
           )}
         </div>
+        {showCreate && <CreateResearchModal api={api} refreshData={refreshData} onClose={() => setShowCreate(false)} />}
       </div>
     </div>);
 
 }
 window.ResearchScreen = ResearchScreen;
 
-function ResearchDetail({ data, research, onBack }) {
+function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const [productIds, setProductIds] = useState(research.products);
   const [demandIds, setDemandIds] = useState(research.demands);
   const [picker, setPicker] = useState(null); // 'product' | 'demand' | null
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
   const products = productIds.map((id) => data.products.find((p) => p.id === id)).filter(Boolean);
   const demands = demandIds.map((id) => data.demands.find((d) => d.id === id)).filter(Boolean);
+  const saveLinks = async (nextProducts = productIds, nextDemands = demandIds) => {
+    await api?.(`/api/research/${research.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ products: nextProducts, demands: nextDemands }),
+    });
+    await refreshData?.();
+  };
+  const analyze = async () => {
+    setBusy(true);setNotice("");
+    try {
+      await saveLinks();
+      await api(`/api/research/${research.id}/analyze`, { method: "POST" });
+      await refreshData?.();
+      setNotice("分析已完成。");
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="viewport">
@@ -1007,7 +1082,7 @@ function ResearchDetail({ data, research, onBack }) {
         <div className="row" style={{ marginBottom: 18 }}>
           <Btn variant="ghost" icon="arrow-left" onClick={onBack}>返回</Btn>
           <div className="grow" />
-          <Btn icon="sync">重新分析</Btn>
+          <Btn icon="sync" onClick={analyze} disabled={busy}>{busy ? "分析中..." : "重新分析"}</Btn>
           <Btn variant="primary" icon="external">导出报告</Btn>
         </div>
 
@@ -1016,6 +1091,7 @@ function ResearchDetail({ data, research, onBack }) {
           <Tag tone={research.status === "已完成" ? "success" : "warn"} style={{ marginTop: 6 }}>{research.status}</Tag>
         </div>
         <div className="muted text-sm" style={{ marginBottom: 22 }}>创建于 {research.date} · 调研项目 #{research.id.toUpperCase()}</div>
+        {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
 
         <Section icon="edit" label="产品描述">
           <div className="card" style={{ padding: 14, fontSize: 13, lineHeight: 1.7, color: "var(--text-2)" }}>
@@ -1037,7 +1113,10 @@ function ResearchDetail({ data, research, onBack }) {
                   </div>
                 </div>
                 <Icon name="x" size={12} style={{ cursor: "pointer", color: "var(--text-4)", position: "absolute", top: 8, right: 8 }}
-              onClick={() => setProductIds(productIds.filter((id) => id !== p.id))} />
+              onClick={() => {
+                const next = productIds.filter((id) => id !== p.id);
+                setProductIds(next);saveLinks(next, demandIds);
+              }} />
               </div>
             )}
             {products.length === 0 &&
@@ -1064,7 +1143,10 @@ function ResearchDetail({ data, research, onBack }) {
                   </div>
                 </div>
                 <Icon name="x" size={12} style={{ cursor: "pointer", color: "var(--text-4)" }}
-              onClick={() => setDemandIds(demandIds.filter((id) => id !== d.id))} />
+              onClick={() => {
+                const next = demandIds.filter((id) => id !== d.id);
+                setDemandIds(next);saveLinks(productIds, next);
+              }} />
               </div>
             )}
             {demands.length === 0 &&
@@ -1079,7 +1161,7 @@ function ResearchDetail({ data, research, onBack }) {
         {picker === "product" &&
         <PickerModal title="添加关联竞品" items={data.products} excludeIds={productIds}
         onClose={() => setPicker(null)}
-        onPick={(id) => {setProductIds([...productIds, id]);setPicker(null);}}
+        onPick={(id) => {const next = [...productIds, id];setProductIds(next);setPicker(null);saveLinks(next, demandIds);}}
         renderItem={(p) =>
         <>
                 <div className="products-thumb" style={{ width: 32, height: 32, fontSize: 16 }}>{p.emoji}</div>
@@ -1094,7 +1176,7 @@ function ResearchDetail({ data, research, onBack }) {
         {picker === "demand" &&
         <PickerModal title="添加关联需求" items={data.demands} excludeIds={demandIds}
         onClose={() => setPicker(null)}
-        onPick={(id) => {setDemandIds([...demandIds, id]);setPicker(null);}}
+        onPick={(id) => {const next = [...demandIds, id];setDemandIds(next);setPicker(null);saveLinks(productIds, next);}}
         renderItem={(d) =>
         <>
                 <div style={{ width: 32, height: 32, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
@@ -1156,6 +1238,55 @@ function Section({ icon, label, children, action }) {
 
 }
 
+function CreateResearchModal({ api, refreshData, onClose }) {
+  const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async () => {
+    setBusy(true);setError("");
+    try {
+      await api("/api/research", {
+        method: "POST",
+        body: JSON.stringify({ title, desc, status: "草稿" }),
+      });
+      await refreshData?.();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <Icon name="compass" size={16} />
+          <h3>新建调研项目</h3>
+          <Btn variant="ghost" icon="x" onClick={onClose} />
+        </div>
+        <div className="modal-body">
+          <div className="col" style={{ gap: 14 }}>
+            <div>
+              <label className="field-label">项目名称</label>
+              <input className="input lg" style={{ width: "100%" }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：便携双色温补光灯 Pro" />
+            </div>
+            <div>
+              <label className="field-label">产品想法描述</label>
+              <textarea className="input" style={{ width: "100%", minHeight: 120, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="描述目标用户、场景、价格段、差异化设想..." />
+            </div>
+            {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
+          </div>
+        </div>
+        <div className="modal-foot">
+          <Btn variant="ghost" onClick={onClose}>取消</Btn>
+          <Btn variant="primary" icon="check" onClick={submit} disabled={busy || !title || !desc}>{busy ? "创建中..." : "创建项目"}</Btn>
+        </div>
+      </div>
+    </div>);
+}
+
 function PickerModal({ title, items, excludeIds = [], onClose, onPick, renderItem, searchKey }) {
   const [q, setQ] = useState("");
   const available = items.filter((it) => !excludeIds.includes(it.id));
@@ -1198,15 +1329,65 @@ function PickerModal({ title, items, excludeIds = [], onClose, onPick, renderIte
 }
 
 // ============ SETTINGS ============
-function SettingsScreen({ data }) {
+function SettingsScreen({ data, api, refreshData }) {
   const [sources, setSources] = useState(data.rssSources);
-  const toggle = (id) => setSources(sources.map((s) => s.id === id ? { ...s, active: !s.active } : s));
+  const [settings, setSettings] = useState(data.settings || {});
+  const [notice, setNotice] = useState("");
+  const [newSource, setNewSource] = useState({ name: "", url: "", interval: 60 });
+  useEffect(() => setSources(data.rssSources), [data.rssSources]);
+  useEffect(() => setSettings(data.settings || {}), [data.settings]);
+  const saveSettings = async (patch = settings) => {
+    setNotice("");
+    try {
+      const saved = await api("/api/settings", { method: "PATCH", body: JSON.stringify(patch) });
+      setSettings(saved);
+      await refreshData?.();
+      setNotice("设置已保存。");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+  const test = async (path, label) => {
+    setNotice(`${label}测试中...`);
+    try {
+      await saveSettings(settings);
+      await api(path, { method: "POST" });
+      setNotice(`${label}测试成功。`);
+      await refreshData?.();
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+  const toggle = async (id) => {
+    const item = sources.find((s) => s.id === id);
+    setSources(sources.map((s) => s.id === id ? { ...s, active: !s.active } : s));
+    await api(`/api/news-sources/${id}`, { method: "PATCH", body: JSON.stringify({ active: !item.active }) });
+    await refreshData?.();
+  };
+  const addSource = async () => {
+    if (!newSource.name || !newSource.url) return;
+    await api("/api/news-sources", { method: "POST", body: JSON.stringify(newSource) });
+    setNewSource({ name: "", url: "", interval: 60 });
+    await refreshData?.();
+  };
+  const syncFeishuNow = async () => {
+    setNotice("飞书同步中...");
+    try {
+      await saveSettings(settings);
+      const result = await api("/api/sync/feishu", { method: "POST", body: JSON.stringify({ kinds: ["products", "demands", "news"] }) });
+      setNotice(`同步完成：${JSON.stringify(result.summary)}`);
+      await refreshData?.();
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
 
   return (
     <div className="viewport">
       <div className="page" style={{ maxWidth: 760 }}>
         <h1 className="h1">系统设置</h1>
         <div className="muted text-sm" style={{ marginBottom: 24 }}>配置 AI 模型、飞书同步与数据源</div>
+        {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
 
         <div className="settings-section">
           <div className="settings-section-head">
@@ -1216,28 +1397,29 @@ function SettingsScreen({ data }) {
           <div className="settings-section-body">
             <div className="settings-row">
               <div className="label">API 类型</div>
-              <select className="input" style={{ width: 240 }} defaultValue="openai">
+              <select className="input" style={{ width: 240 }} value={settings.llm_api_type || "openai"} onChange={(e) => setSettings({ ...settings, llm_api_type: e.target.value })}>
                 <option value="openai">OpenAI 兼容</option>
                 <option value="anthropic">Anthropic</option>
               </select>
             </div>
             <div className="settings-row">
               <div className="label">API URL</div>
-              <input className="input" style={{ width: "100%" }} defaultValue="https://api.minimax.chat/v1" />
+              <input className="input" style={{ width: "100%" }} value={settings.llm_api_url || ""} onChange={(e) => setSettings({ ...settings, llm_api_url: e.target.value })} />
             </div>
             <div className="settings-row">
               <div className="label">API Key</div>
-              <input className="input" style={{ width: "100%" }} defaultValue="sk-************************jW8q" type="password" />
+              <input className="input" style={{ width: "100%" }} value={settings.llm_api_key || ""} onChange={(e) => setSettings({ ...settings, llm_api_key: e.target.value })} type="password" placeholder="sk-..." />
             </div>
             <div className="settings-row">
               <div className="label">模型名称</div>
-              <input className="input" style={{ width: 280 }} defaultValue="MiniMax-Text-01" />
+              <input className="input" style={{ width: 280 }} value={settings.llm_model || ""} onChange={(e) => setSettings({ ...settings, llm_model: e.target.value })} />
             </div>
             <div className="settings-row">
               <div className="label">&nbsp;</div>
               <div className="row">
-                <Btn icon="check">测试连接</Btn>
-                <Tag tone="success">✓ 上次测试 23ms 成功</Tag>
+                <Btn icon="save" onClick={() => saveSettings()}>保存配置</Btn>
+                <Btn icon="check" onClick={() => test("/api/settings/test-llm", "LLM")}>测试连接</Btn>
+                {settings.last_llm_test_at && <Tag tone="success">✓ {settings.last_llm_test_at}</Tag>}
               </div>
             </div>
           </div>
@@ -1251,22 +1433,30 @@ function SettingsScreen({ data }) {
           <div className="settings-section-body">
             <div className="settings-row">
               <div className="label">App ID</div>
-              <input className="input" style={{ width: "100%" }} defaultValue="cli_a8f9d2e1b3c4f5g6" />
+              <input className="input" style={{ width: "100%" }} value={settings.feishu_app_id || ""} onChange={(e) => setSettings({ ...settings, feishu_app_id: e.target.value })} />
             </div>
             <div className="settings-row">
               <div className="label">App Secret</div>
-              <input className="input" style={{ width: "100%" }} defaultValue="******************************" type="password" />
+              <input className="input" style={{ width: "100%" }} value={settings.feishu_app_secret || ""} onChange={(e) => setSettings({ ...settings, feishu_app_secret: e.target.value })} type="password" />
             </div>
             <div className="settings-row">
-              <div className="label">表格 Token</div>
-              <input className="input" style={{ width: "100%" }} defaultValue="shtcnXXXXXXXXXXXXXX" />
+              <div className="label">Base Token</div>
+              <input className="input" style={{ width: "100%" }} value={settings.feishu_base_token || settings.feishu_table_token || ""} onChange={(e) => setSettings({ ...settings, feishu_base_token: e.target.value })} placeholder="appToken / base token" />
+            </div>
+            <div className="settings-row">
+              <div className="label">表 ID</div>
+              <div className="col" style={{ gap: 8, width: "100%" }}>
+                <input className="input" style={{ width: "100%" }} value={settings.feishu_products_table_id || ""} onChange={(e) => setSettings({ ...settings, feishu_products_table_id: e.target.value })} placeholder="竞品表 table_id" />
+                <input className="input" style={{ width: "100%" }} value={settings.feishu_demands_table_id || ""} onChange={(e) => setSettings({ ...settings, feishu_demands_table_id: e.target.value })} placeholder="需求表 table_id" />
+                <input className="input" style={{ width: "100%" }} value={settings.feishu_news_table_id || ""} onChange={(e) => setSettings({ ...settings, feishu_news_table_id: e.target.value })} placeholder="News 表 table_id" />
+              </div>
             </div>
             <div className="settings-row">
               <div className="label">&nbsp;</div>
               <div className="row">
-                <Btn icon="check">测试连接</Btn>
-                <Btn variant="primary" icon="sync">立即同步</Btn>
-                <span className="muted text-sm" style={{ marginLeft: 4 }}>上次:2026-05-09 23:08</span>
+                <Btn icon="check" onClick={() => test("/api/settings/test-feishu", "飞书")}>测试连接</Btn>
+                <Btn variant="primary" icon="sync" onClick={syncFeishuNow}>立即同步</Btn>
+                {settings.last_feishu_test_at && <span className="muted text-sm" style={{ marginLeft: 4 }}>上次:{settings.last_feishu_test_at}</span>}
               </div>
             </div>
           </div>
@@ -1292,9 +1482,15 @@ function SettingsScreen({ data }) {
                 </div>
               </div>
             )}
-            <button className="btn sm ghost" style={{ marginTop: 10, width: "100%", justifyContent: "center", border: "1px dashed var(--border)" }}>
-              <Icon name="plus" size={12} /> 添加数据源
-            </button>
+            <div className="source-row" style={{ marginTop: 10 }}>
+              <div>
+                <input className="input sm" style={{ width: "100%", marginBottom: 6 }} placeholder="源名称" value={newSource.name} onChange={(e) => setNewSource({ ...newSource, name: e.target.value })} />
+                <input className="input sm" style={{ width: "100%" }} placeholder="RSS URL" value={newSource.url} onChange={(e) => setNewSource({ ...newSource, url: e.target.value })} />
+              </div>
+              <div><Tag tone="outline">RSS</Tag></div>
+              <input className="input sm" style={{ width: 82 }} type="number" value={newSource.interval} onChange={(e) => setNewSource({ ...newSource, interval: Number(e.target.value) })} />
+              <Btn size="sm" variant="primary" icon="plus" onClick={addSource}>添加</Btn>
+            </div>
           </div>
         </div>
 

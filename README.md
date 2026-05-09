@@ -86,10 +86,11 @@ Implemented:
 - SQLite-backed persistence for products, demands, news flags, RSS sources, research seed data, and settings.
 - Basic product creation/editing, demand creation/editing, and news star persistence.
 - Docker Compose deployment.
+- OpenAI-compatible LLM calls, lightweight URL parsing, RSS collection, research analysis, and one-way Feishu sync endpoints.
 
-Reserved for the next phase:
+Current real-integration boundary:
 
-- Playwright link parsing.
-- RSS scheduled collection.
-- Real LLM analysis calls.
-- Real Feishu Bitable synchronization.
+- URL parsing uses lightweight HTML/meta/body extraction first, not deep anti-bot browser scraping.
+- RSS collection runs manually from the News page and periodically inside the production container.
+- Feishu sync is one-way from SQLite to Bitable for products, demands, and News.
+- Feishu table schema must already contain the mapped fields shown in the product spec.

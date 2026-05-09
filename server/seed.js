@@ -20,11 +20,18 @@ export function loadSeedData() {
       llm_api_url: "https://api.minimax.chat/v1",
       llm_model: "MiniMax-Text-01",
       llm_api_key: "",
+      llm_timeout_ms: 30000,
       feishu_app_id: "",
       feishu_app_secret: "",
+      feishu_base_token: "",
+      feishu_products_table_id: "",
+      feishu_demands_table_id: "",
+      feishu_news_table_id: "",
       feishu_table_token: "",
       last_llm_test_at: null,
       last_feishu_test_at: null,
+      rss_collect_enabled: true,
+      rss_collect_interval_ms: 15 * 60 * 1000,
     },
   };
 }
