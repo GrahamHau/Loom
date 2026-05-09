@@ -1,4 +1,14 @@
 /* global React, Icon, Tag, Btn, Switch, Placeholder, DemandThumb, PLATFORM_LABEL, PLATFORM_ICON, PLATFORM_KEY */
+const React = globalThis.React;
+const Icon = globalThis.Icon;
+const Tag = globalThis.Tag;
+const Btn = globalThis.Btn;
+const Switch = globalThis.Switch;
+const Placeholder = globalThis.Placeholder;
+const DemandThumb = globalThis.DemandThumb;
+const PLATFORM_LABEL = globalThis.PLATFORM_LABEL;
+const PLATFORM_ICON = globalThis.PLATFORM_ICON;
+const PLATFORM_KEY = globalThis.PLATFORM_KEY;
 const { useState, useMemo } = React;
 
 // ============ LOGIN ============

@@ -1,4 +1,19 @@
 /* global LoginScreen, NewsScreen, ProductsScreen, DemandsScreen, ResearchScreen, SettingsScreen, Icon, Btn, useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle */
+const React = globalThis.React;
+const ReactDOM = globalThis.ReactDOM;
+const LoginScreen = globalThis.LoginScreen;
+const NewsScreen = globalThis.NewsScreen;
+const ProductsScreen = globalThis.ProductsScreen;
+const DemandsScreen = globalThis.DemandsScreen;
+const ResearchScreen = globalThis.ResearchScreen;
+const SettingsScreen = globalThis.SettingsScreen;
+const Icon = globalThis.Icon;
+const Btn = globalThis.Btn;
+const useTweaks = globalThis.useTweaks;
+const TweaksPanel = globalThis.TweaksPanel;
+const TweakSection = globalThis.TweakSection;
+const TweakRadio = globalThis.TweakRadio;
+const TweakToggle = globalThis.TweakToggle;
 const { useEffect, useState } = React;
 
 const NAV = [

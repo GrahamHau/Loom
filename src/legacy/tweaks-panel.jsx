@@ -1,6 +1,7 @@
 
 // tweaks-panel.jsx
 // Reusable Tweaks shell + form-control helpers.
+const React = globalThis.React;
 //
 // Owns the host protocol (listens for __activate_edit_mode / __deactivate_edit_mode,
 // posts __edit_mode_available / __edit_mode_set_keys / __edit_mode_dismissed) so

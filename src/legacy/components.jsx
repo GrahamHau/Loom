@@ -1,4 +1,5 @@
 /* global React */
+const React = globalThis.React;
 const { useState, useEffect, useRef, createContext, useContext } = React;
 
 // =========== Icons (single-stroke line icons, lucide-style) ===========
