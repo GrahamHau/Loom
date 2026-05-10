@@ -25,6 +25,41 @@ function formatDate(value) {
   return date.toISOString().slice(0, 10);
 }
 
+function cleanText(value) {
+  return String(value || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function heuristicClassifyNews({ item }) {
+  const text = cleanText([
+    item.title,
+    item.contentSnippet,
+    item.content,
+    item.summary,
+  ].filter(Boolean).join(" "));
+  if (!text) return null;
+
+  const productPattern = /\b(announce[sd]?|announcing|launch(?:ed|es|ing)?|release[sd]?|releasing|introduce[sd]?|introducing|unveil(?:ed|s|ing)?|debut(?:ed|s|ing)?|new|preorder|pre-order|available now)\b|新品|发布|推出|上新|发售|正式亮相|正式发布|登场/i;
+  const trendPattern = /\b(trend|market|report|survey|forecast|analysis|rumor|leak|hands-on|review)\b|趋势|报告|预测|分析|评测|传闻|曝光/i;
+
+  if (productPattern.test(text)) {
+    return {
+      type: "新品发布",
+      titleZh: item.title || "未命名新品",
+      summary: cleanText(item.contentSnippet || item.summary || item.content).slice(0, 180),
+    };
+  }
+
+  if (trendPattern.test(text)) {
+    return {
+      type: "行业趋势",
+      titleZh: item.title || "未命名资讯",
+      summary: cleanText(item.contentSnippet || item.summary || item.content).slice(0, 180),
+    };
+  }
+
+  return null;
+}
+
 async function classifyNews({ source, item }) {
   const content = [
     item.title,
@@ -51,11 +86,7 @@ async function classifyNews({ source, item }) {
       summary: result.summary_zh || item.contentSnippet || "",
     };
   } catch {
-    return {
-      type: "行业趋势",
-      titleZh: item.title || "未命名资讯",
-      summary: item.contentSnippet || "",
-    };
+    return heuristicClassifyNews({ source, item });
   }
 }
 
