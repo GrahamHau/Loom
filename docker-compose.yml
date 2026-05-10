@@ -10,3 +10,11 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    networks:
+      - default
+      - edge
+
+networks:
+  edge:
+    external: true
+    name: sub2api_sub2api-network
