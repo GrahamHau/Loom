@@ -48,6 +48,24 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+function normalizeData(input = {}) {
+  input ||= {};
+  return {
+    user: {
+      name: "Graham",
+      role: "产品经理",
+      initials: "G",
+      ...(input.user || {}),
+    },
+    products: Array.isArray(input.products) ? input.products : [],
+    demands: Array.isArray(input.demands) ? input.demands : [],
+    news: Array.isArray(input.news) ? input.news : [],
+    research: Array.isArray(input.research) ? input.research : [],
+    rssSources: Array.isArray(input.rssSources) ? input.rssSources : [],
+    settings: input.settings || {},
+  };
+}
+
 function Sidebar({ active, onNav, data }) {
   const counts = {
     news: data.news.length,
@@ -142,7 +160,7 @@ function App() {
       api("/api/bootstrap").catch(() => null),
     ]);
     setMe(meResponse?.user || null);
-    setData(bootstrap);
+    setData(normalizeData(bootstrap));
   };
 
   useEffect(() => {
@@ -151,7 +169,7 @@ function App() {
 
   const refreshData = async () => {
     const next = await api("/api/bootstrap");
-    setData(next);
+    setData(normalizeData(next));
   };
 
   const login = async ({ username, password }) => {

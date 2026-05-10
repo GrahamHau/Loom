@@ -11,6 +11,21 @@ const PLATFORM_ICON = globalThis.PLATFORM_ICON;
 const PLATFORM_KEY = globalThis.PLATFORM_KEY;
 const { useState, useEffect, useMemo } = React;
 
+function EmptyState({ icon = "sparkles", title, children, action }) {
+  return (
+    <div className="empty">
+      <Icon name={icon} size={22} style={{ color: "var(--accent)", marginBottom: 8 }} />
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.6 }}>{children}</div>
+      {action && <div style={{ marginTop: 12 }}>{action}</div>}
+    </div>
+  );
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 // ============ LOGIN ============
 function LoginScreen({ onLogin, error }) {
   const [user, setUser] = useState("graham");
@@ -60,10 +75,10 @@ window.LoginScreen = LoginScreen;
 // ============ NEWS ============
 function NewsScreen({ data, api, refreshData }) {
   const [tab, setTab] = useState("all");
-  const [items, setItems] = useState(data.news);
+  const [items, setItems] = useState(safeArray(data.news));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  useEffect(() => setItems(data.news), [data.news]);
+  useEffect(() => setItems(safeArray(data.news)), [data.news]);
 
   const filtered = items.filter((n) => {
     if (tab === "all") return true;
@@ -120,6 +135,14 @@ function NewsScreen({ data, api, refreshData }) {
       <div className="viewport">
         <div className="page" style={{ paddingTop: 8 }}>
           {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
+          {dates.length === 0 &&
+            <EmptyState
+              icon="newspaper"
+              title="还没有真实 News"
+              action={<Btn size="sm" variant="primary" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>}>
+              先到系统设置添加 RSS 源，或点击立即采集导入真实资讯。
+            </EmptyState>
+          }
           {dates.map((d) =>
           <div key={d}>
               <div className="news-day">{formatDate(d)}</div>
@@ -157,11 +180,14 @@ function NewsScreen({ data, api, refreshData }) {
 window.NewsScreen = NewsScreen;
 
 function formatDate(d) {
-  const today = "2026-05-10";
-  const yesterday = "2026-05-09";
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const yesterdayDate = new Date(now);
+  yesterdayDate.setDate(now.getDate() - 1);
+  const yesterday = yesterdayDate.toISOString().slice(0, 10);
   if (d === today) return "今天 · " + d.replace(/-/g, "/");
   if (d === yesterday) return "昨天 · " + d.replace(/-/g, "/");
-  return d.replace(/-/g, " 年 ").replace(/\//g, "月") + "日";
+  return String(d || "").replace(/-/g, "/");
 }
 
 // ============ PRODUCTS ============
@@ -264,9 +290,9 @@ function BulletListEditor({ items, onChange, tone = "default", placeholder = "�
 }
 
 function ProductsScreen({ data, api, refreshData }) {
-  const [products, setProducts] = useState(data.products);
+  const [products, setProducts] = useState(safeArray(data.products));
   const [notice, setNotice] = useState("");
-  useEffect(() => setProducts(data.products), [data.products]);
+  useEffect(() => setProducts(safeArray(data.products)), [data.products]);
   const updateSelected = async (patch) => {
     setProducts((ps) => ps.map((p) => p.id === selectedId ? { ...p, ...patch } : p));
     if (api && selectedId) {
@@ -274,16 +300,22 @@ function ProductsScreen({ data, api, refreshData }) {
       await refreshData?.();
     }
   };
-  const [selectedId, setSelectedId] = useState(products[0].id);
+  const [selectedId, setSelectedId] = useState(products[0]?.id || null);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部");
   const [showAdd, setShowAdd] = useState(false);
   const [priceCcy, setPriceCcy] = useState("native"); // unused (toggle removed)
 
-  const categories = ["全部", ...Array.from(new Set(products.map((p) => p.category)))];
+  useEffect(() => {
+    if (!products.some((p) => p.id === selectedId)) {
+      setSelectedId(products[0]?.id || null);
+    }
+  }, [products, selectedId]);
+
+  const categories = ["全部", ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))];
   const filtered = products.filter((p) =>
   (categoryFilter === "全部" || p.category === categoryFilter) && (
-  !query || p.name.toLowerCase().includes(query.toLowerCase()))
+  !query || String(p.name || "").toLowerCase().includes(query.toLowerCase()))
   );
   const selected = products.find((p) => p.id === selectedId);
   const syncProducts = async () => {
@@ -329,41 +361,56 @@ function ProductsScreen({ data, api, refreshData }) {
             </thead>
             <tbody>
               {filtered.map((p) => {
-                const main = p.platforms[0];
+                const platforms = safeArray(p.platforms);
+                const main = platforms[0] || {};
+                const reviews = Number(main.reviews);
                 return (
                   <tr key={p.id} className={selectedId === p.id ? "selected" : ""} onClick={() => setSelectedId(p.id)}>
                     <td>
                       <div className="product-name">
-                        <div className="products-thumb">{p.emoji}</div>
+                        <div className="products-thumb">{p.emoji || "📦"}</div>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }}>{p.name}</div>
+                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }}>{p.name || "未命名竞品"}</div>
                           <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}>
-                            {p.tags.slice(0, 3).join(" · ")}
+                            {safeArray(p.tags).slice(0, 3).join(" · ")}
                           </div>
                         </div>
                       </div>
                     </td>
-                    <td><Tag>{p.category}</Tag></td>
+                    <td><Tag>{p.category || "未分类"}</Tag></td>
                     <td>
                       <div className="product-platforms">
-                        {p.platforms.map((pl, i) =>
+                        {platforms.map((pl, i) =>
                         <span key={i} className={`platform-pill ${PLATFORM_KEY[pl.platform]}`}>{PLATFORM_ICON[pl.platform]}</span>
                         )}
+                        {platforms.length === 0 && <span style={{ color: "var(--text-3)" }}>—</span>}
                       </div>
                     </td>
-                    <td style={{ fontVariantNumeric: "tabular-nums" }}>{main.price}</td>
-                    <td style={{ color: "var(--text-3)", fontVariantNumeric: "tabular-nums" }}>{main.cost}</td>
+                    <td style={{ fontVariantNumeric: "tabular-nums" }}>{main.price || "—"}</td>
+                    <td style={{ color: "var(--text-3)", fontVariantNumeric: "tabular-nums" }}>{main.cost || p.cost_estimate || "—"}</td>
                     <td>
-                      <span className="rating-cell"><span className="rating-star">★</span>{main.rating}</span>
-                      <span style={{ color: "var(--text-3)", marginLeft: 6, fontSize: 11 }}>{main.reviews.toLocaleString()}</span>
+                      <span className="rating-cell"><span className="rating-star">★</span>{main.rating ?? "—"}</span>
+                      {Number.isFinite(reviews) && <span style={{ color: "var(--text-3)", marginLeft: 6, fontSize: 11 }}>{reviews.toLocaleString()}</span>}
                     </td>
-                    <td style={{ color: "var(--text-2)" }}>{main.sales}</td>
+                    <td style={{ color: "var(--text-2)" }}>{main.sales || "—"}</td>
                     <td>
                       <Tag tone={p.status === "跟踪中" ? "success" : p.status === "已归档" ? "default" : "accent"}>{p.status}</Tag>
                     </td>
                   </tr>);
 
               })}
+              {filtered.length === 0 &&
+                <tr>
+                  <td colSpan="8">
+                    <EmptyState
+                      icon="boxes"
+                      title={products.length ? "没有匹配的竞品" : "还没有真实竞品"}
+                      action={<Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>添加竞品</Btn>}>
+                      粘贴真实商品链接解析，确认后会写入本地数据库。
+                    </EmptyState>
+                  </td>
+                </tr>
+              }
             </tbody>
           </table>
         </div>
@@ -398,9 +445,9 @@ function ProductsScreen({ data, api, refreshData }) {
             </div>
             <div className="detail-section">
               <div className="detail-section-label">
-                <Icon name="boxes" size={11} /> 平台信息 · {selected.platforms.length} 个
+                <Icon name="boxes" size={11} /> 平台信息 · {safeArray(selected.platforms).length} 个
               </div>
-              {selected.platforms.map((pl, i) =>
+              {safeArray(selected.platforms).map((pl, i) =>
             <div className="platform-card" key={i}>
                   <div className="platform-card-head">
                     <span className={`platform-pill ${PLATFORM_KEY[pl.platform]}`}>{PLATFORM_LABEL[pl.platform]}</span>
@@ -409,19 +456,19 @@ function ProductsScreen({ data, api, refreshData }) {
                   </div>
                   <div className="platform-card-grid">
                     <PlatformInput label="售价" value={pl.price} onChange={(v) => {
-                  const next = selected.platforms.map((p, idx) => idx === i ? { ...p, price: v } : p);
+                  const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, price: v } : p);
                   updateSelected({ platforms: next });
                 }} />
                     <PlatformInput label="评分" value={pl.rating} onChange={(v) => {
-                  const next = selected.platforms.map((p, idx) => idx === i ? { ...p, rating: v } : p);
+                  const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, rating: v } : p);
                   updateSelected({ platforms: next });
                 }} prefix={<span className="rating-star" style={{ fontSize: 11 }}>★</span>} />
                     <PlatformInput label="评论数" value={pl.reviews} onChange={(v) => {
-                  const next = selected.platforms.map((p, idx) => idx === i ? { ...p, reviews: v } : p);
+                  const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, reviews: v } : p);
                   updateSelected({ platforms: next });
                 }} />
                     <PlatformInput label="月销估算" value={pl.sales} onChange={(v) => {
-                  const next = selected.platforms.map((p, idx) => idx === i ? { ...p, sales: v } : p);
+                  const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, sales: v } : p);
                   updateSelected({ platforms: next });
                 }} />
                   </div>
@@ -438,7 +485,7 @@ function ProductsScreen({ data, api, refreshData }) {
                 <span className="metric-prefix">¥</span>
                 <input
                 className="metric-input"
-                value={String(selected.cost_estimate || selected.platforms[0]?.cost || "").replace(/^[¥$￥]\s?/, "")}
+                value={String(selected.cost_estimate || safeArray(selected.platforms)[0]?.cost || "").replace(/^[¥$￥]\s?/, "")}
                 onChange={(e) => {
                   const raw = e.target.value;
                   updateSelected({ cost_estimate: raw ? "¥" + raw : "" });
@@ -451,7 +498,7 @@ function ProductsScreen({ data, api, refreshData }) {
               <div className="detail-section-label">品类 / 标签</div>
               <div className="tag-row">
                 <Tag tone="accent">{selected.category}</Tag>
-                {selected.tags.map((t) => <Tag key={t}>{t}</Tag>)}
+                {safeArray(selected.tags).map((t) => <Tag key={t}>{t}</Tag>)}
                 <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>
                   + 添加
                 </button>
@@ -461,7 +508,7 @@ function ProductsScreen({ data, api, refreshData }) {
             <div className="detail-section">
               <div className="detail-section-label"><Icon name="sparkles" size={11} /> 核心卖点 · AI 总结 + 用户补充</div>
               <BulletListEditor
-              items={selected.selling_points}
+              items={safeArray(selected.selling_points)}
               onChange={(next) => updateSelected({ selling_points: next })}
               tone="success"
               placeholder="输入卖点，回车添加" />
@@ -471,7 +518,7 @@ function ProductsScreen({ data, api, refreshData }) {
             <div className="detail-section">
               <div className="detail-section-label">差评关键词</div>
               <BulletListEditor
-              items={selected.negative_keywords}
+              items={safeArray(selected.negative_keywords)}
               onChange={(next) => updateSelected({ negative_keywords: next })}
               tone="danger"
               placeholder="输入差评关键词，回车添加" />
@@ -480,7 +527,7 @@ function ProductsScreen({ data, api, refreshData }) {
 
             <div className="detail-section">
               <div className="detail-section-label"><Icon name="sparkles" size={11} /> AI 摘要</div>
-              <div className="ai-block">{selected.ai_summary}</div>
+              <div className="ai-block">{selected.ai_summary || "暂无 AI 摘要，添加真实链接解析后会自动生成。"}</div>
             </div>
 
             <div className="detail-section">
@@ -656,8 +703,8 @@ function AddProductModal({ onClose, api, refreshData }) {
 
 // ============ DEMANDS ============
 function DemandsScreen({ data, api, refreshData }) {
-  const [demands, setDemands] = useState(data.demands);
-  useEffect(() => setDemands(data.demands), [data.demands]);
+  const [demands, setDemands] = useState(safeArray(data.demands));
+  useEffect(() => setDemands(safeArray(data.demands)), [data.demands]);
   const [filterScenario, setFilterScenario] = useState("");
   const [filterInnov, setFilterInnov] = useState("");
   const [showAdd, setShowAdd] = useState(false);
@@ -666,11 +713,11 @@ function DemandsScreen({ data, api, refreshData }) {
   const selected = demands.find((d) => d.id === selectedId);
 
   const filtered = demands.filter((d) =>
-  (!filterScenario || d.scenarios.includes(filterScenario)) && (
+  (!filterScenario || safeArray(d.scenarios).includes(filterScenario)) && (
   !filterInnov || d.innovation === filterInnov)
   );
-  const allScenarios = ["", ...Array.from(new Set(demands.flatMap((d) => d.scenarios)))];
-  const allInnov = ["", ...Array.from(new Set(demands.map((d) => d.innovation)))];
+  const allScenarios = ["", ...Array.from(new Set(demands.flatMap((d) => safeArray(d.scenarios))))];
+  const allInnov = ["", ...Array.from(new Set(demands.map((d) => d.innovation).filter(Boolean)))];
   const syncDemands = async () => {
     setNotice("飞书同步中...");
     try {
@@ -688,7 +735,7 @@ function DemandsScreen({ data, api, refreshData }) {
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div>
             <h1 className="h1">需求管理</h1>
-            <div className="muted text-sm">{demands.length} 条已录入 · 上次同步 2026-05-09 23:08</div>
+            <div className="muted text-sm">{demands.length} 条已录入 · 使用真实链接解析或手动录入</div>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
             <Btn size="sm" icon="sync" onClick={syncDemands}>同步飞书</Btn>
@@ -727,8 +774,8 @@ function DemandsScreen({ data, api, refreshData }) {
                 <div className="demand-summary">{d.summary}</div>
                 <div className="demand-tags">
                   <Tag tone="accent">{d.innovation}</Tag>
-                  {d.scenarios.slice(0, 2).map((s) => <Tag key={s}>#{s.split("/")[0]}</Tag>)}
-                  {d.painpoints.slice(0, 1).map((p) => <Tag tone="danger" key={p}>{p.split("/")[0]}</Tag>)}
+                  {safeArray(d.scenarios).slice(0, 2).map((s) => <Tag key={s}>#{s.split("/")[0]}</Tag>)}
+                  {safeArray(d.painpoints).slice(0, 1).map((p) => <Tag tone="danger" key={p}>{p.split("/")[0]}</Tag>)}
                 </div>
                 <div className="demand-foot">
                   <span><Icon name="calendar" size={10} /> {d.date}</span>
@@ -737,6 +784,16 @@ function DemandsScreen({ data, api, refreshData }) {
               </div>
             </div>
           )}
+          {filtered.length === 0 &&
+            <div style={{ gridColumn: "1 / -1" }}>
+              <EmptyState
+                icon="lightbulb"
+                title={demands.length ? "没有匹配的需求" : "还没有真实需求"}
+                action={<Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>录入需求</Btn>}>
+                粘贴真实内容链接解析，确认后会写入本地数据库。
+              </EmptyState>
+            </div>
+          }
         </div>
       </div>
 
@@ -795,7 +852,7 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData }) {
           <div className="detail-section">
             <div className="detail-section-label">使用场景 · 多选</div>
             <div className="tag-row">
-              {demand.scenarios.map((s) => <Tag key={s}>{s}</Tag>)}
+              {safeArray(demand.scenarios).map((s) => <Tag key={s}>{s}</Tag>)}
               <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
             </div>
           </div>
@@ -803,7 +860,7 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData }) {
           <div className="detail-section">
             <div className="detail-section-label">用户痛点 · 多选</div>
             <div className="tag-row">
-              {demand.painpoints.map((p) => <Tag key={p} tone="danger">{p}</Tag>)}
+              {safeArray(demand.painpoints).map((p) => <Tag key={p} tone="danger">{p}</Tag>)}
               <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
             </div>
           </div>
@@ -1000,10 +1057,13 @@ function AddDemandModal({ onClose, api, refreshData }) {
 function ResearchScreen({ data, api, refreshData }) {
   const [activeId, setActiveId] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
-  const items = data.research;
+  const items = safeArray(data.research);
 
   if (activeId) {
     const r = items.find((i) => i.id === activeId);
+    if (!r) {
+      return <ResearchScreen data={data} api={api} refreshData={refreshData} />;
+    }
     return <ResearchDetail data={data} api={api} refreshData={refreshData} research={r} onBack={() => setActiveId(null)} />;
   }
 
@@ -1027,7 +1087,7 @@ function ResearchScreen({ data, api, refreshData }) {
               <div className="research-info">
                 <h4>{r.title}</h4>
                 <div className="meta">
-                  关联 {r.products.length} 个竞品 · {r.demands.length} 条需求 · 创建于 {r.date}
+                  关联 {safeArray(r.products).length} 个竞品 · {safeArray(r.demands).length} 条需求 · 创建于 {r.date}
                 </div>
               </div>
               <Tag tone={r.status === "已完成" ? "success" : r.status === "分析中" ? "warn" : "default"}>
@@ -1039,6 +1099,14 @@ function ResearchScreen({ data, api, refreshData }) {
               <Icon name="chevron-right" size={16} style={{ color: "var(--text-3)" }} />
             </div>
           )}
+          {items.length === 0 &&
+            <EmptyState
+              icon="compass"
+              title="还没有真实调研项目"
+              action={<Btn size="sm" variant="primary" icon="plus" onClick={() => setShowCreate(true)}>新建调研项目</Btn>}>
+              先录入竞品和需求，再创建调研项目生成结构化分析报告。
+            </EmptyState>
+          }
         </div>
         {showCreate && <CreateResearchModal api={api} refreshData={refreshData} onClose={() => setShowCreate(false)} />}
       </div>
@@ -1048,13 +1116,13 @@ function ResearchScreen({ data, api, refreshData }) {
 window.ResearchScreen = ResearchScreen;
 
 function ResearchDetail({ data, api, refreshData, research, onBack }) {
-  const [productIds, setProductIds] = useState(research.products);
-  const [demandIds, setDemandIds] = useState(research.demands);
+  const [productIds, setProductIds] = useState(safeArray(research.products));
+  const [demandIds, setDemandIds] = useState(safeArray(research.demands));
   const [picker, setPicker] = useState(null); // 'product' | 'demand' | null
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const products = productIds.map((id) => data.products.find((p) => p.id === id)).filter(Boolean);
-  const demands = demandIds.map((id) => data.demands.find((d) => d.id === id)).filter(Boolean);
+  const products = productIds.map((id) => safeArray(data.products).find((p) => p.id === id)).filter(Boolean);
+  const demands = demandIds.map((id) => safeArray(data.demands).find((d) => d.id === id)).filter(Boolean);
   const saveLinks = async (nextProducts = productIds, nextDemands = demandIds) => {
     await api?.(`/api/research/${research.id}`, {
       method: "PATCH",
@@ -1108,8 +1176,8 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                   <div className="row" style={{ marginTop: 3, fontSize: 11.5 }}>
-                    <span className="mono" style={{ fontWeight: 600 }}>{p.platforms[0].price}</span>
-                    <span style={{ color: "var(--text-3)" }}>· {p.platforms[0].rating}★</span>
+                    <span className="mono" style={{ fontWeight: 600 }}>{safeArray(p.platforms)[0]?.price || "—"}</span>
+                    <span style={{ color: "var(--text-3)" }}>· {safeArray(p.platforms)[0]?.rating ?? "—"}★</span>
                   </div>
                 </div>
                 <Icon name="x" size={12} style={{ cursor: "pointer", color: "var(--text-4)", position: "absolute", top: 8, right: 8 }}
@@ -1167,11 +1235,11 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
                 <div className="products-thumb" style={{ width: 32, height: 32, fontSize: 16 }}>{p.emoji}</div>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-3)" }}>{p.category} · {p.platforms[0].price} · {p.platforms[0].rating}★</div>
+                  <div style={{ fontSize: 11, color: "var(--text-3)" }}>{p.category || "未分类"} · {safeArray(p.platforms)[0]?.price || "—"} · {safeArray(p.platforms)[0]?.rating ?? "—"}★</div>
                 </div>
               </>
         }
-        searchKey={(p) => p.name + " " + p.category + " " + p.tags.join(" ")} />
+        searchKey={(p) => p.name + " " + p.category + " " + safeArray(p.tags).join(" ")} />
         }
         {picker === "demand" &&
         <PickerModal title="添加关联需求" items={data.demands} excludeIds={demandIds}
@@ -1188,7 +1256,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
                 </div>
               </>
         }
-        searchKey={(d) => d.title + " " + d.innovation + " " + d.scenarios.join(" ") + " " + d.painpoints.join(" ")} />
+        searchKey={(d) => d.title + " " + d.innovation + " " + safeArray(d.scenarios).join(" ") + " " + safeArray(d.painpoints).join(" ")} />
         }
 
         <Section icon="sparkles" label="AI 分析报告">

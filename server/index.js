@@ -10,7 +10,7 @@ import { parseDemandUrl, parseProductUrl } from "./parsers.js";
 import { collectSources } from "./rss-service.js";
 import { analyzeResearch } from "./research-service.js";
 import { syncFeishu, testFeishu } from "./feishu-service.js";
-import { loadSeedData } from "./seed.js";
+import { loadInitialData } from "./seed.js";
 import {
   bootstrap,
   createNewsSource,
@@ -38,7 +38,7 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 const SQLiteStore = SQLiteStoreFactory(session);
 
-ensureSeed(loadSeedData());
+ensureSeed(loadInitialData());
 
 app.use(express.json({ limit: "2mb" }));
 app.use(session({
