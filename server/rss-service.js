@@ -12,11 +12,84 @@ const parser = new Parser({
   },
 });
 
+const IMAGE_FETCH_TIMEOUT_MS = 8000;
+
+function decodeHtml(text) {
+  return String(text || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
+function firstHtmlImage(html) {
+  const metaTags = String(html || "").match(/<meta\s+[^>]*>/gi) || [];
+  for (const tag of metaTags) {
+    const isImageMeta = /\b(?:property|name)=["'](?:og:image|twitter:image|twitter:image:src)["']/i.test(tag);
+    if (!isImageMeta) continue;
+    const content = tag.match(/\bcontent=["']([^"']+)["']/i)?.[1];
+    if (content) return decodeHtml(content.trim());
+  }
+
+  const img = String(html || "").match(/<img[^>]+\bsrc=["']([^"']+)["']/i)?.[1];
+  return img ? decodeHtml(img.trim()) : "";
+}
+
+function normalizeImageUrl(image, baseUrl) {
+  if (!image) return "";
+  try {
+    return new URL(image, baseUrl).toString();
+  } catch {
+    return image;
+  }
+}
+
 function pickImage(item) {
-  return item.enclosure?.url ||
+  const baseUrl = item.link || item.guid || "";
+  const image = item.enclosure?.url ||
     item.mediaThumbnail?.$?.url ||
     item.mediaContent?.$?.url ||
+    firstHtmlImage(item.content || item.summary || "") ||
     "";
+  return normalizeImageUrl(image, baseUrl);
+}
+
+async function fetchArticleImage(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "";
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) return "";
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(parsed.toString(), {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0 PM-Copilot/0.1 (+https://github.com/GrahamHau/PM-Copilot)",
+        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+      },
+    });
+    if (!response.ok) return "";
+    const html = await response.text();
+    return normalizeImageUrl(firstHtmlImage(html), response.url || parsed.toString());
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveImage(item) {
+  const feedImage = pickImage(item);
+  if (feedImage) return feedImage;
+  return fetchArticleImage(item.link || item.guid || "");
 }
 
 function formatDate(value) {
@@ -97,6 +170,7 @@ export async function collectSource(source) {
     const classified = await classifyNews({ source, item });
     if (!classified) continue;
     const published = item.isoDate || item.pubDate || new Date().toISOString();
+    const thumbnail_url = await resolveImage(item);
     newsItems.push({
       source_id: source.id,
       source: source.name,
@@ -106,7 +180,7 @@ export async function collectSource(source) {
       published_at: published,
       date: formatDate(published),
       time: "",
-      thumbnail_url: pickImage(item),
+      thumbnail_url,
       thumbHue: classified.type === "新品发布" ? 220 : 40,
       ...classified,
     });

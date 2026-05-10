@@ -142,14 +142,28 @@ function newsDedupeKey(news) {
   return `${news.source_id || news.source || "unknown"}::${news.original_title || news.titleZh || ""}::${news.published_at || news.date || ""}`;
 }
 
+function googleNewsTitleKey(news) {
+  const source = String(news.source || "");
+  const originalUrl = String(news.original_url || "");
+  if (!source.includes("Google News") && !originalUrl.includes("news.google.")) return "";
+  const title = String(news.original_title || news.titleZh || "").replace(/\s+/g, " ").trim().toLowerCase();
+  return title ? `${news.source_id || source || "unknown"}::title::${title}` : "";
+}
+
 export function upsertNews(items) {
   return mutate((state) => {
     const existing = new Map((state.news || []).map((item) => [newsDedupeKey(item), item]));
+    const googleTitleIndex = new Map();
+    for (const item of state.news || []) {
+      const titleKey = googleNewsTitleKey(item);
+      if (titleKey && !googleTitleIndex.has(titleKey)) googleTitleIndex.set(titleKey, item);
+    }
     const inserted = [];
     const updated = [];
     for (const input of items) {
       const key = newsDedupeKey(input);
-      const current = existing.get(key);
+      const titleKey = googleNewsTitleKey(input);
+      const current = existing.get(key) || (titleKey ? googleTitleIndex.get(titleKey) : null);
       if (current) {
         Object.assign(current, input, {
           id: current.id,
@@ -171,9 +185,17 @@ export function upsertNews(items) {
         };
         state.news.unshift(item);
         existing.set(key, item);
+        if (titleKey) googleTitleIndex.set(titleKey, item);
         inserted.push(item);
       }
     }
+    const seen = new Set();
+    state.news = (state.news || []).filter((item) => {
+      const key = googleNewsTitleKey(item) || newsDedupeKey(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     state.news.sort((a, b) => String(b.published_at || b.date || "").localeCompare(String(a.published_at || a.date || "")));
     return { inserted, updated };
   });

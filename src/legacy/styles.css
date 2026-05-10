@@ -229,7 +229,8 @@ a { color: inherit; text-decoration: none; }
 .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
 .viewport { flex: 1; overflow: auto; }
-.page { padding: 20px 24px 60px; max-width: 1400px; }
+.page { padding: 20px 24px 60px; max-width: 1400px; width: 100%; }
+.page-fluid { max-width: none; }
 .page.full { max-width: none; padding: 0; }
 
 /* ====== Atoms ====== */
@@ -397,9 +398,10 @@ textarea.ghost-input { line-height: 1.6; }
   display: grid;
   grid-template-columns: 1fr 380px;
   height: 100%;
+  min-width: 0;
 }
 .products-layout.no-detail { grid-template-columns: 1fr; }
-.products-main { display: flex; flex-direction: column; overflow: hidden; }
+.products-main { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 .products-toolbar {
   display: flex;
   align-items: center;
@@ -573,6 +575,7 @@ textarea.ghost-input { line-height: 1.6; }
   z-index: 1;
 }
 .news-card {
+  position: relative;
   display: grid;
   grid-template-columns: 132px 1fr auto;
   gap: 16px;
@@ -591,14 +594,20 @@ textarea.ghost-input { line-height: 1.6; }
   border-radius: 50%;
   background: var(--accent);
   position: absolute;
-  margin-top: 6px;
-  margin-left: -10px;
+  top: 22px;
+  left: 7px;
 }
 .news-thumb {
   width: 132px; height: 86px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   overflow: hidden;
+}
+.news-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 .news-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .news-title { font-size: 14px; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em; }

@@ -148,9 +148,7 @@ function NewsScreen({ data, api, refreshData }) {
               <div className="news-day">{formatDate(d)}</div>
               {grouped[d].map((n) =>
             <div className={`news-card ${n.unread ? "unread" : ""}`} key={n.id}>
-                  <div className="news-thumb">
-                    <DemandThumb hue={n.thumbHue} label={n.type === "新品发布" ? "PRODUCT IMG" : "TREND IMG"} />
-                  </div>
+                  <NewsThumb item={n} />
                   <div className="news-body">
                     <div className="news-title">{n.titleZh}</div>
                     <div className="news-summary">{n.summary}</div>
@@ -178,6 +176,20 @@ function NewsScreen({ data, api, refreshData }) {
 
 }
 window.NewsScreen = NewsScreen;
+
+function NewsThumb({ item }) {
+  const [failed, setFailed] = useState(false);
+  const image = item.thumbnail_url || item.image || "";
+  const label = item.type === "新品发布" ? "PRODUCT IMG" : "TREND IMG";
+  return (
+    <div className="news-thumb">
+      {image && !failed ?
+        <img src={image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> :
+        <DemandThumb hue={item.thumbHue} label={label} />
+      }
+    </div>
+  );
+}
 
 function formatDate(d) {
   const now = new Date();
@@ -330,7 +342,7 @@ function ProductsScreen({ data, api, refreshData }) {
   };
 
   return (
-    <div className="products-layout" style={{ height: "100%" }}>
+    <div className={`products-layout ${selected ? "" : "no-detail"}`} style={{ height: "100%" }}>
       <div className="products-main">
         <div className="products-toolbar">
           <div style={{ position: "relative", flex: "0 1 280px" }}>
@@ -731,7 +743,7 @@ function DemandsScreen({ data, api, refreshData }) {
 
   return (
     <div className="viewport">
-      <div className="page">
+      <div className="page page-fluid">
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div>
             <h1 className="h1">需求管理</h1>
