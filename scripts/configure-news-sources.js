@@ -30,8 +30,9 @@ const sources = [
     name: "Tilta Feed",
     url: "https://tilta.com/feed/",
     interval: 240,
-    active: true,
+    active: false,
     group: "competitor-accessories",
+    last_error: "Disabled: VPS receives 403; covered by Google News source",
   },
   {
     id: "rss-apple-newsroom",
@@ -50,9 +51,9 @@ const sources = [
     group: "host-brands",
   },
   {
-    id: "rss-canon-rumors",
-    name: "Canon Rumors",
-    url: "https://www.canonrumors.com/feed/",
+    id: "rss-canon-watch",
+    name: "Canon Watch",
+    url: "https://www.canonwatch.com/feed/",
     interval: 240,
     active: true,
     group: "host-brands",
@@ -86,6 +87,8 @@ const sources = [
 const brokenUrls = new Set([
   "https://www.dji.com/cn/newsroom/rss.xml",
   "https://aputure.com/blog/feed/",
+  "https://tilta.com/feed/",
+  "https://www.canonrumors.com/feed/",
 ]);
 
 const result = mutate((state) => {
