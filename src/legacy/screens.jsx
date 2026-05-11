@@ -87,6 +87,42 @@ function DeleteDemandConfirmModal({ demand, busy, onClose, onConfirm }) {
   );
 }
 
+function guessBrand(news) {
+  const explicit = String(news.brand || "").trim();
+  if (explicit) return explicit;
+  const source = String(news.source || "").trim();
+  if (source) {
+    const cleaned = source
+      .replace(/\s*(news|blog|official|官网|官方|中国|global|camera rumors|rumors)\s*$/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (cleaned) return cleaned;
+  }
+  const title = String(news.titleZh || news.original_title || "").trim();
+  const brandMatch = title.match(/^([A-Za-z0-9]+(?:\s?[A-Za-z0-9]+){0,2})\s*(发布|推出|带来|上线|更新|宣布|发布了|推出了|发布新|推出新)/);
+  return brandMatch?.[1]?.trim() || "";
+}
+
+function DemandTagList({ items, tone = "default", onRemove, addLabel = "+ 添加" }) {
+  return (
+    <div className="tag-row">
+      {safeArray(items).map((item) => (
+        <button
+          key={item}
+          type="button"
+          className={`tag removable ${tone === "default" ? "" : tone}`}
+          onClick={() => onRemove?.(item)}
+          title={`删除 ${item}`}
+        >
+          <span>{item}</span>
+          <Icon name="x" size={11} />
+        </button>
+      ))}
+      <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>{addLabel}</button>
+    </div>
+  );
+}
+
 // ============ LOGIN ============
 function LoginScreen({ onLogin, error }) {
   const [user, setUser] = useState("graham");
@@ -134,7 +170,7 @@ function LoginScreen({ onLogin, error }) {
 window.LoginScreen = LoginScreen;
 
 // ============ NEWS ============
-function NewsScreen({ data, api, refreshData }) {
+function NewsScreen({ data, api, refreshData, navTarget }) {
   const [tab, setTab] = useState("all");
   const [items, setItems] = useState(safeArray(data.news));
   const [counts, setCounts] = useState({
@@ -228,6 +264,11 @@ function NewsScreen({ data, api, refreshData }) {
     loadNews(tab).catch(() => {});
   }, [tab]);
 
+  useEffect(() => {
+    if (!navTarget || navTarget.screen !== "news") return;
+    setTab("all");
+  }, [navTarget]);
+
   return (
     <>
       <div className="news-tabs">
@@ -272,6 +313,7 @@ function NewsScreen({ data, api, refreshData }) {
                     <div className="news-summary">{n.summary}</div>
                     <div className="news-meta">
                       <Tag tone={n.type === "新品发布" ? "accent" : "warn"}>{n.type}</Tag>
+                      {n.type === "新品发布" && guessBrand(n) ? <Tag tone="outline">{guessBrand(n)}</Tag> : null}
                       <span>{n.source}</span>
                       <span className="dot">·</span>
                       <span>{formatRelativeTime(n.published_at)}</span>
@@ -848,7 +890,7 @@ function AddProductModal({ onClose, api, refreshData }) {
 }
 
 // ============ DEMANDS ============
-function DemandsScreen({ data, api, refreshData }) {
+function DemandsScreen({ data, api, refreshData, navTarget }) {
   const [demands, setDemands] = useState(safeArray(data.demands));
   useEffect(() => setDemands(safeArray(data.demands)), [data.demands]);
   const [filterScenario, setFilterScenario] = useState("");
@@ -880,6 +922,11 @@ function DemandsScreen({ data, api, refreshData }) {
   const openDeleteConfirm = (demand) => {
     setDeleteTarget(demand);
   };
+
+  useEffect(() => {
+    if (!navTarget || navTarget.screen !== "demands") return;
+    setSelectedId(navTarget.id || null);
+  }, [navTarget]);
 
   const confirmDelete = async () => {
     if (!api || !deleteTarget) return;
@@ -1032,18 +1079,19 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
 
           <div className="detail-section">
             <div className="detail-section-label">使用场景 · 多选</div>
-            <div className="tag-row">
-              {safeArray(demand.scenarios).map((s) => <Tag key={s}>{s}</Tag>)}
-              <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
-            </div>
+            <DemandTagList
+              items={demand.scenarios}
+              onRemove={(value) => save({ scenarios: safeArray(demand.scenarios).filter((item) => item !== value) })}
+            />
           </div>
 
           <div className="detail-section">
             <div className="detail-section-label">用户痛点 · 多选</div>
-            <div className="tag-row">
-              {safeArray(demand.painpoints).map((p) => <Tag key={p} tone="danger">{p}</Tag>)}
-              <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
-            </div>
+            <DemandTagList
+              items={demand.painpoints}
+              tone="danger"
+              onRemove={(value) => save({ painpoints: safeArray(demand.painpoints).filter((item) => item !== value) })}
+            />
           </div>
 
           <div className="detail-section">

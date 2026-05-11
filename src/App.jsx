@@ -14,7 +14,7 @@ const TweaksPanel = globalThis.TweaksPanel;
 const TweakSection = globalThis.TweakSection;
 const TweakRadio = globalThis.TweakRadio;
 const TweakToggle = globalThis.TweakToggle;
-const { useEffect, useState } = React;
+const { useEffect, useMemo, useState } = React;
 
 const NAV = [
   { group: "采集服务", items: [
@@ -34,6 +34,119 @@ const TITLES = {
   research: "市场调研",
   settings: "系统设置",
 };
+
+const SEARCH_ICON = {
+  news: "newspaper",
+  products: "boxes",
+  demands: "lightbulb",
+  research: "compass",
+};
+
+function buildSearchIndex(data) {
+  const news = (data.news || []).map((item) => ({
+    id: `news:${item.id}`,
+    entityId: item.id,
+    screen: "news",
+    icon: SEARCH_ICON.news,
+    kind: "新闻",
+    title: item.titleZh || item.original_title || "未命名资讯",
+    summary: item.summary || "",
+    meta: item.source || "",
+  }));
+  const products = (data.products || []).map((item) => ({
+    id: `products:${item.id}`,
+    entityId: item.id,
+    screen: "products",
+    icon: SEARCH_ICON.products,
+    kind: "竞品",
+    title: item.name || "未命名竞品",
+    summary: item.ai_summary || "",
+    meta: item.category || "",
+  }));
+  const demands = (data.demands || []).map((item) => ({
+    id: `demands:${item.id}`,
+    entityId: item.id,
+    screen: "demands",
+    icon: SEARCH_ICON.demands,
+    kind: "需求",
+    title: item.title || "未命名需求",
+    summary: item.summary || "",
+    meta: item.innovation || "",
+  }));
+  const research = (data.research || []).map((item) => ({
+    id: `research:${item.id}`,
+    entityId: item.id,
+    screen: "research",
+    icon: SEARCH_ICON.research,
+    kind: "调研",
+    title: item.title || "未命名调研",
+    summary: item.desc || "",
+    meta: item.status || "",
+  }));
+  return [...demands, ...products, ...news, ...research];
+}
+
+function GlobalSearchModal({ data, onClose, onPick }) {
+  const [query, setQuery] = useState("");
+  const items = useMemo(() => buildSearchIndex(data), [data]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items.slice(0, 12);
+    return items.filter((item) =>
+      [item.title, item.summary, item.meta, item.kind].filter(Boolean).some((value) => String(value).toLowerCase().includes(q))
+    ).slice(0, 24);
+  }, [items, query]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 620 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <Icon name="search" size={15} />
+          <h3>全局搜索</h3>
+          <span className="kbd">⌘K</span>
+          <Btn variant="ghost" icon="x" onClick={onClose} />
+        </div>
+        <div style={{ padding: "14px 18px 0" }}>
+          <input
+            autoFocus
+            className="input lg"
+            style={{ width: "100%" }}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索需求、竞品、News、调研项目..."
+          />
+        </div>
+        <div className="modal-body" style={{ paddingTop: 10, maxHeight: 420 }}>
+          {filtered.length === 0 ? (
+            <div className="empty">没有匹配的结果</div>
+          ) : (
+            <div className="search-result-list">
+              {filtered.map((item) => (
+                <button key={item.id} className="search-result" onClick={() => onPick(item)}>
+                  <div className="search-result-icon">
+                    <Icon name={item.icon} size={14} />
+                  </div>
+                  <div className="search-result-body">
+                    <div className="search-result-top">
+                      <span className="search-result-title">{item.title}</span>
+                      <Tag tone="outline">{item.kind}</Tag>
+                    </div>
+                    <div className="search-result-meta">
+                      <span>{TITLES[item.screen]}</span>
+                      {item.meta ? <span>· {item.meta}</span> : null}
+                    </div>
+                    {item.summary ? <div className="search-result-summary">{item.summary}</div> : null}
+                  </div>
+                  <Icon name="chevron-right" size={14} style={{ color: "var(--text-3)" }} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -147,6 +260,8 @@ function App() {
   const [me, setMe] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [navTarget, setNavTarget] = useState(null);
   const [t, setTweak] = useTweaks({ theme: "feishu", mode: "light", showLogin: false });
 
   useEffect(() => {
@@ -165,6 +280,20 @@ function App() {
 
   useEffect(() => {
     loadBootstrap().catch((err) => setError(err.message));
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+      if (event.key === "Escape") {
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   const refreshData = async () => {
@@ -202,7 +331,7 @@ function App() {
     );
   }
 
-  const screenProps = { data, api, refreshData };
+  const screenProps = { data, api, refreshData, navTarget };
   const screen = {
     news: <NewsScreen {...screenProps} />,
     products: <ProductsScreen {...screenProps} />,
@@ -222,11 +351,15 @@ function App() {
           {active === "demands" && <span className="topbar-crumb">· {data.demands.length} 条灵感</span>}
           {active === "research" && <span className="topbar-crumb">· {data.research.length} 个项目</span>}
           <div className="topbar-actions">
-            <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 8px", color: "var(--text-3)", fontSize: 11.5 }}>
+            <button
+              type="button"
+              className="topbar-search-trigger"
+              onClick={() => setSearchOpen(true)}
+            >
               <Icon name="search" size={13} />
               <span>搜索</span>
               <span className="kbd">⌘K</span>
-            </div>
+            </button>
             <Btn variant="ghost" icon="bell" size="sm" />
             <Btn variant="ghost" icon="panel-open" size="sm" />
           </div>
@@ -234,6 +367,17 @@ function App() {
         {screen}
       </main>
       <PMCTweaks t={t} setTweak={setTweak} />
+      {searchOpen && data && (
+        <GlobalSearchModal
+          data={data}
+          onClose={() => setSearchOpen(false)}
+          onPick={(item) => {
+            setActive(item.screen);
+            setNavTarget({ screen: item.screen, id: item.entityId, at: Date.now() });
+            setSearchOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
