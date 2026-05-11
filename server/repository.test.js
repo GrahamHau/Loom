@@ -52,16 +52,25 @@ describe("repository", () => {
     repo.upsertNews([{ source_id: "s1", source: "S", original_url: "https://a.test/1", titleZh: "A", date: "2026-05-10" }]);
     repo.upsertNews([{ source_id: "s1", source: "S", original_url: "https://a.test/1", titleZh: "B", date: "2026-05-10" }]);
     expect(repo.listNews()).toHaveLength(2);
-    expect(repo.listNews().find((item) => item.original_url === "https://a.test/1")?.titleZh).toBe("B");
+    expect(repo.listNews().find((item) => item.original_url === "https://a.test/1")?.titleZh).toBe("A");
   });
 
-  it("dedupes google news redirects by title", () => {
+  it("dedupes only by original url", () => {
     repo.upsertNews([
       { source_id: "google", source: "配件竞品新品 - Google News", original_url: "https://news.google.com/rss/a", titleZh: "Tilta launches filter kit", original_title: "Tilta launches filter kit", date: "2026-05-10" },
       { source_id: "google", source: "配件竞品新品 - Google News", original_url: "https://news.google.com/rss/b", titleZh: "Tilta launches filter kit", original_title: "Tilta launches filter kit", date: "2026-05-10" },
     ]);
     const matches = repo.listNews().filter((item) => item.original_title === "Tilta launches filter kit");
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(2);
+  });
+
+  it("creates and reports news source health fields", () => {
+    const source = repo.createNewsSource({ name: "Test Feed", url: "https://example.com/feed.xml", group: "brand-news", brand: "DJI" });
+    expect(source?.source_group).toBe("brand-news");
+    expect(source?.brand).toBe("DJI");
+    const updated = repo.updateNewsSource(source.id, { last_fetched_at: "2026-05-11T00:00:00.000Z", last_item_count: 12, last_error: "HTTP 403" });
+    expect(updated?.last_item_count).toBe(12);
+    expect(updated?.last_error).toBe("HTTP 403");
   });
 
   it("does not overwrite masked secrets", () => {

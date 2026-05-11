@@ -14,10 +14,10 @@ describe("rss-service classification", () => {
       },
     });
     expect(result.type).toBe("新品发布");
-    expect(result.classification.reason).toBe("official_strong_launch");
+    expect(result.classification.reason).toBe("heuristic_new_product");
   });
 
-  it("does not classify broad photography stories as product launches", () => {
+  it("drops broad photography stories", () => {
     const result = heuristicClassifyNews({
       source: { name: "PetaPixel", authority: "watchlist" },
       item: {
@@ -25,11 +25,10 @@ describe("rss-service classification", () => {
         contentSnippet: "The archive collection has been donated to a research center.",
       },
     });
-    expect(result.type).toBe("行业趋势");
-    expect(result.classification.reason).toBe("non_product_or_broad_news");
+    expect(result).toBe(null);
   });
 
-  it("keeps teaser and expected launch stories out of product launches", () => {
+  it("drops teaser and expected launch stories", () => {
     const result = heuristicClassifyNews({
       source: { name: "主机品牌新品 - Google News", authority: "aggregator" },
       item: {
@@ -37,11 +36,10 @@ describe("rss-service classification", () => {
         contentSnippet: "The company is expected to reveal more details soon.",
       },
     });
-    expect(result.type).toBe("行业趋势");
-    expect(result.classification.reason).toBe("non_product_or_broad_news");
+    expect(result).toBe(null);
   });
 
-  it("keeps official non-gear collections out of product launches", () => {
+  it("drops official non-gear collections", () => {
     const result = heuristicClassifyNews({
       source: { name: "Apple Newsroom", authority: "official" },
       item: {
@@ -49,6 +47,18 @@ describe("rss-service classification", () => {
         contentSnippet: "The collection includes a new watch band and wallpaper.",
       },
     });
+    expect(result).toBe(null);
+  });
+
+  it("keeps trend reports as trend", () => {
+    const result = heuristicClassifyNews({
+      source: { name: "PetaPixel", authority: "watchlist" },
+      item: {
+        title: "New camera market report points to mirrorless demand shift",
+        contentSnippet: "A new market report shows changing consumer demand across imaging categories.",
+      },
+    });
     expect(result.type).toBe("行业趋势");
+    expect(result.classification.reason).toBe("heuristic_trend");
   });
 });

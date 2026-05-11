@@ -188,6 +188,16 @@ app.post("/api/news/refresh", requireAuth, asyncHandler(async (_req, res) => {
   });
 }));
 
+app.get("/api/news/sources/status", requireAuth, (_req, res) => {
+  res.json(listNewsSources().map((source) => ({
+    id: source.id,
+    name: source.name,
+    last_fetched_at: source.last_fetched_at,
+    last_item_count: source.last_item_count,
+    last_error: source.last_error,
+  })));
+});
+
 app.get("/api/news-sources", requireAuth, (_req, res) => res.json(listNewsSources()));
 app.post("/api/news-sources", requireAuth, (req, res) => res.status(201).json(createNewsSource(req.body || {})));
 app.patch("/api/news-sources/:id", requireAuth, (req, res) => {

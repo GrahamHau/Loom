@@ -63,11 +63,14 @@ function mapNewsSourceRow(row) {
     language: row.language || "",
     authority: row.authority || "watchlist",
     group: row.group_name || "custom",
+    source_group: row.source_group || row.group_name || "custom",
+    brand: row.brand || "",
     interval: row.fetch_interval,
     fetch_interval: row.fetch_interval,
     active: Boolean(row.is_active),
     is_active: Boolean(row.is_active),
     last_fetched_at: row.last_fetched_at,
+    last_item_count: Number(row.last_item_count || 0),
     last_error: row.last_error,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -204,53 +207,24 @@ export function deleteNews(id) {
   return db.prepare("DELETE FROM news_items WHERE id = ?").run(id).changes > 0;
 }
 
-function newsDedupeKey(news) {
-  if (news.source_id && news.original_url) return `${news.source_id}::${news.original_url}`;
-  return `${news.source_id || news.source || "unknown"}::${news.original_title || news.titleZh || ""}::${news.published_at || news.date || ""}`;
-}
-
-function googleNewsTitleKey(news) {
-  const source = String(news.source || "");
-  const originalUrl = String(news.original_url || "");
-  if (!source.includes("Google News") && !originalUrl.includes("news.google.")) return "";
-  const title = String(news.original_title || news.titleZh || "").replace(/\s+/g, " ").trim().toLowerCase();
-  return title ? `${news.source_id || source || "unknown"}::title::${title}` : "";
-}
-
 export function upsertNews(items) {
-  const existingItems = listNews();
-  const existing = new Map(existingItems.map((item) => [newsDedupeKey(item), item]));
-  const googleTitleIndex = new Map();
-  for (const item of existingItems) {
-    const titleKey = googleNewsTitleKey(item);
-    if (titleKey && !googleTitleIndex.has(titleKey)) googleTitleIndex.set(titleKey, item);
-  }
-
   const inserted = [];
-  const updated = [];
+  const selectStmt = db.prepare("SELECT * FROM news_items WHERE original_url = ?");
   const insertStmt = db.prepare(`
-    INSERT INTO news_items (
+    INSERT OR IGNORE INTO news_items (
       id, user_id, source_id, source_name, source_authority, original_title, original_url,
       original_summary, original_content, title_zh, summary_zh, content_zh, type, thumbnail_url,
       thumb_hue, is_kept, is_read, is_starred, published_at, llm_processed, needs_translation,
       classification_json, synced_at, feishu_record_id, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  const updateStmt = db.prepare(`
-    UPDATE news_items
-    SET source_id = ?, source_name = ?, source_authority = ?, original_title = ?, original_url = ?,
-        original_summary = ?, original_content = ?, title_zh = ?, summary_zh = ?, content_zh = ?,
-        type = ?, thumbnail_url = ?, thumb_hue = ?, is_kept = ?, llm_processed = ?, needs_translation = ?,
-        classification_json = ?, published_at = ?, updated_at = ?
-    WHERE id = ?
-  `);
   db.transaction((records) => {
     for (const input of records) {
-      const key = newsDedupeKey(input);
-      const titleKey = googleNewsTitleKey(input);
-      const current = existing.get(key) || (titleKey ? googleTitleIndex.get(titleKey) : null);
+      if (!input.original_url) continue;
+      const current = selectStmt.get(input.original_url);
+      if (current) continue;
       const payload = {
-        id: current?.id || input.id || nanoid(10),
+        id: input.id || nanoid(10),
         user_id: input.user_id || "default",
         source_id: input.source_id || "unknown",
         source_name: input.source || "",
@@ -266,41 +240,29 @@ export function upsertNews(items) {
         thumbnail_url: input.thumbnail_url || "",
         thumb_hue: Number(input.thumbHue ?? 40),
         is_kept: input.type ? 1 : 0,
-        is_read: current ? (current.unread ? 0 : 1) : 0,
-        is_starred: current ? (current.starred ? 1 : 0) : 0,
+        is_read: 0,
+        is_starred: 0,
         published_at: input.published_at || input.date || nowIso(),
         llm_processed: input.type ? 1 : 0,
         needs_translation: input.needsTranslation ? 1 : 0,
         classification_json: input.classification ? JSON.stringify(input.classification) : null,
-        synced_at: current?.synced_at || null,
-        feishu_record_id: current?.feishu_record_id || null,
-        created_at: current?.created_at || nowIso(),
+        synced_at: null,
+        feishu_record_id: null,
+        created_at: nowIso(),
         updated_at: nowIso(),
       };
-      if (current) {
-        updateStmt.run(
-          payload.source_id, payload.source_name, payload.source_authority, payload.original_title, payload.original_url,
-          payload.original_summary, payload.original_content, payload.title_zh, payload.summary_zh, payload.content_zh,
-          payload.type, payload.thumbnail_url, payload.thumb_hue, payload.is_kept, payload.llm_processed, payload.needs_translation,
-          payload.classification_json, payload.published_at, payload.updated_at, payload.id
-        );
-        existing.set(key, { ...current, ...payload, source: payload.source_name, titleZh: payload.title_zh });
-        if (titleKey) googleTitleIndex.set(titleKey, { ...current, ...payload, source: payload.source_name, titleZh: payload.title_zh });
-        updated.push(payload);
-      } else {
-        insertStmt.run(
-          payload.id, payload.user_id, payload.source_id, payload.source_name, payload.source_authority, payload.original_title, payload.original_url,
-          payload.original_summary, payload.original_content, payload.title_zh, payload.summary_zh, payload.content_zh, payload.type, payload.thumbnail_url,
-          payload.thumb_hue, payload.is_kept, payload.is_read, payload.is_starred, payload.published_at, payload.llm_processed, payload.needs_translation,
-          payload.classification_json, payload.synced_at, payload.feishu_record_id, payload.created_at, payload.updated_at
-        );
-        existing.set(key, { ...payload, source: payload.source_name, titleZh: payload.title_zh, date: String(payload.published_at || "").slice(0, 10) });
-        if (titleKey) googleTitleIndex.set(titleKey, { ...payload, source: payload.source_name, titleZh: payload.title_zh, date: String(payload.published_at || "").slice(0, 10) });
+      const result = insertStmt.run(
+        payload.id, payload.user_id, payload.source_id, payload.source_name, payload.source_authority, payload.original_title, payload.original_url,
+        payload.original_summary, payload.original_content, payload.title_zh, payload.summary_zh, payload.content_zh, payload.type, payload.thumbnail_url,
+        payload.thumb_hue, payload.is_kept, payload.is_read, payload.is_starred, payload.published_at, payload.llm_processed, payload.needs_translation,
+        payload.classification_json, payload.synced_at, payload.feishu_record_id, payload.created_at, payload.updated_at
+      );
+      if (result.changes > 0) {
         inserted.push(payload);
       }
     }
   })(items);
-  return { inserted, updated };
+  return { inserted, updated: [] };
 }
 
 export function listNewsSources() {
@@ -321,21 +283,24 @@ export function createNewsSource(input) {
     language: input.language || "",
     authority: input.authority || "watchlist",
     group_name: input.group || "custom",
+    source_group: input.source_group || input.group || "custom",
+    brand: input.brand || "",
     fetch_interval: clampFetchInterval(input.interval || input.fetch_interval || 60),
     is_active: input.active ?? input.is_active ?? true ? 1 : 0,
     last_fetched_at: input.last_fetched_at || null,
+    last_item_count: Number(input.last_item_count || 0),
     last_error: input.last_error || null,
     created_at: nowIso(),
     updated_at: nowIso(),
   };
   db.prepare(`
     INSERT INTO news_sources (
-      id, user_id, name, url, type, language, authority, group_name,
-      fetch_interval, is_active, last_fetched_at, last_error, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, user_id, name, url, type, language, authority, group_name, source_group, brand,
+      fetch_interval, is_active, last_fetched_at, last_item_count, last_error, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    source.id, source.user_id, source.name, source.url, source.type, source.language, source.authority, source.group_name,
-    source.fetch_interval, source.is_active, source.last_fetched_at, source.last_error, source.created_at, source.updated_at
+    source.id, source.user_id, source.name, source.url, source.type, source.language, source.authority, source.group_name, source.source_group, source.brand,
+    source.fetch_interval, source.is_active, source.last_fetched_at, source.last_item_count, source.last_error, source.created_at, source.updated_at
   );
   return listNewsSources().find((item) => item.id === source.id) || null;
 }
@@ -345,8 +310,8 @@ export function updateNewsSource(id, patch) {
   if (!current) return null;
   db.prepare(`
     UPDATE news_sources
-    SET name = ?, url = ?, type = ?, language = ?, authority = ?, group_name = ?,
-        fetch_interval = ?, is_active = ?, last_fetched_at = ?, last_error = ?, updated_at = ?
+    SET name = ?, url = ?, type = ?, language = ?, authority = ?, group_name = ?, source_group = ?, brand = ?,
+        fetch_interval = ?, is_active = ?, last_fetched_at = ?, last_item_count = ?, last_error = ?, updated_at = ?
     WHERE id = ?
   `).run(
     patch.name ?? current.name,
@@ -355,9 +320,12 @@ export function updateNewsSource(id, patch) {
     patch.language ?? current.language,
     patch.authority ?? current.authority,
     patch.group ?? current.group_name,
+    patch.source_group ?? patch.group ?? current.source_group ?? current.group_name,
+    patch.brand ?? current.brand,
     patch.fetch_interval !== undefined || patch.interval !== undefined ? clampFetchInterval(patch.fetch_interval ?? patch.interval) : current.fetch_interval,
     patch.is_active !== undefined ? (patch.is_active ? 1 : 0) : (patch.active !== undefined ? (patch.active ? 1 : 0) : current.is_active),
     patch.last_fetched_at ?? current.last_fetched_at,
+    patch.last_item_count !== undefined ? Number(patch.last_item_count || 0) : Number(current.last_item_count || 0),
     patch.last_error ?? current.last_error,
     nowIso(),
     id
@@ -367,6 +335,10 @@ export function updateNewsSource(id, patch) {
 
 export function deleteNewsSource(id) {
   return db.prepare("DELETE FROM news_sources WHERE id = ?").run(id).changes > 0;
+}
+
+export function clearNewsSources() {
+  return db.prepare("DELETE FROM news_sources").run().changes;
 }
 
 export function createResearch(input) {

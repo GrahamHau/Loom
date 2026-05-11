@@ -31,9 +31,12 @@ export function migrate() {
       language TEXT DEFAULT '',
       authority TEXT DEFAULT 'watchlist',
       group_name TEXT DEFAULT 'custom',
+      source_group TEXT DEFAULT 'custom',
+      brand TEXT DEFAULT '',
       fetch_interval INTEGER DEFAULT 60,
       is_active INTEGER DEFAULT 1,
       last_fetched_at TEXT,
+      last_item_count INTEGER DEFAULT 0,
       last_error TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -73,6 +76,17 @@ export function migrate() {
     CREATE INDEX IF NOT EXISTS idx_news_items_starred ON news_items(is_starred);
     CREATE INDEX IF NOT EXISTS idx_news_items_url ON news_items(original_url);
   `);
+
+  const newsSourceColumns = new Set(db.prepare("PRAGMA table_info(news_sources)").all().map((column) => column.name));
+  if (!newsSourceColumns.has("source_group")) {
+    db.exec("ALTER TABLE news_sources ADD COLUMN source_group TEXT DEFAULT 'custom';");
+  }
+  if (!newsSourceColumns.has("brand")) {
+    db.exec("ALTER TABLE news_sources ADD COLUMN brand TEXT DEFAULT '';");
+  }
+  if (!newsSourceColumns.has("last_item_count")) {
+    db.exec("ALTER TABLE news_sources ADD COLUMN last_item_count INTEGER DEFAULT 0;");
+  }
 }
 
 function syncLegacyNewsTables() {
@@ -84,10 +98,10 @@ function syncLegacyNewsTables() {
     const insertSource = db.prepare(`
       INSERT OR IGNORE INTO news_sources (
         id, user_id, name, url, type, language, authority, group_name,
-        fetch_interval, is_active, last_fetched_at, last_error, created_at, updated_at
+        source_group, brand, fetch_interval, is_active, last_fetched_at, last_item_count, last_error, created_at, updated_at
       ) VALUES (
         @id, @user_id, @name, @url, @type, @language, @authority, @group_name,
-        @fetch_interval, @is_active, @last_fetched_at, @last_error, @created_at, @updated_at
+        @source_group, @brand, @fetch_interval, @is_active, @last_fetched_at, @last_item_count, @last_error, @created_at, @updated_at
       )
     `);
     const insertMany = db.transaction((sources) => {
@@ -101,9 +115,12 @@ function syncLegacyNewsTables() {
           language: source.language || "",
           authority: source.authority || "watchlist",
           group_name: source.group || "custom",
+          source_group: source.source_group || source.group || "custom",
+          brand: source.brand || "",
           fetch_interval: Number(source.interval || source.fetch_interval || 60),
           is_active: source.active === false ? 0 : 1,
           last_fetched_at: source.last_fetched_at || null,
+          last_item_count: Number(source.last_item_count || 0),
           last_error: source.last_error || null,
           created_at: source.created_at || new Date().toISOString(),
           updated_at: source.updated_at || new Date().toISOString(),

@@ -197,7 +197,7 @@ function NewsScreen({ data, api, refreshData }) {
                       <Tag tone={n.type === "新品发布" ? "accent" : "warn"}>{n.type}</Tag>
                       <span>{n.source}</span>
                       <span className="dot">·</span>
-                      <span>{n.time}</span>
+                      <span>{formatRelativeTime(n.published_at)}</span>
                     </div>
                   </div>
                   <div className="news-actions">
@@ -241,6 +241,22 @@ function formatDate(d) {
   if (d === today) return "今天 · " + d.replace(/-/g, "/");
   if (d === yesterday) return "昨天 · " + d.replace(/-/g, "/");
   return String(d || "").replace(/-/g, "/");
+}
+
+function formatRelativeTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60000));
+  if (diffMinutes < 60) return `${Math.max(1, diffMinutes)}分钟前`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}小时前`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return `${diffDays}天前`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) return `${diffMonths}个月前`;
+  return `${Math.floor(diffMonths / 12)}年前`;
 }
 
 // ============ PRODUCTS ============
@@ -1457,6 +1473,13 @@ function SettingsScreen({ data, api, refreshData }) {
   const [newSource, setNewSource] = useState({ name: "", url: "", interval: 60 });
   useEffect(() => setSources(data.rssSources), [data.rssSources]);
   useEffect(() => setSettings(data.settings || {}), [data.settings]);
+  useEffect(() => {
+    if (!api) return;
+    api("/api/news/sources/status").then((statusList) => {
+      const statusMap = new Map((statusList || []).map((item) => [item.id, item]));
+      setSources((current) => current.map((source) => ({ ...source, ...(statusMap.get(source.id) || {}) })));
+    }).catch(() => {});
+  }, [api, data.rssSources]);
   const saveSettings = async (patch = settings) => {
     setNotice("");
     try {
@@ -1594,6 +1617,11 @@ function SettingsScreen({ data, api, refreshData }) {
                 <div>
                   <div style={{ fontWeight: 500 }}>{s.name}</div>
                   <div className="url">{s.url}</div>
+                  <div className="muted text-sm">
+                    {s.last_fetched_at ? `上次采集 ${formatRelativeTime(s.last_fetched_at)}` : "未采集"}
+                    {` · 条数 ${s.last_item_count || 0}`}
+                    {s.last_error ? ` · 错误 ${s.last_error}` : ""}
+                  </div>
                 </div>
                 <div><Tag tone="outline">RSS</Tag></div>
                 <div className="muted text-sm">{s.interval} min</div>
