@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { ensureSeed } from "./db.js";
 import { AppError, testLLM } from "./ai-service.js";
 import { parseDemandUrl, parseProductUrl } from "./parsers.js";
-import { collectDueSources, collectSources } from "./rss-service.js";
+import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-service.js";
 import { analyzeResearch } from "./research-service.js";
 import { syncFeishu, testFeishu } from "./feishu-service.js";
 import { loadInitialData } from "./seed.js";
@@ -186,6 +186,11 @@ app.post("/api/news/refresh", requireAuth, asyncHandler(async (_req, res) => {
       console.error("Manual news refresh failed", error);
     }
   });
+}));
+
+app.post("/api/news/process-llm", requireAuth, asyncHandler(async (req, res) => {
+  const limit = Math.min(100, Math.max(1, Number(req.body?.limit || 20)));
+  res.json(await processNewsWithLlm(limit));
 }));
 
 app.get("/api/news/sources/status", requireAuth, (_req, res) => {

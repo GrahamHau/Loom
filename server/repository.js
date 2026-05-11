@@ -185,6 +185,16 @@ export function listNews() {
   `).all().map(mapNewsRow);
 }
 
+export function listPendingNewsForLlm(limit = 20) {
+  return db.prepare(`
+    SELECT *
+    FROM news_items
+    WHERE llm_processed = 0
+    ORDER BY published_at DESC, created_at DESC
+    LIMIT ?
+  `).all(limit).map(mapNewsRow);
+}
+
 export function updateNews(id, patch) {
   const current = db.prepare("SELECT * FROM news_items WHERE id = ?").get(id);
   if (!current) return null;
@@ -192,11 +202,27 @@ export function updateNews(id, patch) {
     UPDATE news_items
     SET is_read = ?,
         is_starred = ?,
+        type = COALESCE(?, type),
+        title_zh = COALESCE(?, title_zh),
+        summary_zh = COALESCE(?, summary_zh),
+        content_zh = COALESCE(?, content_zh),
+        is_kept = COALESCE(?, is_kept),
+        llm_processed = COALESCE(?, llm_processed),
+        needs_translation = COALESCE(?, needs_translation),
+        classification_json = COALESCE(?, classification_json),
         updated_at = ?
     WHERE id = ?
   `).run(
     patch.unread !== undefined ? (patch.unread ? 0 : 1) : (patch.is_read !== undefined ? (patch.is_read ? 1 : 0) : current.is_read),
     patch.starred !== undefined ? (patch.starred ? 1 : 0) : (patch.is_starred !== undefined ? (patch.is_starred ? 1 : 0) : current.is_starred),
+    patch.type ?? null,
+    patch.titleZh ?? null,
+    patch.summary ?? null,
+    patch.contentZh ?? null,
+    patch.is_kept ?? null,
+    patch.llm_processed ?? null,
+    patch.needsTranslation !== undefined ? (patch.needsTranslation ? 1 : 0) : null,
+    patch.classification ? JSON.stringify(patch.classification) : null,
     nowIso(),
     id
   );
@@ -243,7 +269,7 @@ export function upsertNews(items) {
         is_read: 0,
         is_starred: 0,
         published_at: input.published_at || input.date || nowIso(),
-        llm_processed: input.type ? 1 : 0,
+        llm_processed: input.llmProcessed !== undefined ? (input.llmProcessed ? 1 : 0) : (input.type ? 1 : 0),
         needs_translation: input.needsTranslation ? 1 : 0,
         classification_json: input.classification ? JSON.stringify(input.classification) : null,
         synced_at: null,

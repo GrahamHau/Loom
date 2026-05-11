@@ -137,6 +137,20 @@ function NewsScreen({ data, api, refreshData }) {
     }
   };
 
+  const processLlm = async () => {
+    setBusy(true);setNotice("");
+    try {
+      const result = await api("/api/news/process-llm", { method: "POST", body: JSON.stringify({ limit: 20 }) });
+      setNotice(`LLM 处理完成：处理 ${result.processed || 0} 条，保留 ${result.kept || 0} 条，过滤 ${result.filtered || 0} 条，剩余 ${result.remaining || 0} 条`);
+      await refreshData?.();
+      await loadNews(tab);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const loadNews = async (nextTab = tab) => {
     if (!api) return;
     const params = new URLSearchParams({ page: "1", limit: "100" });
@@ -167,6 +181,7 @@ function NewsScreen({ data, api, refreshData }) {
         )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, padding: "6px 0" }}>
           <Btn size="sm" variant="ghost" icon="filter">筛选</Btn>
+          <Btn size="sm" variant="ghost" icon="sparkles" onClick={processLlm} disabled={busy}>{busy ? "处理中..." : "LLM处理"}</Btn>
           <Btn size="sm" variant="ghost" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>
         </div>
       </div>

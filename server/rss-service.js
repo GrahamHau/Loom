@@ -1,6 +1,6 @@
 import Parser from "rss-parser";
 import { callLLM } from "./ai-service.js";
-import { upsertNews, updateNewsSource } from "./repository.js";
+import { listPendingNewsForLlm, updateNews, upsertNews, updateNewsSource } from "./repository.js";
 
 const parser = new Parser({
   timeout: 20000,
@@ -128,33 +128,17 @@ export function heuristicClassifyNews({ item }) {
 async function classifyNews({ source, item }) {
   const heuristic = heuristicClassifyNews({ source, item });
   if (heuristic && heuristic.type !== "待判定") {
-    return heuristic;
+    return { ...heuristic, llmProcessed: true };
   }
-
-  const content = [
-    `来源：${source.name}`,
-    `标题：${stripHtml(item.title || "").slice(0, 180)}`,
-    `摘要：${stripHtml(item.contentSnippet || item.summary || item.content || "").slice(0, NEWS_LLM_INPUT_LIMIT)}`,
-  ].join("\n\n");
-
-  try {
-    const result = await callLLM({
-      system: NEWS_LLM_SYSTEM_PROMPT,
-      user: content,
-      maxTokens: NEWS_LLM_MAX_TOKENS,
-    });
-    if (!result?.keep) return null;
-    return {
-      type: mapType(result.type) || "行业趋势",
-      titleZh: result.title_zh || item.title || "未命名资讯",
-      summary: result.summary_zh || stripHtml(item.contentSnippet || item.summary || item.content).slice(0, 80),
-      contentZh: "",
-      needsTranslation: false,
-      classification: { reason: "llm" },
-    };
-  } catch {
-    return heuristic && heuristic.type !== "待判定" ? heuristic : null;
-  }
+  return {
+    type: null,
+    titleZh: stripHtml(item.title || "") || "未命名资讯",
+    summary: stripHtml(item.contentSnippet || item.summary || item.content).slice(0, 80),
+    contentZh: "",
+    needsTranslation: true,
+    classification: { reason: "pending_manual_llm" },
+    llmProcessed: false,
+  };
 }
 
 async function fetchFeed(source) {
@@ -240,3 +224,56 @@ export async function collectDueSources(sources, now = new Date()) {
 }
 
 export { shouldCollectSource };
+
+export async function processNewsWithLlm(limit = 20) {
+  const pending = listPendingNewsForLlm(limit);
+  let processed = 0;
+  let kept = 0;
+  let filtered = 0;
+
+  for (const item of pending) {
+    const content = [
+      `来源：${item.source}`,
+      `标题：${stripHtml(item.original_title || "").slice(0, 180)}`,
+      `摘要：${stripHtml(item.original_content || "").slice(0, NEWS_LLM_INPUT_LIMIT)}`,
+    ].join("\n\n");
+
+    try {
+      const result = await callLLM({
+        system: NEWS_LLM_SYSTEM_PROMPT,
+        user: content,
+        maxTokens: NEWS_LLM_MAX_TOKENS,
+      });
+      if (result?.keep) {
+        updateNews(item.id, {
+          type: mapType(result.type) || "行业趋势",
+          titleZh: result.title_zh || item.titleZh,
+          summary: result.summary_zh || item.summary,
+          contentZh: "",
+          is_kept: 1,
+          llm_processed: 1,
+          needsTranslation: false,
+          classification: { reason: "manual_llm" },
+        });
+        kept += 1;
+      } else {
+        updateNews(item.id, {
+          is_kept: 0,
+          llm_processed: 1,
+          classification: { reason: "manual_llm_filtered" },
+        });
+        filtered += 1;
+      }
+      processed += 1;
+    } catch {
+      // keep pending for retry
+    }
+  }
+
+  return {
+    processed,
+    kept,
+    filtered,
+    remaining: listPendingNewsForLlm(1000).length,
+  };
+}
