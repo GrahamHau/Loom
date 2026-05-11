@@ -6,9 +6,21 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function newsCountsFrom(items) {
+  const typed = items.filter((item) => item.type);
+  return {
+    all: typed.length,
+    new_product: typed.filter((item) => item.type === "新品发布").length,
+    trend: typed.filter((item) => item.type === "行业趋势").length,
+    starred: typed.filter((item) => item.starred).length,
+  };
+}
+
 export function bootstrap() {
   const state = clone(getState());
-  state.news = listNews();
+  const news = listNews();
+  state.news = news.slice(0, 30);
+  state.newsCounts = newsCountsFrom(news);
   state.rssSources = listNewsSources();
   if (state.settings) {
     state.settings = { ...state.settings, tag_groups: normalizeTagGroups(state.settings.tag_groups) };

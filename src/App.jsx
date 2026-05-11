@@ -174,6 +174,7 @@ function normalizeData(input = {}) {
     products: Array.isArray(input.products) ? input.products : [],
     demands: Array.isArray(input.demands) ? input.demands : [],
     news: Array.isArray(input.news) ? input.news : [],
+    newsCounts: input.newsCounts || { all: Array.isArray(input.news) ? input.news.length : 0, new_product: 0, trend: 0, starred: 0 },
     research: Array.isArray(input.research) ? input.research : [],
     rssSources: Array.isArray(input.rssSources) ? input.rssSources : [],
     settings: input.settings || {},
@@ -182,7 +183,7 @@ function normalizeData(input = {}) {
 
 function Sidebar({ active, onNav, data }) {
   const counts = {
-    news: data.news.length,
+    news: data.newsCounts?.all || data.news.length,
     products: data.products.length,
     demands: data.demands.length,
     research: data.research.length,
@@ -348,7 +349,7 @@ function App() {
   }[active];
   const notifications = [
     { id: "n1", label: "系统", text: "全局搜索已经接通，可用 ⌘K 快速打开。", tone: "outline" },
-    { id: "n2", label: "News", text: `${data.news.length} 条资讯已载入，当前数据源 ${data.rssSources.length} 个。`, tone: "outline" },
+    { id: "n2", label: "News", text: `${data.newsCounts?.all || data.news.length} 条资讯已载入，当前数据源 ${data.rssSources.length} 个。`, tone: "outline" },
   ];
 
   return (
