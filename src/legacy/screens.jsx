@@ -136,6 +136,50 @@ function DeleteSourceConfirmModal({ source, busy, onClose, onConfirm }) {
   );
 }
 
+function itemDisplayName(item) {
+  return item?.title || item?.name || item?.titleZh || item?.original_title || item?.id || "未命名条目";
+}
+
+function DeleteItemsConfirmModal({ entityLabel, items, busy, onClose, onConfirm }) {
+  if (!items?.length) return null;
+  const preview = items.slice(0, 5);
+  const extra = items.length - preview.length;
+  return (
+    <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
+      <div className="modal" style={{ width: 500 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <Icon name="trash" size={16} style={{ color: "var(--danger)" }} />
+          <h3>{items.length > 1 ? `确认批量删除${entityLabel}` : `确认删除${entityLabel}`}</h3>
+          <Btn variant="ghost" icon="x" onClick={onClose} disabled={busy} />
+        </div>
+        <div className="modal-body">
+          <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 14 }}>
+            {items.length > 1 ? `将删除 ${items.length} 条${entityLabel}，这个操作不可撤销。` : `删除后这条${entityLabel}将无法恢复。`}
+          </div>
+          <div className="confirm-delete-summary">
+            {preview.map((item) => (
+              <div className="confirm-delete-row" key={item.id || itemDisplayName(item)}>
+                <div className="confirm-delete-label">{entityLabel}</div>
+                <div className="confirm-delete-value" style={{ fontWeight: 600 }}>{itemDisplayName(item)}</div>
+              </div>
+            ))}
+            {extra > 0 && (
+              <div className="confirm-delete-row">
+                <div className="confirm-delete-label">其他</div>
+                <div className="confirm-delete-value">还有 {extra} 条未展开</div>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="modal-foot">
+          <Btn variant="ghost" onClick={onClose} disabled={busy}>取消</Btn>
+          <Btn variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>{busy ? "删除中..." : "确认删除"}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function guessBrand(news) {
   const explicit = String(news.brand || "").trim();
   if (explicit) return explicit;
@@ -256,6 +300,10 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   useEffect(() => {
     setItems(safeArray(data.news));
     setCounts({
@@ -344,6 +392,44 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     setTab("all");
   }, [navTarget]);
 
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
+  }, [items]);
+
+  const selectedItems = items.filter((item) => selectedIds.includes(item.id));
+  const toggleSelect = (id) => {
+    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds((current) => current.length === items.length ? [] : items.map((item) => item.id));
+  };
+  const deleteOne = async () => {
+    if (!api || !deleteTarget) return;
+    setDeleteBusy(true);
+    try {
+      await api(`/api/news/${deleteTarget.id}`, { method: "DELETE" });
+      setSelectedIds((current) => current.filter((id) => id !== deleteTarget.id));
+      setDeleteTarget(null);
+      await refreshData?.();
+      await loadNews(tab);
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+  const deleteBulk = async () => {
+    if (!api || !selectedItems.length) return;
+    setDeleteBusy(true);
+    try {
+      await Promise.all(selectedItems.map((item) => api(`/api/news/${item.id}`, { method: "DELETE" })));
+      setSelectedIds([]);
+      setShowBulkDeleteConfirm(false);
+      await refreshData?.();
+      await loadNews(tab);
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   return (
     <>
       <div className="news-tabs">
@@ -358,6 +444,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           </div>
         )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, padding: "6px 0" }}>
+          <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
           <Btn size="sm" variant="ghost" icon="filter">筛选</Btn>
           <Btn size="sm" variant="ghost" icon="sparkles" onClick={processLlm} disabled={busy}>{busy ? "处理中..." : "LLM处理"}</Btn>
           <Btn size="sm" variant="ghost" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>
@@ -367,6 +454,15 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
       <div className="viewport">
         <div className="page" style={{ paddingTop: 8 }}>
           {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
+          {items.length > 0 &&
+            <div className="bulk-toolbar" style={{ marginBottom: 12 }}>
+              <label className="bulk-check">
+                <input type="checkbox" checked={selectedIds.length > 0 && selectedIds.length === items.length} onChange={toggleSelectAll} />
+                <span>全选当前结果</span>
+              </label>
+              <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+            </div>
+          }
           {dates.length === 0 &&
             <EmptyState
               icon="newspaper"
@@ -376,7 +472,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
             </EmptyState>
           }
           {dates.map((d) =>
-          <div key={d}>
+            <div key={d}>
               <div className="news-day">{formatDate(d)}</div>
               {grouped[d].map((n) =>
               {
@@ -387,6 +483,9 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
               onClick={() => openNews(n)}
               onKeyDown={(e) => { if (e.key === "Enter") openNews(n); }}>
                   <NewsThumb item={n} />
+                  <label className="card-select" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedIds.includes(n.id)} onChange={() => toggleSelect(n.id)} />
+                  </label>
                   <div className="news-body">
                     <div className="news-title">{n.titleZh}</div>
                     <div className="news-summary">{n.summary}</div>
@@ -399,6 +498,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
                     </div>
                   </div>
                   <div className="news-actions">
+                    <Btn size="sm" variant="ghost" icon="trash" onClick={(e) => { e.stopPropagation(); setDeleteTarget(n); }} />
                     <Btn size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); toggleStar(n.id); }}
                 icon={n.starred ? "star-fill" : "star"}
                 style={{ color: n.starred ? "var(--warn)" : undefined }} />
@@ -412,6 +512,8 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           )}
         </div>
       </div>
+      {deleteTarget && <DeleteItemsConfirmModal entityLabel="资讯" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
+      {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="资讯" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}
     </>);
 
 }
@@ -573,6 +675,10 @@ function BulletListEditor({ items, onChange, tone = "default", placeholder = "�
 function ProductsScreen({ data, api, refreshData }) {
   const [products, setProducts] = useState(safeArray(data.products));
   const [notice, setNotice] = useState("");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   useEffect(() => setProducts(safeArray(data.products)), [data.products]);
   const updateSelected = async (patch) => {
     setProducts((ps) => ps.map((p) => p.id === selectedId ? { ...p, ...patch } : p));
@@ -592,6 +698,9 @@ function ProductsScreen({ data, api, refreshData }) {
       setSelectedId(products[0]?.id || null);
     }
   }, [products, selectedId]);
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => products.some((item) => item.id === id)));
+  }, [products]);
 
   const categories = ["全部", ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))];
   const filtered = products.filter((p) =>
@@ -599,6 +708,7 @@ function ProductsScreen({ data, api, refreshData }) {
   !query || String(p.name || "").toLowerCase().includes(query.toLowerCase()))
   );
   const selected = products.find((p) => p.id === selectedId);
+  const selectedProducts = products.filter((item) => selectedIds.includes(item.id));
   const syncProducts = async () => {
     setNotice("飞书同步中...");
     try {
@@ -607,6 +717,46 @@ function ProductsScreen({ data, api, refreshData }) {
       setNotice("竞品库已同步到飞书。");
     } catch (error) {
       setNotice(error.message);
+    }
+  };
+  const toggleSelect = (id) => {
+    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds((current) => current.length === filtered.length ? [] : filtered.map((item) => item.id));
+  };
+  const deleteOne = async () => {
+    if (!api || !deleteTarget) return;
+    setDeleteBusy(true);
+    setNotice("");
+    try {
+      await api(`/api/products/${deleteTarget.id}`, { method: "DELETE" });
+      if (selectedId === deleteTarget.id) setSelectedId(null);
+      setSelectedIds((current) => current.filter((id) => id !== deleteTarget.id));
+      setDeleteTarget(null);
+      await refreshData?.();
+      setNotice(`已删除竞品：${deleteTarget.name || "未命名竞品"}`);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+  const deleteBulk = async () => {
+    if (!api || !selectedProducts.length) return;
+    setDeleteBusy(true);
+    setNotice("");
+    try {
+      await Promise.all(selectedProducts.map((item) => api(`/api/products/${item.id}`, { method: "DELETE" })));
+      if (selectedProducts.some((item) => item.id === selectedId)) setSelectedId(null);
+      setSelectedIds([]);
+      setShowBulkDeleteConfirm(false);
+      await refreshData?.();
+      setNotice(`已删除 ${selectedProducts.length} 条竞品`);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setDeleteBusy(false);
     }
   };
 
@@ -632,12 +782,23 @@ function ProductsScreen({ data, api, refreshData }) {
           </div>
         </div>
         {notice && <div className="ai-block" style={{ margin: "0 12px 10px" }}>{notice}</div>}
+        {filtered.length > 0 &&
+          <div className="bulk-toolbar" style={{ margin: "0 12px 10px" }}>
+            <label className="bulk-check">
+              <input type="checkbox" checked={selectedIds.length > 0 && selectedIds.length === filtered.length} onChange={toggleSelectAll} />
+              <span>全选当前结果</span>
+            </label>
+            <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+            <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+          </div>
+        }
 
         <div className="products-table-wrap">
           <table className="products-table">
             <thead>
               <tr>
-                <th>商品名称</th><th>品类</th><th>平台</th><th>售价</th><th>参考成本</th><th>评分</th><th>月销估算</th><th>状态</th>
+                <th style={{ width: 34 }} />
+                <th>商品名称</th><th>品类</th><th>平台</th><th>售价</th><th>参考成本</th><th>评分</th><th>月销估算</th><th>状态</th><th style={{ width: 52 }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -647,6 +808,9 @@ function ProductsScreen({ data, api, refreshData }) {
                 const reviews = Number(main.reviews);
                 return (
                   <tr key={p.id} className={selectedId === p.id ? "selected" : ""} onClick={() => setSelectedId(p.id)}>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggleSelect(p.id)} />
+                    </td>
                     <td>
                       <div className="product-name">
                         <div className="products-thumb">{p.emoji || "📦"}</div>
@@ -677,12 +841,15 @@ function ProductsScreen({ data, api, refreshData }) {
                     <td>
                       <Tag tone={p.status === "跟踪中" ? "success" : p.status === "已归档" ? "default" : "accent"}>{p.status}</Tag>
                     </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <Btn size="sm" variant="ghost" icon="trash" onClick={() => setDeleteTarget(p)} />
+                    </td>
                   </tr>);
 
               })}
               {filtered.length === 0 &&
                 <tr>
-                  <td colSpan="8">
+                  <td colSpan="10">
                     <EmptyState
                       icon="boxes"
                       title={products.length ? "没有匹配的竞品" : "还没有真实竞品"}
@@ -709,6 +876,7 @@ function ProductsScreen({ data, api, refreshData }) {
                 </div>
               </div>
             </h3>
+            <Btn variant="ghost" icon="trash" onClick={() => setDeleteTarget(selected)} />
             <Btn variant="ghost" icon="external" />
             <Btn variant="ghost" icon="more" />
           </div>
@@ -816,6 +984,8 @@ function ProductsScreen({ data, api, refreshData }) {
       }
 
       {showAdd && <AddProductModal api={api} refreshData={refreshData} onClose={() => setShowAdd(false)} />}
+      {deleteTarget && <DeleteItemsConfirmModal entityLabel="竞品" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
+      {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="竞品" items={selectedProducts} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}
     </div>);
 
 }
@@ -987,7 +1157,9 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   const [filterInnov, setFilterInnov] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const selected = demands.find((d) => d.id === selectedId);
@@ -1018,6 +1190,10 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
     setSelectedId(navTarget.id || null);
   }, [navTarget]);
 
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => demands.some((item) => item.id === id)));
+  }, [demands]);
+
   const confirmDelete = async () => {
     if (!api || !deleteTarget) return;
     setDeleteBusy(true);
@@ -1028,6 +1204,31 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
       setDeleteTarget(null);
       await refreshData?.();
       setNotice(`已删除需求：${deleteTarget.title || "未命名需求"}`);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  const selectedItems = demands.filter((item) => selectedIds.includes(item.id));
+  const toggleSelect = (id) => {
+    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds((current) => current.length === filtered.length ? [] : filtered.map((item) => item.id));
+  };
+  const deleteSelected = async () => {
+    if (!api || !selectedItems.length) return;
+    setDeleteBusy(true);
+    setNotice("");
+    try {
+      await Promise.all(selectedItems.map((item) => api(`/api/demands/${item.id}`, { method: "DELETE" })));
+      if (selectedIds.includes(selectedId)) setSelectedId(null);
+      setSelectedIds([]);
+      setDeleteTarget(null);
+      await refreshData?.();
+      setNotice(`已删除 ${selectedItems.length} 条需求`);
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -1049,6 +1250,16 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           </div>
         </div>
         {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
+        {filtered.length > 0 &&
+          <div className="bulk-toolbar" style={{ marginBottom: 12 }}>
+            <label className="bulk-check">
+              <input type="checkbox" checked={selectedIds.length > 0 && selectedIds.length === filtered.length} onChange={toggleSelectAll} />
+              <span>全选当前结果</span>
+            </label>
+            <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+            <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+          </div>
+        }
 
         <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
           <Icon name="filter" size={13} style={{ color: "var(--text-3)" }} />
@@ -1070,6 +1281,14 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           {filtered.map((d) =>
           <div className="demand-card" key={d.id} onClick={() => setSelectedId(d.id)} style={{ cursor: "pointer" }}>
               <div className="demand-thumb">
+                <label className="card-select">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(d.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => toggleSelect(d.id)}
+                  />
+                </label>
                 <DemandImage demand={d} label={d.source.toUpperCase() + " · INSPIRATION"} className="demand-thumb-media" />
                 <div className="platform-badge">
                   <Icon name="link" size={10} /> {PLATFORM_LABEL[d.source] || d.source}
@@ -1117,6 +1336,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
       {showAdd && <AddDemandModal api={api} refreshData={refreshData} onClose={() => setShowAdd(false)} />}
       {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
       {deleteTarget && <DeleteDemandConfirmModal demand={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={confirmDelete} />}
+      {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="需求" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={async () => { await deleteSelected(); setShowBulkDeleteConfirm(false); }} />}
     </div>);
 
 }
@@ -1376,7 +1596,47 @@ function AddDemandModal({ onClose, api, refreshData }) {
 function ResearchScreen({ data, api, refreshData }) {
   const [activeId, setActiveId] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const items = safeArray(data.research);
+
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
+  }, [items]);
+
+  const selectedItems = items.filter((item) => selectedIds.includes(item.id));
+  const toggleSelect = (id) => {
+    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds((current) => current.length === items.length ? [] : items.map((item) => item.id));
+  };
+  const deleteOne = async () => {
+    if (!api || !deleteTarget) return;
+    setDeleteBusy(true);
+    try {
+      await api(`/api/research/${deleteTarget.id}`, { method: "DELETE" });
+      setSelectedIds((current) => current.filter((id) => id !== deleteTarget.id));
+      setDeleteTarget(null);
+      await refreshData?.();
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+  const deleteBulk = async () => {
+    if (!api || !selectedItems.length) return;
+    setDeleteBusy(true);
+    try {
+      await Promise.all(selectedItems.map((item) => api(`/api/research/${item.id}`, { method: "DELETE" })));
+      setSelectedIds([]);
+      setShowBulkDeleteConfirm(false);
+      await refreshData?.();
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
   if (activeId) {
     const r = items.find((i) => i.id === activeId);
@@ -1388,21 +1648,33 @@ function ResearchScreen({ data, api, refreshData }) {
 
   return (
     <div className="viewport">
-      <div className="page">
+      <div className="page page-fluid">
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div>
             <h1 className="h1">市场调研</h1>
             <div className="muted text-sm">从竞品库与需求管理中匹配数据,AI 生成结构化分析报告</div>
           </div>
-          <div style={{ marginLeft: "auto" }}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+            <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
             <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>新建调研项目</Btn>
           </div>
         </div>
+
+        {items.length > 0 &&
+          <div className="bulk-toolbar" style={{ marginBottom: 12 }}>
+            <label className="bulk-check">
+              <input type="checkbox" checked={selectedIds.length > 0 && selectedIds.length === items.length} onChange={toggleSelectAll} />
+              <span>全选当前结果</span>
+            </label>
+            <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+          </div>
+        }
 
         <div className="research-list">
           {items.map((r) =>
           <div className="research-row" key={r.id} onClick={() => setActiveId(r.id)}>
               <div className="icon"><Icon name="compass" size={18} /></div>
+              <input type="checkbox" checked={selectedIds.includes(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(r.id)} />
               <div className="research-info">
                 <h4>{r.title}</h4>
                 <div className="meta">
@@ -1415,6 +1687,7 @@ function ResearchScreen({ data, api, refreshData }) {
                 {r.status === "草稿" && "📝 "}
                 {r.status}
               </Tag>
+              <Btn size="sm" variant="ghost" icon="trash" onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }} />
               <Icon name="chevron-right" size={16} style={{ color: "var(--text-3)" }} />
             </div>
           )}
@@ -1428,6 +1701,8 @@ function ResearchScreen({ data, api, refreshData }) {
           }
         </div>
         {showCreate && <CreateResearchModal api={api} refreshData={refreshData} onClose={() => setShowCreate(false)} />}
+        {deleteTarget && <DeleteItemsConfirmModal entityLabel="调研" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
+        {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="调研" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}
       </div>
     </div>);
 
