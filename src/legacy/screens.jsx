@@ -26,6 +26,13 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizeMonthlySales(value) {
+  return String(value || "")
+    .replace(/\s*\/\s*(month|mo|mth|月)\s*$/i, "")
+    .replace(/\s*(每月|月销)\s*$/i, "")
+    .trim();
+}
+
 function DemandImage({ demand, label, className = "", style }) {
   const [failed, setFailed] = useState(false);
   const image = demand?.thumbnail_url || demand?.image || "";
@@ -165,6 +172,28 @@ function DemandTagList({ items, tone = "default", onRemove, addLabel = "+ 添加
         </button>
       ))}
       <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>{addLabel}</button>
+    </div>
+  );
+}
+
+function RemovableTagList({ items, tone = "default", onRemove, addLabel = "+ 添加" }) {
+  return (
+    <div className="tag-row">
+      {safeArray(items).map((item) => (
+        <button
+          key={item}
+          type="button"
+          className={`tag removable ${tone === "default" ? "" : tone}`}
+          onClick={() => onRemove?.(item)}
+          title={`删除 ${item}`}
+        >
+          <span>{item}</span>
+          <Icon name="x" size={11} />
+        </button>
+      ))}
+      <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>
+        {addLabel}
+      </button>
     </div>
   );
 }
@@ -719,10 +748,10 @@ function ProductsScreen({ data, api, refreshData }) {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, reviews: v } : p);
                   updateSelected({ platforms: next });
                 }} inputMode="numeric" />
-                    <PlatformInput label="月销估算" value={pl.sales} onChange={(v) => {
+                    <PlatformInput label="月销估算" value={normalizeMonthlySales(pl.sales)} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, sales: v } : p);
                   updateSelected({ platforms: next });
-                }} suffix="/month" inputMode="numeric" />
+                }} suffix="/ 月" inputMode="numeric" />
                   </div>
                 </div>
             )}
@@ -748,13 +777,10 @@ function ProductsScreen({ data, api, refreshData }) {
 
             <div className="detail-section">
               <div className="detail-section-label">品类 / 标签</div>
-              <div className="tag-row">
-                <Tag tone="accent">{selected.category}</Tag>
-                {safeArray(selected.tags).map((t) => <Tag key={t}>{t}</Tag>)}
-                <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>
-                  + 添加
-                </button>
-              </div>
+              <RemovableTagList
+                items={selected.tags}
+                onRemove={(value) => updateSelected({ tags: safeArray(selected.tags).filter((item) => item !== value) })}
+              />
             </div>
 
             <div className="detail-section">
@@ -2073,6 +2099,7 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
   const [groups, setGroups] = useState(safeArray(settings.tag_groups));
   const [drafts, setDrafts] = useState({});
   const [editing, setEditing] = useState(null); // index of group with input open
+  const [tagTab, setTagTab] = useState("common");
 
   useEffect(() => {
     setGroups(safeArray(settings.tag_groups));
@@ -2094,9 +2121,28 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
     await saveSettings(next);
   };
 
+  const TAB_GROUPS = {
+    common: ["brands", "custom_tags"],
+    news: ["brands"],
+    products: ["brands", "product_categories"],
+    demands: ["scenarios", "painpoints", "innovation_types", "custom_tags"],
+    research: ["brands", "product_categories", "scenarios", "painpoints", "innovation_types", "custom_tags"],
+  };
+
+  const visibleGroups = groups.filter((group) => TAB_GROUPS[tagTab]?.includes(group.key));
+
   return (
     <>
-      {groups.map((g, i) =>
+      <div className="news-tabs" style={{ marginBottom: 16 }}>
+        <div className={`news-tab ${tagTab === "common" ? "active" : ""}`} onClick={() => setTagTab("common")}>通用</div>
+        <div className={`news-tab ${tagTab === "news" ? "active" : ""}`} onClick={() => setTagTab("news")}>News</div>
+        <div className={`news-tab ${tagTab === "products" ? "active" : ""}`} onClick={() => setTagTab("products")}>竞品</div>
+        <div className={`news-tab ${tagTab === "demands" ? "active" : ""}`} onClick={() => setTagTab("demands")}>需求</div>
+        <div className={`news-tab ${tagTab === "research" ? "active" : ""}`} onClick={() => setTagTab("research")}>调研</div>
+      </div>
+      {visibleGroups.map((g) => {
+        const i = groups.findIndex((item) => item.key === g.key);
+        return (
       <div className="settings-row" key={g.name} style={{ alignItems: "flex-start" }}>
           <div className="label">
             {g.name}
@@ -2132,7 +2178,7 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
           }
           </div>
         </div>
-      )}
+      );})}
       <div className="settings-row">
         <div className="label">&nbsp;</div>
         <div className="row">

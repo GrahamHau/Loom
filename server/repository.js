@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { db, getState, saveState } from "./db.js";
+import { normalizeTagGroups } from "./tag-config.js";
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -10,13 +11,18 @@ export function bootstrap() {
   state.news = listNews();
   state.rssSources = listNewsSources();
   if (state.settings) {
+    state.settings = { ...state.settings, tag_groups: normalizeTagGroups(state.settings.tag_groups) };
     state.settings = maskSettings(state.settings);
   }
   return state;
 }
 
 export function rawState() {
-  return clone(getState());
+  const state = clone(getState());
+  if (state?.settings) {
+    state.settings = { ...state.settings, tag_groups: normalizeTagGroups(state.settings.tag_groups) };
+  }
+  return state;
 }
 
 function nowIso() {
@@ -448,6 +454,7 @@ export function updateSettings(patch) {
       if (next[key] === "********" || next[key] === "") delete next[key];
     }
     state.settings = { ...(state.settings || {}), ...next };
+    state.settings.tag_groups = normalizeTagGroups(state.settings.tag_groups);
     return maskSettings(state.settings);
   });
 }
