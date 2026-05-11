@@ -92,6 +92,7 @@ export function heuristicClassifyNews({ item }) {
   const title = stripHtml(item.title);
   const content = stripHtml([item.contentSnippet, item.summary, item.content].filter(Boolean).join(" "));
   const lower = `${title}\n${content}`.toLowerCase();
+  const sourceName = String(item.sourceName || item.source || "").toLowerCase();
   const launchPattern = /\b(launch(?:ed|es|ing)?|announce[sd]?|announcing|release[sd]?|releasing|introduce[sd]?|introducing|unveil(?:ed|s|ing)?|debut(?:ed|s|ing)?|正式发布|正式推出|新品发布|发售|上市)\b/i;
   const productPattern = /\b(camera|lens|drone|gimbal|light|tripod|rig|cage|mount|microphone|monitor|stabilizer|battery|charger|accessory|iphone|ipad|macbook)\b|相机|镜头|无人机|云台|补光灯|三脚架|麦克风|监视器|稳定器|电池|充电器|配件/i;
   const trendPattern = /\b(trend|market|report|survey|forecast|analysis)\b|趋势|报告|预测|分析/i;
@@ -101,6 +102,8 @@ export function heuristicClassifyNews({ item }) {
   const financePattern = /\b(stock|shares|earnings|investor|fund|capital|ipo|quarter|q1|q2|q3|q4|price target|analyst)\b|股价|涨停|跌停|投资者|融资|财报|资金|市值|概念股/i;
   const corporatePattern = /\b(partnership|agreement|lawsuit|acquisition|merger|executive|ceo|board|subsidiary)\b|合作协议|诉讼|收购|并购|高管|董事会|子公司/i;
   const hardEvidencePattern = /\b(camera|lens|drone|gimbal|light|tripod|rig|cage|mount|microphone|monitor|stabilizer|battery|charger|accessory|flash|monolight|led|rgb|wireless mic)\b|相机|镜头|无人机|云台|补光灯|三脚架|兔笼|支架|麦克风|监视器|稳定器|电池|充电器|闪光灯|配件/i;
+  const mediaLikeSource = /\b(petapixel|dpreview|imaging resource|newsshooter|ym cinema|no film school|36kr|ifanr|moviemeter|rumors)\b/i.test(sourceName);
+  const weakLaunchContextPattern = /\b(conversation|workflow|lineup|market fit|without official|discussion|coverage)\b|讨论|动向|观察|解读/i;
 
   if (rejectPattern.test(lower)) return null;
   if (prelaunchPattern.test(lower)) return null;
@@ -110,6 +113,15 @@ export function heuristicClassifyNews({ item }) {
     return { type: "待判定", needsTranslation: true, classification: { reason: "heuristic_ambiguous" } };
   }
   if (launchPattern.test(lower) && productPattern.test(lower)) {
+    if (mediaLikeSource && (weakLaunchContextPattern.test(lower) || !/\b(announced by|released by|available now|ships now)\b/i.test(lower))) {
+      return {
+        type: "行业趋势",
+        titleZh: title || "未命名资讯",
+        summary: content.slice(0, 80),
+        needsTranslation: true,
+        classification: { reason: "media_launch_downgraded_to_trend" },
+      };
+    }
     return {
       type: "新品发布",
       titleZh: title || "未命名新品",
@@ -131,7 +143,7 @@ export function heuristicClassifyNews({ item }) {
 }
 
 async function classifyNews({ source, item }) {
-  const heuristic = heuristicClassifyNews({ source, item });
+  const heuristic = heuristicClassifyNews({ source, item: { ...item, sourceName: source.name } });
   if (heuristic && heuristic.type !== "待判定") {
     return { ...heuristic, llmProcessed: true };
   }

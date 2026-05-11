@@ -74,6 +74,18 @@ describe("rss-service classification", () => {
     expect(result.classification.reason).toBe("heuristic_ambiguous");
   });
 
+  it("downgrades media launch-like story to trend when evidence is weak", () => {
+    const result = heuristicClassifyNews({
+      item: {
+        sourceName: "PetaPixel",
+        title: "New camera system launches into creator workflow conversation",
+        contentSnippet: "The story discusses how the new lineup fits the market without official launch details.",
+      },
+    });
+    expect(result.type).toBe("行业趋势");
+    expect(result.classification.reason).toBe("media_launch_downgraded_to_trend");
+  });
+
   it("collects only due sources for scheduler", () => {
     const now = new Date("2026-05-11T12:00:00.000Z");
     expect(shouldCollectSource({ active: true, url: "https://a.test", fetch_interval: 60, last_fetched_at: "2026-05-11T10:30:00.000Z" }, now)).toBe(true);

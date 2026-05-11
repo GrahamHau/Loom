@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { callLLM } from "./ai-service.js";
 import { fetchPageContent } from "./content-fetcher.js";
+import { buildSearchContext } from "./search-service.js";
 
 function compactArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String).slice(0, 8);
@@ -16,6 +17,7 @@ function safeNumber(value) {
 export async function parseProductUrl({ url, platform }) {
   const page = await fetchPageContent(url);
   const detectedPlatform = platform || page.platform;
+  const searchContext = await buildSearchContext(`${page.title} ${detectedPlatform} product review specs`, { limit: 4 });
   const result = await callLLM({
     system: "你是产品经理的竞品信息结构化助手。只返回 JSON，不要解释。",
     user: `从以下网页内容中提取商品信息。允许字段为 null。返回 JSON：
@@ -37,7 +39,11 @@ export async function parseProductUrl({ url, platform }) {
 URL：${page.url}
 标题：${page.title}
 描述：${page.description}
-正文：${page.content}`,
+正文：${page.content}
+
+外部搜索上下文：
+${searchContext}`,
+    maxTokens: 300,
   });
 
   const name = result.name || page.title || "未命名竞品";
@@ -71,6 +77,7 @@ URL：${page.url}
 
 export async function parseDemandUrl({ url }) {
   const page = await fetchPageContent(url);
+  const searchContext = await buildSearchContext(`${page.title} creator problem use case trend`, { limit: 4 });
   const result = await callLLM({
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
     user: `请对以下内容进行结构化打标。
@@ -94,7 +101,11 @@ export async function parseDemandUrl({ url }) {
 URL：${page.url}
 标题：${page.title}
 描述：${page.description}
-正文：${page.content}`,
+正文：${page.content}
+
+外部搜索上下文：
+${searchContext}`,
+    maxTokens: 260,
   });
 
   return {

@@ -1,5 +1,6 @@
 import { callLLM } from "./ai-service.js";
 import { rawState, updateResearch } from "./repository.js";
+import { buildSearchContext } from "./search-service.js";
 
 function productSummary(product) {
   const first = product.platforms?.[0] || {};
@@ -55,6 +56,7 @@ export async function analyzeResearch(id) {
     .map((did) => state.demands.find((demand) => demand.id === did))
     .filter(Boolean)
     .map(demandSummary);
+  const searchContext = await buildSearchContext(`${research.title} ${research.desc || research.description || ""} camera gear market trend`, { limit: 5 });
 
   const result = await callLLM({
     system: "你是产品经理的市场调研分析助手。只返回 JSON。",
@@ -71,9 +73,13 @@ export async function analyzeResearch(id) {
 调研标题：${research.title}
 产品描述：${research.desc || research.description || ""}
 关联竞品：${JSON.stringify(products, null, 2)}
-关联需求：${JSON.stringify(demands, null, 2)}`,
+关联需求：${JSON.stringify(demands, null, 2)}
+
+外部搜索上下文：
+${searchContext}`,
     responseFormat: "json",
     temperature: 0.3,
+    maxTokens: 700,
   });
 
   return updateResearch(id, {
