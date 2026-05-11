@@ -26,6 +26,67 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function DemandImage({ demand, label, className = "", style }) {
+  const [failed, setFailed] = useState(false);
+  const image = demand?.thumbnail_url || demand?.image || "";
+  if (image && !failed) {
+    return (
+      <img
+        className={className}
+        style={style}
+        src={image}
+        alt={demand?.title || "demand"}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return <DemandThumb hue={demand?.thumbHue} label={label} />;
+}
+
+function DeleteDemandConfirmModal({ demand, busy, onClose, onConfirm }) {
+  if (!demand) return null;
+  return (
+    <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
+      <div className="modal" style={{ width: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <Icon name="trash" size={16} style={{ color: "var(--danger)" }} />
+          <h3>确认删除需求</h3>
+          <Btn variant="ghost" icon="x" onClick={onClose} disabled={busy} />
+        </div>
+        <div className="modal-body">
+          <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 14 }}>
+            删除后将从当前需求库中移除，这个操作不可撤销。
+          </div>
+          <div className="confirm-delete-summary">
+            <div className="confirm-delete-row">
+              <div className="confirm-delete-label">标题</div>
+              <div className="confirm-delete-value" style={{ fontWeight: 600 }}>{demand.title || "未命名需求"}</div>
+            </div>
+            <div className="confirm-delete-row">
+              <div className="confirm-delete-label">平台</div>
+              <div className="confirm-delete-value">{PLATFORM_LABEL[demand.source] || demand.source || "未知"}</div>
+            </div>
+            <div className="confirm-delete-row">
+              <div className="confirm-delete-label">日期</div>
+              <div className="confirm-delete-value">{demand.date || "-"}</div>
+            </div>
+            <div className="confirm-delete-row">
+              <div className="confirm-delete-label">创新类型</div>
+              <div className="confirm-delete-value">{demand.innovation || "待分类"}</div>
+            </div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <Btn variant="ghost" onClick={onClose} disabled={busy}>取消</Btn>
+          <Btn variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>{busy ? "删除中..." : "确认删除"}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============ LOGIN ============
 function LoginScreen({ onLogin, error }) {
   const [user, setUser] = useState("graham");
@@ -141,7 +202,8 @@ function NewsScreen({ data, api, refreshData }) {
     setBusy(true);setNotice("");
     try {
       const result = await api("/api/news/process-llm", { method: "POST", body: JSON.stringify({ limit: 20 }) });
-      setNotice(`LLM 处理完成：处理 ${result.processed || 0} 条，保留 ${result.kept || 0} 条，过滤 ${result.filtered || 0} 条，剩余 ${result.remaining || 0} 条`);
+      const errorText = result.errors?.length ? `；失败 ${result.failed || 0} 条：${result.errors.map((item) => item.message).join(" / ")}` : "";
+      setNotice(`LLM 处理完成：处理 ${result.processed || 0} 条，保留 ${result.kept || 0} 条，过滤 ${result.filtered || 0} 条，剩余 ${result.remaining || 0} 条${errorText}`);
       await refreshData?.();
       await loadNews(tab);
     } catch (error) {
@@ -793,6 +855,8 @@ function DemandsScreen({ data, api, refreshData }) {
   const [filterInnov, setFilterInnov] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const selected = demands.find((d) => d.id === selectedId);
 
@@ -810,6 +874,27 @@ function DemandsScreen({ data, api, refreshData }) {
       setNotice("需求管理已同步到飞书。");
     } catch (error) {
       setNotice(error.message);
+    }
+  };
+
+  const openDeleteConfirm = (demand) => {
+    setDeleteTarget(demand);
+  };
+
+  const confirmDelete = async () => {
+    if (!api || !deleteTarget) return;
+    setDeleteBusy(true);
+    setNotice("");
+    try {
+      await api(`/api/demands/${deleteTarget.id}`, { method: "DELETE" });
+      if (selectedId === deleteTarget.id) setSelectedId(null);
+      setDeleteTarget(null);
+      await refreshData?.();
+      setNotice(`已删除需求：${deleteTarget.title || "未命名需求"}`);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setDeleteBusy(false);
     }
   };
 
@@ -848,10 +933,21 @@ function DemandsScreen({ data, api, refreshData }) {
           {filtered.map((d) =>
           <div className="demand-card" key={d.id} onClick={() => setSelectedId(d.id)} style={{ cursor: "pointer" }}>
               <div className="demand-thumb">
-                <DemandThumb hue={d.thumbHue} label={d.source.toUpperCase() + " · INSPIRATION"} />
+                <DemandImage demand={d} label={d.source.toUpperCase() + " · INSPIRATION"} className="demand-thumb-media" />
                 <div className="platform-badge">
                   <Icon name="link" size={10} /> {PLATFORM_LABEL[d.source] || d.source}
                 </div>
+                <button
+                  type="button"
+                  className="demand-delete-btn"
+                  aria-label={`删除 ${d.title || "需求"}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openDeleteConfirm(d);
+                  }}
+                >
+                  <Icon name="trash" size={14} />
+                </button>
               </div>
               <div className="demand-body">
                 <div className="demand-title">{d.title}</div>
@@ -882,13 +978,14 @@ function DemandsScreen({ data, api, refreshData }) {
       </div>
 
       {showAdd && <AddDemandModal api={api} refreshData={refreshData} onClose={() => setShowAdd(false)} />}
-      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} onClose={() => setSelectedId(null)} />}
+      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
+      {deleteTarget && <DeleteDemandConfirmModal demand={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={confirmDelete} />}
     </div>);
 
 }
 window.DemandsScreen = DemandsScreen;
 
-function DemandDetailDrawer({ demand, onClose, api, refreshData }) {
+function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete }) {
   const save = async (patch) => {
     if (api) {
       await api(`/api/demands/${demand.id}`, { method: "PATCH", body: JSON.stringify(patch) });
@@ -910,7 +1007,7 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData }) {
         </div>
         <div className="drawer-body">
           <div className="drawer-hero">
-            <DemandThumb hue={demand.thumbHue} label={(demand.source || "").toUpperCase() + " · INSPIRATION"} />
+            <DemandImage demand={demand} label={(demand.source || "").toUpperCase() + " · INSPIRATION"} className="demand-thumb-media" />
           </div>
 
           <div className="detail-section">
@@ -962,7 +1059,7 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData }) {
 
           <div className="detail-section" style={{ display: "flex", gap: 6 }}>
             <Btn variant="default" icon="sync" style={{ flex: 1, justifyContent: "center" }}>同步飞书</Btn>
-            <Btn variant="ghost" icon="trash">删除</Btn>
+            <Btn variant="ghost" icon="trash" onClick={() => onRequestDelete?.(demand)}>删除</Btn>
           </div>
         </div>
       </div>
@@ -1067,7 +1164,7 @@ function AddDemandModal({ onClose, api, refreshData }) {
               </div>
 
               <div className="drawer-hero" style={{ aspectRatio: "16/9", margin: 0 }}>
-                <DemandThumb hue={170} label="KICKSTARTER · INSPIRATION" />
+                <DemandImage demand={preview} label={`${(preview?.source || "web").toUpperCase()} · INSPIRATION`} className="demand-thumb-media" />
               </div>
 
               <div className="detail-section">

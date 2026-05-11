@@ -230,6 +230,8 @@ export async function processNewsWithLlm(limit = 20) {
   let processed = 0;
   let kept = 0;
   let filtered = 0;
+  let failed = 0;
+  const errors = [];
 
   for (const item of pending) {
     const content = [
@@ -265,8 +267,13 @@ export async function processNewsWithLlm(limit = 20) {
         filtered += 1;
       }
       processed += 1;
-    } catch {
-      // keep pending for retry
+    } catch (error) {
+      failed += 1;
+      errors.push({
+        id: item.id,
+        title: item.original_title || item.titleZh,
+        message: error.message || "LLM 处理失败",
+      });
     }
   }
 
@@ -274,6 +281,8 @@ export async function processNewsWithLlm(limit = 20) {
     processed,
     kept,
     filtered,
+    failed,
+    errors: errors.slice(0, 5),
     remaining: listPendingNewsForLlm(1000).length,
   };
 }
