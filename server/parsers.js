@@ -16,6 +16,13 @@ function safeNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeMonthlySales(value) {
+  return String(value || "")
+    .replace(/\s*\/\s*(month|mo|mth|月)\s*$/i, "")
+    .replace(/\s*(每月|月销)\s*$/i, "")
+    .trim();
+}
+
 function tagGroups() {
   return rawState().settings?.tag_groups || [];
 }
@@ -78,7 +85,7 @@ ${searchContext}`,
       cost: "",
       rating: safeNumber(result.rating),
       reviews: safeNumber(result.review_count),
-      sales: result.monthly_sales || "",
+      sales: normalizeMonthlySales(result.monthly_sales),
       fetched_at: new Date().toISOString(),
     }],
     raw: { page_title: page.title, page_description: page.description },
