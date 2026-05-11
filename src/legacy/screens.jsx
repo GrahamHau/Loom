@@ -1847,32 +1847,78 @@ function SettingsScreen({ data, api, refreshData }) {
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="search" size={14} style={{ color: "var(--accent)" }} />
-            <div><h3>Search Service</h3><div className="desc">供后续网页搜索、Research 与外部上下文抓取使用</div></div>
+            <div><h3>网页搜索 (Deep Research)</h3><div className="desc">Deep Research 会用它拉取最新的外部上下文</div></div>
           </div>
           <div className="settings-section-body">
-            <div className="settings-row">
-              <div className="label">启用</div>
-              <Switch on={Boolean(settings.search_enabled)} onChange={(on) => setSettings({ ...settings, search_enabled: on })} />
+            <div className="search-provider-card">
+              <div className="search-provider-head">
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <Icon name="chevron-down" size={16} style={{ color: "var(--text-3)" }} />
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ fontSize: 15, fontWeight: 600 }}>Tavily</div>
+                      {settings.search_tavily_enabled && <Tag tone="success">Active</Tag>}
+                    </div>
+                    <div className="muted text-sm">General web search for Deep Research</div>
+                  </div>
+                </div>
+                <Switch on={Boolean(settings.search_tavily_enabled)} onChange={(on) => setSettings({
+                  ...settings,
+                  search_tavily_enabled: on,
+                  search_enabled: on ? true : settings.search_serpapi_enabled,
+                  search_provider: on ? "tavily" : (settings.search_serpapi_enabled ? "serpapi" : settings.search_provider),
+                })} />
+              </div>
+              <div className="search-provider-body">
+                <div className="settings-row">
+                  <div className="label">API Key</div>
+                  <input className="input" style={{ width: "100%" }} value={settings.search_tavily_api_key || ""} onChange={(e) => setSettings({ ...settings, search_tavily_api_key: e.target.value })} type="password" placeholder="Enter your Tavily API key" />
+                </div>
+              </div>
             </div>
-            <div className="settings-row">
-              <div className="label">Provider</div>
-              <select className="input" style={{ width: 240 }} value={settings.search_provider || "tavily"} onChange={(e) => setSettings({ ...settings, search_provider: e.target.value })}>
-                <option value="tavily">Tavily</option>
-                <option value="serpapi">SerpApi</option>
-              </select>
+
+            <div className="search-provider-card">
+              <div className="search-provider-head">
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <Icon name="chevron-down" size={16} style={{ color: "var(--text-3)" }} />
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>SerpApi</div>
+                    <div className="muted text-sm">Google, Bing, DuckDuckGo, Scholar, News, Images, Videos, YouTube</div>
+                  </div>
+                </div>
+                <Switch on={Boolean(settings.search_serpapi_enabled)} onChange={(on) => setSettings({
+                  ...settings,
+                  search_serpapi_enabled: on,
+                  search_enabled: settings.search_tavily_enabled || on,
+                  search_provider: on ? "serpapi" : (settings.search_tavily_enabled ? "tavily" : settings.search_provider),
+                })} />
+              </div>
+              <div className="search-provider-body">
+                <div className="settings-row">
+                  <div className="label">API Key</div>
+                  <input className="input" style={{ width: "100%" }} value={settings.search_serpapi_api_key || ""} onChange={(e) => setSettings({ ...settings, search_serpapi_api_key: e.target.value })} type="password" placeholder="Enter your SerpApi API key (serpapi.com)" />
+                </div>
+                <div className="settings-row" style={{ alignItems: "start" }}>
+                  <div className="label">Search engine / category</div>
+                  <div className="col" style={{ gap: 10 }}>
+                    <div className="search-engine-grid">
+                      {SERP_ENGINE_OPTIONS.map(([value, label]) =>
+                      <button
+                        key={value}
+                        type="button"
+                        className={`search-engine-pill ${String(settings.search_serpapi_engine || "google") === value ? "active" : ""}`}
+                        onClick={() => setSettings({ ...settings, search_serpapi_engine: value })}
+                      >
+                          {label}
+                        </button>
+                      )}
+                    </div>
+                    <input className="input" style={{ width: "100%" }} value={settings.search_serpapi_engine || "google"} onChange={(e) => setSettings({ ...settings, search_serpapi_engine: e.target.value })} />
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="settings-row">
-              <div className="label">API URL</div>
-              <input className="input" style={{ width: "100%" }} value={settings.search_api_url || ""} onChange={(e) => setSettings({ ...settings, search_api_url: e.target.value })} />
-            </div>
-            <div className="settings-row">
-              <div className="label">API Key</div>
-              <input className="input" style={{ width: "100%" }} value={settings.search_api_key || ""} onChange={(e) => setSettings({ ...settings, search_api_key: e.target.value })} type="password" placeholder="tvly-... / serpapi key" />
-            </div>
-            <div className="settings-row">
-              <div className="label">模型 / 引擎</div>
-              <input className="input" style={{ width: 280 }} value={settings.search_model || ""} onChange={(e) => setSettings({ ...settings, search_model: e.target.value })} placeholder="可选" />
-            </div>
+
             <div className="settings-row">
               <div className="label">&nbsp;</div>
               <div className="row">
