@@ -87,6 +87,48 @@ function DeleteDemandConfirmModal({ demand, busy, onClose, onConfirm }) {
   );
 }
 
+function DeleteSourceConfirmModal({ source, busy, onClose, onConfirm }) {
+  if (!source) return null;
+  return (
+    <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
+      <div className="modal" style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <Icon name="trash" size={16} style={{ color: "var(--danger)" }} />
+          <h3>确认删除数据源</h3>
+          <Btn variant="ghost" icon="x" onClick={onClose} disabled={busy} />
+        </div>
+        <div className="modal-body">
+          <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 14 }}>
+            删除后这个 News 数据源将不会再继续采集。
+          </div>
+          <div className="confirm-delete-summary">
+            <div className="confirm-delete-row">
+              <div className="confirm-delete-label">名称</div>
+              <div className="confirm-delete-value" style={{ fontWeight: 600 }}>{source.name}</div>
+            </div>
+            <div className="confirm-delete-row">
+              <div className="confirm-delete-label">地址</div>
+              <div className="confirm-delete-value">{source.url}</div>
+            </div>
+            <div className="confirm-delete-row">
+              <div className="confirm-delete-label">采集条数</div>
+              <div className="confirm-delete-value">{source.last_item_count || 0}</div>
+            </div>
+            <div className="confirm-delete-row">
+              <div className="confirm-delete-label">频率</div>
+              <div className="confirm-delete-value">{source.interval} min</div>
+            </div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <Btn variant="ghost" onClick={onClose} disabled={busy}>取消</Btn>
+          <Btn variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>{busy ? "删除中..." : "确认删除"}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function guessBrand(news) {
   const explicit = String(news.brand || "").trim();
   if (explicit) return explicit;
@@ -101,6 +143,10 @@ function guessBrand(news) {
   const title = String(news.titleZh || news.original_title || "").trim();
   const brandMatch = title.match(/^([A-Za-z0-9]+(?:\s?[A-Za-z0-9]+){0,2})\s*(发布|推出|带来|上线|更新|宣布|发布了|推出了|发布新|推出新)/);
   return brandMatch?.[1]?.trim() || "";
+}
+
+function sameMetaLabel(a, b) {
+  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 }
 
 function DemandTagList({ items, tone = "default", onRemove, addLabel = "+ 添加" }) {
@@ -304,6 +350,10 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           <div key={d}>
               <div className="news-day">{formatDate(d)}</div>
               {grouped[d].map((n) =>
+              {
+                const brand = n.type === "新品发布" ? guessBrand(n) : "";
+                const showSource = !sameMetaLabel(brand, n.source);
+                return (
             <div className={`news-card ${n.unread ? "unread" : ""}`} key={n.id} role="button" tabIndex={0}
               onClick={() => openNews(n)}
               onKeyDown={(e) => { if (e.key === "Enter") openNews(n); }}>
@@ -313,9 +363,9 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
                     <div className="news-summary">{n.summary}</div>
                     <div className="news-meta">
                       <Tag tone={n.type === "新品发布" ? "accent" : "warn"}>{n.type}</Tag>
-                      {n.type === "新品发布" && guessBrand(n) ? <Tag tone="outline">{guessBrand(n)}</Tag> : null}
-                      <span>{n.source}</span>
-                      <span className="dot">·</span>
+                      {brand ? <Tag tone="outline">{brand}</Tag> : null}
+                      {showSource ? <span>{n.source}</span> : null}
+                      {showSource ? <span className="dot">·</span> : null}
                       <span>{formatRelativeTime(n.published_at)}</span>
                     </div>
                   </div>
@@ -327,7 +377,8 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
                     <Btn size="sm" variant="ghost" icon="more" onClick={(e) => e.stopPropagation()} />
                   </div>
                 </div>
-            )}
+                );
+              })}
             </div>
           )}
         </div>
@@ -377,6 +428,18 @@ function formatRelativeTime(value) {
   if (diffMonths < 12) return `${diffMonths}个月前`;
   return `${Math.floor(diffMonths / 12)}年前`;
 }
+
+const SERP_ENGINE_OPTIONS = [
+  ["google", "Google Web"],
+  ["google_news", "Google News"],
+  ["google_scholar", "Google Scholar"],
+  ["google_patents", "Google Patents"],
+  ["bing", "Bing"],
+  ["duckduckgo", "DuckDuckGo"],
+  ["google_images", "Google Images"],
+  ["google_videos", "Google Videos"],
+  ["youtube", "YouTube"],
+];
 
 // ============ PRODUCTS ============
 // Image upload slot for product (compact)
@@ -1350,12 +1413,22 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const [picker, setPicker] = useState(null); // 'product' | 'demand' | null
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [status, setStatus] = useState(research.status || "草稿");
   const products = productIds.map((id) => safeArray(data.products).find((p) => p.id === id)).filter(Boolean);
   const demands = demandIds.map((id) => safeArray(data.demands).find((d) => d.id === id)).filter(Boolean);
+  useEffect(() => setStatus(research.status || "草稿"), [research.status]);
   const saveLinks = async (nextProducts = productIds, nextDemands = demandIds) => {
     await api?.(`/api/research/${research.id}`, {
       method: "PATCH",
       body: JSON.stringify({ products: nextProducts, demands: nextDemands }),
+    });
+    await refreshData?.();
+  };
+  const saveStatus = async (nextStatus) => {
+    setStatus(nextStatus);
+    await api?.(`/api/research/${research.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: nextStatus }),
     });
     await refreshData?.();
   };
@@ -1385,7 +1458,19 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
 
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 6 }}>
           <h1 className="h1" style={{ flex: 1, fontSize: 24 }}>{research.title}</h1>
-          <Tag tone={research.status === "已完成" ? "success" : "warn"} style={{ marginTop: 6 }}>{research.status}</Tag>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+            <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>状态</span>
+            <select
+              className="input sm"
+              style={{ height: 28, minWidth: 108 }}
+              value={status}
+              onChange={(e) => saveStatus(e.target.value)}
+            >
+              <option value="草稿">草稿</option>
+              <option value="分析中">分析中</option>
+              <option value="已完成">已完成</option>
+            </select>
+          </div>
         </div>
         <div className="muted text-sm" style={{ marginBottom: 22 }}>创建于 {research.date} · 调研项目 #{research.id.toUpperCase()}</div>
         {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
@@ -1631,6 +1716,9 @@ function SettingsScreen({ data, api, refreshData }) {
   const [settings, setSettings] = useState(data.settings || {});
   const [notice, setNotice] = useState("");
   const [newSource, setNewSource] = useState({ name: "", url: "", interval: 60 });
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [deleteSourceTarget, setDeleteSourceTarget] = useState(null);
+  const [deleteSourceBusy, setDeleteSourceBusy] = useState(false);
   useEffect(() => setSources(data.rssSources), [data.rssSources]);
   useEffect(() => setSettings(data.settings || {}), [data.settings]);
   useEffect(() => {
@@ -1674,6 +1762,24 @@ function SettingsScreen({ data, api, refreshData }) {
     setNewSource({ name: "", url: "", interval: 60 });
     await refreshData?.();
   };
+  const openSource = (source) => {
+    if (source?.url) window.open(source.url, "_blank", "noopener,noreferrer");
+  };
+  const confirmDeleteSource = async () => {
+    if (!api || !deleteSourceTarget) return;
+    setDeleteSourceBusy(true);
+    setNotice("");
+    try {
+      await api(`/api/news-sources/${deleteSourceTarget.id}`, { method: "DELETE" });
+      setDeleteSourceTarget(null);
+      await refreshData?.();
+      setNotice(`已删除数据源：${deleteSourceTarget.name}`);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setDeleteSourceBusy(false);
+    }
+  };
   const syncFeishuNow = async () => {
     setNotice("飞书同步中...");
     try {
@@ -1685,6 +1791,15 @@ function SettingsScreen({ data, api, refreshData }) {
       setNotice(error.message);
     }
   };
+  const sortedSources = [...sources].sort((a, b) => {
+    const countDiff = Number(b.last_item_count || 0) - Number(a.last_item_count || 0);
+    if (countDiff !== 0) return countDiff;
+    const fetchedA = new Date(a.last_fetched_at || 0).getTime();
+    const fetchedB = new Date(b.last_fetched_at || 0).getTime();
+    if (fetchedB !== fetchedA) return fetchedB - fetchedA;
+    return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hans-CN");
+  });
+  const visibleSources = sourcesExpanded ? sortedSources : sortedSources.slice(0, 4);
 
   return (
     <div className="viewport">
@@ -1810,7 +1925,7 @@ function SettingsScreen({ data, api, refreshData }) {
             <div><h3>News 数据源</h3><div className="desc">RSS 与定向网页源,定时拉取后经 AI 中间层筛选</div></div>
           </div>
           <div className="settings-section-body">
-            {sources.map((s) =>
+            {visibleSources.map((s) =>
             <div className="source-row" key={s.id}>
                 <div>
                   <div style={{ fontWeight: 500 }}>{s.name}</div>
@@ -1823,12 +1938,23 @@ function SettingsScreen({ data, api, refreshData }) {
                 </div>
                 <div><Tag tone="outline">RSS</Tag></div>
                 <div className="muted text-sm">{s.interval} min</div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, alignItems: "center" }}>
+                <div className="source-row-actions">
                   <Switch on={s.active} onChange={() => toggle(s.id)} />
-                  <Btn size="sm" variant="ghost" icon="more" />
+                  <Btn size="sm" variant="ghost" icon="external" onClick={() => openSource(s)} />
+                  <Btn size="sm" variant="ghost" icon="trash" onClick={() => setDeleteSourceTarget(s)} />
                 </div>
               </div>
             )}
+            {sources.length > 4 &&
+              <button
+                type="button"
+                className="sources-expand-btn"
+                onClick={() => setSourcesExpanded((v) => !v)}
+              >
+                <span>{sourcesExpanded ? "收起数据源" : `展开全部 ${sources.length} 个数据源`}</span>
+                <Icon name={sourcesExpanded ? "chevron-up" : "chevron-down"} size={14} />
+              </button>
+            }
             <div className="source-row" style={{ marginTop: 10 }}>
               <div>
                 <input className="input sm" style={{ width: "100%", marginBottom: 6 }} placeholder="源名称" value={newSource.name} onChange={(e) => setNewSource({ ...newSource, name: e.target.value })} />
@@ -1863,6 +1989,14 @@ function SettingsScreen({ data, api, refreshData }) {
           </div>
         </div>
       </div>
+      {deleteSourceTarget && (
+        <DeleteSourceConfirmModal
+          source={deleteSourceTarget}
+          busy={deleteSourceBusy}
+          onClose={() => !deleteSourceBusy && setDeleteSourceTarget(null)}
+          onConfirm={confirmDeleteSource}
+        />
+      )}
     </div>);
 
 }

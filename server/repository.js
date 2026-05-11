@@ -93,6 +93,8 @@ export function maskSettings(settings) {
   const masked = { ...settings };
   if (masked.llm_api_key) masked.llm_api_key = "********";
   if (masked.search_api_key) masked.search_api_key = "********";
+  if (masked.search_tavily_api_key) masked.search_tavily_api_key = "********";
+  if (masked.search_serpapi_api_key) masked.search_serpapi_api_key = "********";
   if (masked.feishu_app_secret) masked.feishu_app_secret = "********";
   return masked;
 }
@@ -442,7 +444,7 @@ export function markSynced(kind, records) {
 export function updateSettings(patch) {
   return mutate((state) => {
     const next = { ...patch };
-    for (const key of ["llm_api_key", "search_api_key", "feishu_app_secret"]) {
+    for (const key of ["llm_api_key", "search_api_key", "search_tavily_api_key", "search_serpapi_api_key", "feishu_app_secret"]) {
       if (next[key] === "********" || next[key] === "") delete next[key];
     }
     state.settings = { ...(state.settings || {}), ...next };

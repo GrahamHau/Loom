@@ -1,4 +1,4 @@
-/* global LoginScreen, NewsScreen, ProductsScreen, DemandsScreen, ResearchScreen, SettingsScreen, Icon, Btn, useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle */
+/* global LoginScreen, NewsScreen, ProductsScreen, DemandsScreen, ResearchScreen, SettingsScreen, Icon, Btn, Tag, useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle */
 const React = globalThis.React;
 const ReactDOM = globalThis.ReactDOM;
 const LoginScreen = globalThis.LoginScreen;
@@ -9,6 +9,7 @@ const ResearchScreen = globalThis.ResearchScreen;
 const SettingsScreen = globalThis.SettingsScreen;
 const Icon = globalThis.Icon;
 const Btn = globalThis.Btn;
+const Tag = globalThis.Tag;
 const useTweaks = globalThis.useTweaks;
 const TweaksPanel = globalThis.TweaksPanel;
 const TweakSection = globalThis.TweakSection;
@@ -262,6 +263,8 @@ function App() {
   const [error, setError] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [navTarget, setNavTarget] = useState(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [tweaksVisible, setTweaksVisible] = useState(false);
   const [t, setTweak] = useTweaks({ theme: "feishu", mode: "light", showLogin: false });
 
   useEffect(() => {
@@ -295,6 +298,10 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => {
+    window.postMessage({ type: tweaksVisible ? "__activate_edit_mode" : "__deactivate_edit_mode" }, "*");
+  }, [tweaksVisible]);
 
   const refreshData = async () => {
     const next = await api("/api/bootstrap");
@@ -339,6 +346,10 @@ function App() {
     research: <ResearchScreen {...screenProps} />,
     settings: <SettingsScreen {...screenProps} />,
   }[active];
+  const notifications = [
+    { id: "n1", label: "系统", text: "全局搜索已经接通，可用 ⌘K 快速打开。", tone: "outline" },
+    { id: "n2", label: "News", text: `${data.news.length} 条资讯已载入，当前数据源 ${data.rssSources.length} 个。`, tone: "outline" },
+  ];
 
   return (
     <div className="app">
@@ -360,13 +371,33 @@ function App() {
               <span>搜索</span>
               <span className="kbd">⌘K</span>
             </button>
-            <Btn variant="ghost" icon="bell" size="sm" />
-            <Btn variant="ghost" icon="panel-open" size="sm" />
+            <div style={{ position: "relative" }}>
+              <Btn variant="ghost" icon="bell" size="sm" onClick={() => setNotificationsOpen((v) => !v)} />
+              {notificationsOpen && (
+                <div className="topbar-popover">
+                  <div className="topbar-popover-head">
+                    <span>通知</span>
+                    <Tag tone="outline">{notifications.length}</Tag>
+                  </div>
+                  <div className="topbar-popover-list">
+                    {notifications.map((item) => (
+                      <div key={item.id} className="topbar-popover-item">
+                        <Tag tone={item.tone}>{item.label}</Tag>
+                        <div className="topbar-popover-text">{item.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <Btn variant="ghost" icon="panel-open" size="sm" onClick={() => setTweaksVisible((v) => !v)} />
           </div>
         </div>
         {screen}
       </main>
-      <PMCTweaks t={t} setTweak={setTweak} />
+      <div style={{ display: tweaksVisible ? "block" : "none" }}>
+        <PMCTweaks t={t} setTweak={setTweak} />
+      </div>
       {searchOpen && data && (
         <GlobalSearchModal
           data={data}

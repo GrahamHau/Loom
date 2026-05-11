@@ -7,11 +7,43 @@ function settings() {
 
 function configuredSettings() {
   const s = settings();
-  if (!s.search_enabled) return null;
+  const tavilyEnabled = Boolean(s.search_tavily_enabled);
+  const serpapiEnabled = Boolean(s.search_serpapi_enabled);
+  if (!tavilyEnabled && !serpapiEnabled && !s.search_enabled) return null;
+
+  if (tavilyEnabled) {
+    if (!s.search_tavily_api_key) {
+      throw new AppError(400, "search_not_configured", "Tavily 未配置 API Key。");
+    }
+    return {
+      provider: "tavily",
+      api_key: s.search_tavily_api_key,
+      api_url: s.search_tavily_api_url || "https://api.tavily.com/search",
+      model: s.search_tavily_mode || "basic",
+    };
+  }
+
+  if (serpapiEnabled) {
+    if (!s.search_serpapi_api_key) {
+      throw new AppError(400, "search_not_configured", "SerpApi 未配置 API Key。");
+    }
+    return {
+      provider: "serpapi",
+      api_key: s.search_serpapi_api_key,
+      api_url: s.search_serpapi_api_url || "https://serpapi.com/search.json",
+      model: s.search_serpapi_engine || "google",
+    };
+  }
+
   if (!s.search_provider || !s.search_api_key) {
     throw new AppError(400, "search_not_configured", "Search Service 未配置完整，请填写 Provider 和 API Key。");
   }
-  return s;
+  return {
+    provider: s.search_provider,
+    api_key: s.search_api_key,
+    api_url: s.search_api_url,
+    model: s.search_model,
+  };
 }
 
 function trimText(value, limit = 240) {
@@ -32,17 +64,17 @@ function normalizeResults(items, limit = 5) {
 }
 
 async function searchTavily(query, s, limit) {
-  const endpoint = String(s.search_api_url || "https://api.tavily.com/search").replace(/\/+$/, "");
+  const endpoint = String(s.api_url || "https://api.tavily.com/search").replace(/\/+$/, "");
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${s.search_api_key}`,
+      Authorization: `Bearer ${s.api_key}`,
     },
     body: JSON.stringify({
       query,
       max_results: limit,
-      search_depth: s.search_model || "basic",
+      search_depth: s.model || "basic",
       include_answer: false,
       include_images: false,
       include_raw_content: false,
@@ -56,11 +88,11 @@ async function searchTavily(query, s, limit) {
 }
 
 async function searchSerpApi(query, s, limit) {
-  const endpoint = String(s.search_api_url || "https://serpapi.com/search.json").replace(/\/+$/, "");
+  const endpoint = String(s.api_url || "https://serpapi.com/search.json").replace(/\/+$/, "");
   const url = new URL(endpoint);
   url.searchParams.set("q", query);
-  url.searchParams.set("api_key", s.search_api_key);
-  url.searchParams.set("engine", s.search_model || "google");
+  url.searchParams.set("api_key", s.api_key);
+  url.searchParams.set("engine", s.model || "google");
   url.searchParams.set("num", String(limit));
   url.searchParams.set("hl", "en");
   const response = await fetch(url.toString());
@@ -75,7 +107,7 @@ export async function searchWeb(query, { limit = 5 } = {}) {
   const s = configuredSettings();
   if (!s) return [];
   if (!query) return [];
-  if (s.search_provider === "serpapi") {
+  if (s.provider === "serpapi") {
     return searchSerpApi(query, s, limit);
   }
   return searchTavily(query, s, limit);
