@@ -1,0 +1,89 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+button, input, select { font: inherit; }
+.page { max-width: 960px; margin: 0 auto; padding: 28px 24px 40px; }
+.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+h1 { font-size: 24px; line-height: 1.2; margin-bottom: 6px; letter-spacing: 0; }
+p { color: var(--text-secondary); line-height: 1.6; }
+.section {
+  background: var(--bg);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 14px;
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+h2 { font-size: 15px; letter-spacing: 0; }
+#connection-state { font-size: 12px; color: var(--text-tertiary); }
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+input, select {
+  width: 100%;
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  padding: 9px 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+input:focus, select:focus { outline: none; border-color: var(--brand); }
+.actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.btn {
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  background: var(--bg);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.btn.primary { border-color: var(--brand); background: var(--brand); color: #fff; }
+.btn.danger { color: var(--tag-neg-text); }
+.check-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.check-row label {
+  flex-direction: row;
+  align-items: center;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 10px;
+}
+.check-row input { width: auto; }
+.note { color: var(--text-secondary); line-height: 1.6; }
+
+@media (max-width: 720px) {
+  .top { flex-direction: column; }
+  .form-grid, .check-row { grid-template-columns: 1fr; }
+}

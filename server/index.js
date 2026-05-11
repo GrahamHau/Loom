@@ -5,8 +5,9 @@ import SQLiteStoreFactory from "connect-sqlite3";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureSeed } from "./db.js";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { AppError, testLLM } from "./ai-service.js";
-import { parseDemandUrl, parseProductUrl } from "./parsers.js";
+import { parseDemandRaw, parseDemandUrl, parseProductRaw, parseProductUrl } from "./parsers.js";
 import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-service.js";
 import { analyzeResearch } from "./research-service.js";
 import { syncFeishu, testFeishu } from "./feishu-service.js";
@@ -57,7 +58,26 @@ app.use(session({
 
 function requireAuth(req, res, next) {
   if (req.session.user) return next();
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (token && isValidApiToken(token)) {
+    req.session.user = rawState().user;
+    return next();
+  }
   res.status(401).json({ error: "unauthorized" });
+}
+
+function apiToken() {
+  const secret = process.env.SESSION_SECRET || "pm-copilot-dev-secret-change-me";
+  const username = process.env.APP_USERNAME || "graham";
+  const password = process.env.APP_PASSWORD || "pm-copilot";
+  return createHash("sha256").update(`${secret}:${username}:${password}`).digest("hex");
+}
+
+function isValidApiToken(token) {
+  const expected = apiToken();
+  const a = Buffer.from(token);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function asyncHandler(handler) {
@@ -84,7 +104,7 @@ app.post("/api/auth/login", (req, res) => {
   }
   const state = rawState();
   req.session.user = state.user;
-  res.json({ user: state.user });
+  res.json({ user: state.user, token: apiToken() });
 });
 
 app.post("/api/auth/logout", (req, res) => {
@@ -92,8 +112,10 @@ app.post("/api/auth/logout", (req, res) => {
 });
 
 app.get("/api/me", (req, res) => {
-  if (!req.session.user) return res.status(401).json({ error: "unauthorized" });
-  res.json({ user: req.session.user });
+  if (req.session.user) return res.json({ user: req.session.user });
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (token && isValidApiToken(token)) return res.json({ user: rawState().user });
+  res.status(401).json({ error: "unauthorized" });
 });
 
 app.get("/api/bootstrap", (_req, res) => {
@@ -102,10 +124,38 @@ app.get("/api/bootstrap", (_req, res) => {
 
 app.get("/api/products", requireAuth, (_req, res) => res.json(rawState().products));
 app.post("/api/products", requireAuth, (req, res) => res.status(201).json(createProduct(req.body || {})));
+app.get("/api/products/find-similar", requireAuth, (req, res) => {
+  const name = String(req.query.name || "").trim().toLowerCase();
+  const brand = String(req.query.brand || "").trim().toLowerCase();
+  if (!name && !brand) return res.json({ product: null });
+  const product = rawState().products.find((item) => {
+    const itemName = String(item.name || "").toLowerCase();
+    const itemBrand = String(item.brand || item.platforms?.[0]?.brand || "").toLowerCase();
+    return (name && (itemName.includes(name.slice(0, 20)) || name.includes(itemName.slice(0, 20)))) ||
+      (brand && itemBrand && itemBrand === brand);
+  });
+  res.json({ product: product ? { id: product.id, name: product.name } : null });
+});
 app.patch("/api/products/:id", requireAuth, (req, res) => {
   const item = updateProduct(req.params.id, req.body || {});
   if (!item) return res.status(404).json({ error: "product_not_found" });
   res.json(item);
+});
+app.post("/api/products/:id/platforms", requireAuth, (req, res) => {
+  const current = rawState().products.find((product) => product.id === req.params.id);
+  if (!current) return res.status(404).json({ error: "product_not_found" });
+  const platform = {
+    id: req.body?.id || `${req.body?.platform || "platform"}-${Date.now()}`,
+    platform: req.body?.platform || "unknown",
+    url: req.body?.url || req.body?.source_url || "",
+    price: req.body?.price || "",
+    rating: req.body?.rating ?? null,
+    reviews: req.body?.reviews ?? req.body?.review_count ?? 0,
+    sales: req.body?.sales || req.body?.monthly_sales || "",
+    fetched_at: new Date().toISOString(),
+  };
+  const item = updateProduct(req.params.id, { platforms: [...(current.platforms || []), platform] });
+  res.status(201).json(item);
 });
 app.delete("/api/products/:id", requireAuth, (req, res) => {
   if (!deleteProduct(req.params.id)) return res.status(404).json({ error: "product_not_found" });
@@ -114,6 +164,9 @@ app.delete("/api/products/:id", requireAuth, (req, res) => {
 
 app.post("/api/products/parse-url", requireAuth, asyncHandler(async (req, res) => {
   res.json(await parseProductUrl(req.body || {}));
+}));
+app.post("/api/products/parse-raw", requireAuth, asyncHandler(async (req, res) => {
+  res.json(await parseProductRaw(req.body || {}));
 }));
 
 app.get("/api/demands", requireAuth, (_req, res) => res.json(rawState().demands));
@@ -130,6 +183,17 @@ app.delete("/api/demands/:id", requireAuth, (req, res) => {
 app.post("/api/demands/parse-url", requireAuth, asyncHandler(async (req, res) => {
   res.json(await parseDemandUrl(req.body || {}));
 }));
+app.post("/api/demands/parse-raw", requireAuth, asyncHandler(async (req, res) => {
+  res.json(await parseDemandRaw(req.body || {}));
+}));
+
+app.get("/api/stats/today", requireAuth, (_req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const state = rawState();
+  const products = state.products.filter((item) => String(item.created_at || item.date || "").slice(0, 10) === today).length;
+  const demands = state.demands.filter((item) => String(item.created_at || item.date || "").slice(0, 10) === today).length;
+  res.json({ products, demands });
+});
 
 app.get("/api/news", requireAuth, (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));

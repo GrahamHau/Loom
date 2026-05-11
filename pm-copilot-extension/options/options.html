@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PM Copilot 设置</title>
+  <link rel="stylesheet" href="../styles/design-tokens.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="page">
+    <header class="top">
+      <div>
+        <h1>PM Copilot Clipper</h1>
+        <p>配置采集插件的服务器、登录状态、平台和字段映射。</p>
+      </div>
+      <button id="open-web" class="btn">打开 Web 端</button>
+    </header>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>连接</h2>
+        <span id="connection-state">未检测</span>
+      </div>
+      <div class="form-grid">
+        <label>服务器地址<input id="api-base" type="url" placeholder="https://ulanzi-copilot.my1panelsite.xyz"></label>
+        <label>用户名<input id="username" type="text" placeholder="graham"></label>
+        <label>密码<input id="password" type="password" placeholder="••••••••"></label>
+      </div>
+      <div class="actions">
+        <button id="save-login" class="btn primary">登录并保存</button>
+        <button id="test-connection" class="btn">测试连接</button>
+        <button id="logout" class="btn danger">退出登录</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>采集策略</h2>
+      </div>
+      <div class="form-grid">
+        <label>默认模式
+          <select id="default-mode">
+            <option value="auto">自动判断</option>
+            <option value="product">竞品</option>
+            <option value="demand">需求</option>
+          </select>
+        </label>
+        <label>AI 处理
+          <select id="ai-before-save">
+            <option value="true">保存前自动结构化</option>
+            <option value="false">只提取原始字段</option>
+          </select>
+        </label>
+      </div>
+      <div class="check-row">
+        <label><input type="checkbox" data-platform="amazon"> Amazon</label>
+        <label><input type="checkbox" data-platform="taobao"> 淘宝/天猫</label>
+        <label><input type="checkbox" data-platform="xiaohongshu"> 小红书</label>
+        <label><input type="checkbox" data-platform="kickstarter"> Kickstarter</label>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>字段映射</h2>
+      </div>
+      <div class="form-grid">
+        <label>商品名称字段<input id="map-product-name" type="text"></label>
+        <label>品牌字段<input id="map-product-brand" type="text"></label>
+        <label>品类字段<input id="map-product-category" type="text"></label>
+        <label>需求标题字段<input id="map-demand-title" type="text"></label>
+        <label>需求摘要字段<input id="map-demand-summary" type="text"></label>
+      </div>
+      <div class="actions">
+        <button id="save-settings" class="btn primary">保存设置</button>
+        <button id="reset-settings" class="btn">恢复默认</button>
+      </div>
+    </section>
+
+    <section class="section note">
+      插件只会在用户打开右侧栏并点击保存时，把当前页面提取到的数据发送到 PM Copilot。
+    </section>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "PM Copilot Clipper",
+  "version": "1.0.0",
+  "description": "一键采集竞品和需求到 PM Copilot 情报中台",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "PM Copilot"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.amazon.com/*",
+        "*://*.amazon.co.jp/*",
+        "*://*.taobao.com/*",
+        "*://*.tmall.com/*",
+        "*://*.xiaohongshu.com/*",
+        "*://www.xiaohongshu.com/*",
+        "*://*.kickstarter.com/projects/*"
+      ],
+      "js": [
+        "content/detector.js",
+        "content/amazon.js",
+        "content/taobao.js",
+        "content/xiaohongshu.js",
+        "content/kickstarter.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "*://*.amazon.com/*",
+    "*://*.amazon.co.jp/*",
+    "*://*.taobao.com/*",
+    "*://*.tmall.com/*",
+    "*://*.xiaohongshu.com/*",
+    "*://www.xiaohongshu.com/*",
+    "*://*.kickstarter.com/*",
+    "http://127.0.0.1:*/*",
+    "http://localhost:*/*",
+    "https://ulanzi-copilot.my1panelsite.xyz/*"
+  ]
+}

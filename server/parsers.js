@@ -92,6 +92,62 @@ ${searchContext}`,
   };
 }
 
+export async function parseProductRaw({ platform, data }) {
+  const groups = tagGroups();
+  const source = data || {};
+  const result = await callLLM({
+    system: "你是竞品分析助手，服务于摄影配件品牌产品经理。只返回 JSON，不要解释。",
+    user: `从插件采集的商品信息中提取结构化数据。字段缺失可返回 null。
+
+返回 JSON：
+{
+  "name": "标准化商品名",
+  "brand": "品牌名",
+  "category": "品类",
+  "price": "带符号的价格",
+  "sku_id": "SKU ID",
+  "rating": 数字,
+  "review_count": 数字,
+  "monthly_sales": "月销估算",
+  "selling_points": ["卖点"],
+  "negative_keywords": ["差评词"],
+  "ai_summary": "50字以内中文竞品摘要"
+}
+
+品牌字段：${tagListText(groups, "brands")}
+产品品类：${tagListText(groups, "product_categories")}
+
+平台：${platform}
+URL：${source.url || ""}
+商品名：${source.name || source.title || ""}
+价格：${source.price || ""}
+品牌：${source.brand || ""}
+评分：${source.rating || ""} (${source.review_count || 0} 评)
+月销：${source.monthly_sales || ""}
+描述：${source.description || source.content || ""}
+原始卖点：${compactArray(source.raw_bullets).join("；")}`,
+    maxTokens: 260,
+  });
+
+  return {
+    ...source,
+    ...result,
+    platform,
+    name: result.name || source.name || source.title || "未命名竞品",
+    brand: result.brand || source.brand || "",
+    category: result.category || source.category || "未分类",
+    price: result.price || source.price || "",
+    sku_id: result.sku_id || source.sku_id || "",
+    rating: safeNumber(result.rating ?? source.rating),
+    review_count: safeNumber(result.review_count ?? source.review_count),
+    monthly_sales: normalizeMonthlySales(result.monthly_sales || source.monthly_sales),
+    thumbnail_url: source.thumbnail_url || result.image_url || "",
+    selling_points: compactArray(result.selling_points || source.raw_bullets),
+    negative_keywords: compactArray(result.negative_keywords),
+    ai_summary: result.ai_summary || source.description || "",
+  };
+}
+
 export async function parseDemandUrl({ url }) {
   const page = await fetchPageContent(url);
   const searchContext = await buildSearchContext(`${page.title} creator problem use case trend`, { limit: 4 });
@@ -146,5 +202,51 @@ ${searchContext}`,
     date: new Date().toISOString().slice(0, 10),
     thumbHue: 180,
     raw: { page_title: page.title, page_description: page.description },
+  };
+}
+
+export async function parseDemandRaw({ platform, data }) {
+  const source = data || {};
+  const groups = tagGroups();
+  const result = await callLLM({
+    system: "你是产品信息分类助手。只返回 JSON，不要解释。",
+    user: `请对插件采集的内容进行需求结构化打标。
+
+使用场景：${tagListText(groups, "scenarios")}
+用户痛点：${tagListText(groups, "painpoints")}
+创新类型：${tagListText(groups, "innovation_types")}
+自定义标签：${tagListText(groups, "custom_tags")}
+
+返回 JSON：
+{
+  "title": "一句话标题",
+  "summary": "80字以内中文摘要",
+  "tags_scenario": [],
+  "tags_painpoint": [],
+  "tags_innovation": "单选值",
+  "tags_category": [],
+  "tags_custom": []
+}
+
+平台：${platform}
+URL：${source.url || ""}
+标题：${source.title || source.name || ""}
+作者：${source.author || source.brand || ""}
+互动：点赞 ${source.likes || 0}，收藏 ${source.collects || 0}，评论 ${source.comments || 0}
+内容：${source.content || source.description || ""}`,
+    maxTokens: 240,
+  });
+
+  return {
+    ...source,
+    platform,
+    title: result.title || source.title || source.name || "未命名需求",
+    summary: result.summary || source.content || source.description || "",
+    tags_scenario: compactArray(result.tags_scenario),
+    tags_painpoint: compactArray(result.tags_painpoint),
+    tags_innovation: result.tags_innovation || "待分类",
+    tags_category: compactArray(result.tags_category),
+    tags_custom: compactArray(result.tags_custom),
+    thumbnail_url: source.thumbnail_url || "",
   };
 }
