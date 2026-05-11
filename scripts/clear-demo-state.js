@@ -1,4 +1,4 @@
-import { getState, saveState } from "../server/db.js";
+import { db, getState, saveState } from "../server/db.js";
 
 const state = getState();
 
@@ -10,9 +10,13 @@ if (!state) {
 const before = {
   products: state.products?.length || 0,
   demands: state.demands?.length || 0,
-  news: state.news?.length || 0,
+  news: db.prepare("SELECT COUNT(*) AS count FROM news_items").get().count,
+  newsSources: db.prepare("SELECT COUNT(*) AS count FROM news_sources").get().count,
   research: state.research?.length || 0,
 };
+
+db.prepare("DELETE FROM news_items").run();
+db.prepare("DELETE FROM news_sources").run();
 
 saveState({
   ...state,

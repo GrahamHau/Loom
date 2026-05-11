@@ -76,16 +76,25 @@ window.LoginScreen = LoginScreen;
 function NewsScreen({ data, api, refreshData }) {
   const [tab, setTab] = useState("all");
   const [items, setItems] = useState(safeArray(data.news));
+  const [counts, setCounts] = useState({
+    all: safeArray(data.news).length,
+    new_product: safeArray(data.news).filter((n) => n.type === "新品发布").length,
+    trend: safeArray(data.news).filter((n) => n.type === "行业趋势").length,
+    starred: safeArray(data.news).filter((n) => n.starred).length,
+  });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  useEffect(() => setItems(safeArray(data.news)), [data.news]);
+  useEffect(() => {
+    setItems(safeArray(data.news));
+    setCounts({
+      all: safeArray(data.news).length,
+      new_product: safeArray(data.news).filter((n) => n.type === "新品发布").length,
+      trend: safeArray(data.news).filter((n) => n.type === "行业趋势").length,
+      starred: safeArray(data.news).filter((n) => n.starred).length,
+    });
+  }, [data.news]);
 
-  const filtered = items.filter((n) => {
-    if (tab === "all") return true;
-    if (tab === "starred") return n.starred;
-    return n.type === tab;
-  });
-  const grouped = filtered.reduce((acc, n) => {
+  const grouped = items.reduce((acc, n) => {
     (acc[n.date] = acc[n.date] || []).push(n);return acc;
   }, {});
   const dates = Object.keys(grouped);
@@ -100,12 +109,27 @@ function NewsScreen({ data, api, refreshData }) {
     }
   };
 
+  const openOriginal = (item) => {
+    const url = item?.original_url || item?.url;
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const openNews = async (item) => {
+    if (api && item.unread) {
+      setItems((current) => current.map((n) => n.id === item.id ? { ...n, unread: false } : n));
+      await api(`/api/news/${item.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) });
+      await refreshData?.();
+    }
+    openOriginal(item);
+  };
+
   const collect = async () => {
     setBusy(true);setNotice("");
     try {
       const result = await api("/api/news/collect", { method: "POST" });
       setNotice(`采集完成：新增 ${result.inserted || 0} 条，更新 ${result.updated || 0} 条${result.errors?.length ? `，失败 ${result.errors.length} 个源` : ""}`);
       await refreshData?.();
+      await loadNews(tab);
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -113,14 +137,29 @@ function NewsScreen({ data, api, refreshData }) {
     }
   };
 
+  const loadNews = async (nextTab = tab) => {
+    if (!api) return;
+    const params = new URLSearchParams({ page: "1", limit: "100" });
+    if (nextTab === "starred") params.set("starred", "1");
+    if (nextTab === "新品发布") params.set("type", "new_product");
+    if (nextTab === "行业趋势") params.set("type", "trend");
+    const result = await api(`/api/news?${params.toString()}`);
+    setItems(safeArray(result.items || result));
+    if (result.counts) setCounts(result.counts);
+  };
+
+  useEffect(() => {
+    loadNews(tab).catch(() => {});
+  }, [tab]);
+
   return (
     <>
       <div className="news-tabs">
         {[
-        ["all", "全部", items.length],
-        ["新品发布", "新品发布", items.filter((i) => i.type === "新品发布").length],
-        ["行业趋势", "行业趋势", items.filter((i) => i.type === "行业趋势").length],
-        ["starred", "已收藏", items.filter((i) => i.starred).length]].
+        ["all", "全部", counts.all],
+        ["新品发布", "新品发布", counts.new_product],
+        ["行业趋势", "行业趋势", counts.trend],
+        ["starred", "已收藏", counts.starred]].
         map(([k, label, count]) =>
         <div key={k} className={`news-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
             {label} <span style={{ color: "var(--text-4)", marginLeft: 4 }}>{count}</span>
@@ -147,7 +186,9 @@ function NewsScreen({ data, api, refreshData }) {
           <div key={d}>
               <div className="news-day">{formatDate(d)}</div>
               {grouped[d].map((n) =>
-            <div className={`news-card ${n.unread ? "unread" : ""}`} key={n.id}>
+            <div className={`news-card ${n.unread ? "unread" : ""}`} key={n.id} role="button" tabIndex={0}
+              onClick={() => openNews(n)}
+              onKeyDown={(e) => { if (e.key === "Enter") openNews(n); }}>
                   <NewsThumb item={n} />
                   <div className="news-body">
                     <div className="news-title">{n.titleZh}</div>
@@ -160,11 +201,11 @@ function NewsScreen({ data, api, refreshData }) {
                     </div>
                   </div>
                   <div className="news-actions">
-                    <Btn size="sm" variant="ghost" onClick={() => toggleStar(n.id)}
+                    <Btn size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); toggleStar(n.id); }}
                 icon={n.starred ? "star-fill" : "star"}
                 style={{ color: n.starred ? "var(--warn)" : undefined }} />
-                    <Btn size="sm" variant="ghost" icon="external" />
-                    <Btn size="sm" variant="ghost" icon="more" />
+                    <Btn size="sm" variant="ghost" icon="external" onClick={(e) => { e.stopPropagation(); openOriginal(n); }} />
+                    <Btn size="sm" variant="ghost" icon="more" onClick={(e) => e.stopPropagation()} />
                   </div>
                 </div>
             )}

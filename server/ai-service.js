@@ -12,7 +12,13 @@ export class AppError extends Error {
 }
 
 function getSettings() {
-  return rawState().settings || {};
+  const settings = rawState().settings || {};
+  return {
+    ...settings,
+    llm_api_url: settings.llm_api_url || process.env.LLM_API_URL || process.env.OPENAI_BASE_URL || "",
+    llm_model: settings.llm_model || process.env.LLM_MODEL || process.env.OPENAI_MODEL || "",
+    llm_api_key: settings.llm_api_key || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
+  };
 }
 
 function configuredSettings() {

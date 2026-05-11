@@ -45,7 +45,7 @@ export function cleanHtml(html) {
     .slice(0, MAX_TEXT_LENGTH);
 }
 
-export async function fetchPageContent(url) {
+async function fetchPageResponse(url) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -71,6 +71,29 @@ export async function fetchPageContent(url) {
       throw new AppError(response.status, "fetch_failed", `页面抓取失败：HTTP ${response.status}`);
     }
     const html = await response.text();
+    return { parsed, response, html };
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new AppError(504, "fetch_timeout", "页面抓取超过 30 秒。");
+    }
+    if (error instanceof AppError) throw error;
+    throw new AppError(502, "fetch_unavailable", "页面无法访问或被目标站点拦截。", { message: error.message });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function fetchPageHtml(url) {
+  const { parsed, response, html } = await fetchPageResponse(url);
+  return {
+    url: response.url || parsed.toString(),
+    html,
+  };
+}
+
+export async function fetchPageContent(url) {
+  try {
+    const { parsed, response, html } = await fetchPageResponse(url);
     const title = firstMatch(html, [
       /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
       /<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i,
@@ -86,8 +109,8 @@ export async function fetchPageContent(url) {
     ]);
     const text = cleanHtml(html);
     return {
-      url: parsed.toString(),
-      platform: detectPlatform(parsed.toString()),
+      url: response.url || parsed.toString(),
+      platform: detectPlatform(response.url || parsed.toString()),
       title,
       description,
       image,
@@ -95,12 +118,7 @@ export async function fetchPageContent(url) {
       content: [title, description, text].filter(Boolean).join("\n\n").slice(0, MAX_TEXT_LENGTH),
     };
   } catch (error) {
-    if (error.name === "AbortError") {
-      throw new AppError(504, "fetch_timeout", "页面抓取超过 30 秒。");
-    }
     if (error instanceof AppError) throw error;
     throw new AppError(502, "fetch_unavailable", "页面无法访问或被目标站点拦截。", { message: error.message });
-  } finally {
-    clearTimeout(timeout);
   }
 }

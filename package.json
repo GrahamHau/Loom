@@ -13,7 +13,8 @@
     "test": "vitest run",
     "db:seed": "node scripts/seed-db.js",
     "db:clear-demo": "node scripts/clear-demo-state.js",
-    "news:configure-sources": "node scripts/configure-news-sources.js"
+    "news:configure-sources": "node scripts/configure-news-sources.js",
+    "news:reclassify": "node scripts/reclassify-news.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",

@@ -1,5 +1,5 @@
 import { AppError } from "./ai-service.js";
-import { markSynced, rawState, updateSettings } from "./repository.js";
+import { listNews, markSynced, rawState, updateSettings } from "./repository.js";
 
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
 
@@ -146,7 +146,8 @@ export async function syncFeishu({ kinds = ["products", "demands", "news"] } = {
 
     const synced = [];
     const result = { created: 0, updated: 0, failed: 0, errors: [] };
-    for (const item of state[kind] || []) {
+    const records = kind === "news" ? listNews().filter((item) => item.type) : (state[kind] || []);
+    for (const item of records) {
       try {
         const fields = config.fields(item);
         const recordId = item.feishu_record_id

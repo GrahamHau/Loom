@@ -22,6 +22,7 @@ import {
   deleteNewsSource,
   deleteProduct,
   deleteResearch,
+  listNews,
   listNewsSources,
   rawState,
   updateDemand,
@@ -131,14 +132,41 @@ app.post("/api/demands/parse-url", requireAuth, asyncHandler(async (req, res) =>
 }));
 
 app.get("/api/news", requireAuth, (req, res) => {
-  let items = rawState().news || [];
-  if (req.query.type) items = items.filter((item) => item.type === req.query.type);
-  if (req.query.starred === "true") items = items.filter((item) => item.starred);
-  res.json(items);
+  const page = Math.max(1, Number(req.query.page || 1));
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
+  const offset = (page - 1) * limit;
+  const typeMap = { new_product: "新品发布", trend: "行业趋势" };
+  const allItems = listNews().filter((item) => item.type);
+  let items = allItems;
+  if (req.query.type) items = items.filter((item) => item.type === (typeMap[req.query.type] || req.query.type));
+  if (req.query.starred === "1" || req.query.starred === "true") items = items.filter((item) => item.starred);
+  if (req.query.q) {
+    const q = String(req.query.q).toLowerCase();
+    items = items.filter((item) =>
+      [item.titleZh, item.original_title, item.summary, item.contentZh].filter(Boolean).some((value) => String(value).toLowerCase().includes(q))
+    );
+  }
+  const counts = {
+    all: allItems.length,
+    new_product: allItems.filter((item) => item.type === "新品发布").length,
+    trend: allItems.filter((item) => item.type === "行业趋势").length,
+    starred: allItems.filter((item) => item.starred).length,
+  };
+  const paged = items.slice(offset, offset + limit);
+  res.json({ items: paged, counts, page, limit });
+});
+
+app.get("/api/news/:id", requireAuth, (req, res) => {
+  const item = listNews().find((entry) => entry.id === req.params.id);
+  if (!item) return res.status(404).json({ error: "news_not_found" });
+  res.json(item);
 });
 
 app.patch("/api/news/:id", requireAuth, (req, res) => {
-  const item = updateNews(req.params.id, req.body || {});
+  const patch = { ...(req.body || {}) };
+  if (patch.is_read !== undefined && patch.unread === undefined) patch.unread = !patch.is_read;
+  if (patch.is_starred !== undefined && patch.starred === undefined) patch.starred = Boolean(patch.is_starred);
+  const item = updateNews(req.params.id, patch);
   if (!item) return res.status(404).json({ error: "news_not_found" });
   res.json(item);
 });
@@ -148,6 +176,16 @@ app.delete("/api/news/:id", requireAuth, (req, res) => {
 });
 app.post("/api/news/collect", requireAuth, asyncHandler(async (_req, res) => {
   res.json(await collectSources(listNewsSources()));
+}));
+app.post("/api/news/refresh", requireAuth, asyncHandler(async (_req, res) => {
+  res.json({ message: "采集已触发，后台处理中" });
+  setImmediate(async () => {
+    try {
+      await collectSources(listNewsSources());
+    } catch (error) {
+      console.error("Manual news refresh failed", error);
+    }
+  });
 }));
 
 app.get("/api/news-sources", requireAuth, (_req, res) => res.json(listNewsSources()));
