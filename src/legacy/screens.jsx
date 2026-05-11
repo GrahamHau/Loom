@@ -1731,6 +1731,44 @@ function SettingsScreen({ data, api, refreshData }) {
 
         <div className="settings-section">
           <div className="settings-section-head">
+            <Icon name="search" size={14} style={{ color: "var(--accent)" }} />
+            <div><h3>Search Service</h3><div className="desc">供后续网页搜索、Research 与外部上下文抓取使用</div></div>
+          </div>
+          <div className="settings-section-body">
+            <div className="settings-row">
+              <div className="label">启用</div>
+              <Switch on={Boolean(settings.search_enabled)} onChange={(on) => setSettings({ ...settings, search_enabled: on })} />
+            </div>
+            <div className="settings-row">
+              <div className="label">Provider</div>
+              <select className="input" style={{ width: 240 }} value={settings.search_provider || "tavily"} onChange={(e) => setSettings({ ...settings, search_provider: e.target.value })}>
+                <option value="tavily">Tavily</option>
+                <option value="serpapi">SerpApi</option>
+              </select>
+            </div>
+            <div className="settings-row">
+              <div className="label">API URL</div>
+              <input className="input" style={{ width: "100%" }} value={settings.search_api_url || ""} onChange={(e) => setSettings({ ...settings, search_api_url: e.target.value })} />
+            </div>
+            <div className="settings-row">
+              <div className="label">API Key</div>
+              <input className="input" style={{ width: "100%" }} value={settings.search_api_key || ""} onChange={(e) => setSettings({ ...settings, search_api_key: e.target.value })} type="password" placeholder="tvly-... / serpapi key" />
+            </div>
+            <div className="settings-row">
+              <div className="label">模型 / 引擎</div>
+              <input className="input" style={{ width: 280 }} value={settings.search_model || ""} onChange={(e) => setSettings({ ...settings, search_model: e.target.value })} placeholder="可选" />
+            </div>
+            <div className="settings-row">
+              <div className="label">&nbsp;</div>
+              <div className="row">
+                <Btn icon="save" onClick={() => saveSettings()}>保存搜索配置</Btn>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-head">
             <Icon name="sync" size={14} style={{ color: "var(--accent)" }} />
             <div><h3>飞书多维表格同步</h3><div className="desc">单向同步 — 数据流向飞书,不反向覆盖本地</div></div>
           </div>

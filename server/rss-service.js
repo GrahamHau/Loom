@@ -98,9 +98,14 @@ export function heuristicClassifyNews({ item }) {
   const rejectPattern = /\b(giveaway|discount|coupon|hiring|career|sponsor|sponsored|travel|tutorial|how to|used market|auction)\b|赠品|抽奖|折扣|招聘|赞助|游记|教程|二手|拍卖/i;
   const prelaunchPattern = /\b(teaser|expected|coming soon|next week|rumou?r|leak)\b|预热|即将发布|传闻|曝光/i;
   const ambiguousPattern = /\b(update|updated|version|series|lineup|creator|shooting|workflow|event|award|festival|feature)\b|升级|系列|生态|创作|活动|奖项|功能/i;
+  const financePattern = /\b(stock|shares|earnings|investor|fund|capital|ipo|quarter|q1|q2|q3|q4|price target|analyst)\b|股价|涨停|跌停|投资者|融资|财报|资金|市值|概念股/i;
+  const corporatePattern = /\b(partnership|agreement|lawsuit|acquisition|merger|executive|ceo|board|subsidiary)\b|合作协议|诉讼|收购|并购|高管|董事会|子公司/i;
+  const hardEvidencePattern = /\b(camera|lens|drone|gimbal|light|tripod|rig|cage|mount|microphone|monitor|stabilizer|battery|charger|accessory|flash|monolight|led|rgb|wireless mic)\b|相机|镜头|无人机|云台|补光灯|三脚架|兔笼|支架|麦克风|监视器|稳定器|电池|充电器|闪光灯|配件/i;
 
   if (rejectPattern.test(lower)) return null;
   if (prelaunchPattern.test(lower)) return null;
+  if (financePattern.test(lower) && !hardEvidencePattern.test(lower)) return null;
+  if (corporatePattern.test(lower) && !launchPattern.test(lower) && !trendPattern.test(lower)) return null;
   if (ambiguousPattern.test(lower) && !trendPattern.test(lower) && !(launchPattern.test(lower) && productPattern.test(lower))) {
     return { type: "待判定", needsTranslation: true, classification: { reason: "heuristic_ambiguous" } };
   }
