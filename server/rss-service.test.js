@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 process.env.DATABASE_PATH = ":memory:";
 
-const { heuristicClassifyNews } = await import("./rss-service.js");
+const { heuristicClassifyNews, shouldCollectSource } = await import("./rss-service.js");
 
 describe("rss-service classification", () => {
   it("keeps official product launches as product news", () => {
@@ -60,5 +60,23 @@ describe("rss-service classification", () => {
     });
     expect(result.type).toBe("行业趋势");
     expect(result.classification.reason).toBe("heuristic_trend");
+  });
+
+  it("marks ambiguous updates for llm review", () => {
+    const result = heuristicClassifyNews({
+      source: { name: "Brand Feed", authority: "watchlist" },
+      item: {
+        title: "Creator workflow update adds new feature series",
+        contentSnippet: "The lineup update improves workflow for creators.",
+      },
+    });
+    expect(result.type).toBe("待判定");
+    expect(result.classification.reason).toBe("heuristic_ambiguous");
+  });
+
+  it("collects only due sources for scheduler", () => {
+    const now = new Date("2026-05-11T12:00:00.000Z");
+    expect(shouldCollectSource({ active: true, url: "https://a.test", fetch_interval: 60, last_fetched_at: "2026-05-11T10:30:00.000Z" }, now)).toBe(true);
+    expect(shouldCollectSource({ active: true, url: "https://a.test", fetch_interval: 60, last_fetched_at: "2026-05-11T11:30:00.000Z" }, now)).toBe(false);
   });
 });

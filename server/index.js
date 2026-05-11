@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { ensureSeed } from "./db.js";
 import { AppError, testLLM } from "./ai-service.js";
 import { parseDemandUrl, parseProductUrl } from "./parsers.js";
-import { collectSources } from "./rss-service.js";
+import { collectDueSources, collectSources } from "./rss-service.js";
 import { analyzeResearch } from "./research-service.js";
 import { syncFeishu, testFeishu } from "./feishu-service.js";
 import { loadInitialData } from "./seed.js";
@@ -237,12 +237,12 @@ let rssCollecting = false;
 function startRssScheduler() {
   const settings = rawState().settings || {};
   if (settings.rss_collect_enabled === false || process.env.RSS_COLLECT_ENABLED === "false") return;
-  const interval = Number(process.env.RSS_COLLECT_INTERVAL_MS || settings.rss_collect_interval_ms || 15 * 60 * 1000);
+  const interval = Number(process.env.RSS_SCHEDULER_CHECK_INTERVAL_MS || process.env.RSS_COLLECT_INTERVAL_MS || settings.rss_collect_interval_ms || 15 * 60 * 1000);
   setInterval(async () => {
     if (rssCollecting) return;
     rssCollecting = true;
     try {
-      await collectSources(listNewsSources());
+      await collectDueSources(listNewsSources());
     } catch (error) {
       console.error("RSS collect failed", error);
     } finally {

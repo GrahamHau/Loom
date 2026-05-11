@@ -59,7 +59,7 @@ export function parseJsonObject(text, fallback = {}) {
   }
 }
 
-export async function callLLM({ system, user, responseFormat = "json", temperature = 0.2 }) {
+export async function callLLM({ system, user, responseFormat = "json", temperature = 0.2, maxTokens }) {
   const settings = configuredSettings();
   const timeoutMs = Number(settings.llm_timeout_ms || process.env.LLM_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
   const controller = new AbortController();
@@ -79,6 +79,7 @@ export async function callLLM({ system, user, responseFormat = "json", temperatu
           { role: "user", content: user },
         ],
         temperature,
+        max_tokens: maxTokens,
         response_format: responseFormat === "json" ? { type: "json_object" } : undefined,
       }),
     });

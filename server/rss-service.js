@@ -43,8 +43,21 @@ const NEWS_LLM_SYSTEM_PROMPT = `你是一个信息筛选助手，服务于摄影
   "summary_zh": "50字以内中文摘要，提炼核心信息。不是翻译，是提炼。"
 }`;
 
+const NEWS_LLM_INPUT_LIMIT = 700;
+const NEWS_LLM_MAX_TOKENS = 120;
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldCollectSource(source, now = new Date()) {
+  if (source.active === false || !source.url) return false;
+  const intervalMinutes = Number(source.fetch_interval || source.interval || 60);
+  const intervalMs = Math.max(30, intervalMinutes) * 60 * 1000;
+  if (!source.last_fetched_at) return true;
+  const lastFetched = new Date(source.last_fetched_at);
+  if (Number.isNaN(lastFetched.getTime())) return true;
+  return now.getTime() - lastFetched.getTime() >= intervalMs;
 }
 
 function stripHtml(value) {
@@ -84,9 +97,13 @@ export function heuristicClassifyNews({ item }) {
   const trendPattern = /\b(trend|market|report|survey|forecast|analysis)\b|趋势|报告|预测|分析/i;
   const rejectPattern = /\b(giveaway|discount|coupon|hiring|career|sponsor|sponsored|travel|tutorial|how to|used market|auction)\b|赠品|抽奖|折扣|招聘|赞助|游记|教程|二手|拍卖/i;
   const prelaunchPattern = /\b(teaser|expected|coming soon|next week|rumou?r|leak)\b|预热|即将发布|传闻|曝光/i;
+  const ambiguousPattern = /\b(update|updated|version|series|lineup|creator|shooting|workflow|event|award|festival|feature)\b|升级|系列|生态|创作|活动|奖项|功能/i;
 
   if (rejectPattern.test(lower)) return null;
   if (prelaunchPattern.test(lower)) return null;
+  if (ambiguousPattern.test(lower) && !trendPattern.test(lower) && !(launchPattern.test(lower) && productPattern.test(lower))) {
+    return { type: "待判定", needsTranslation: true, classification: { reason: "heuristic_ambiguous" } };
+  }
   if (launchPattern.test(lower) && productPattern.test(lower)) {
     return {
       type: "新品发布",
@@ -109,16 +126,22 @@ export function heuristicClassifyNews({ item }) {
 }
 
 async function classifyNews({ source, item }) {
+  const heuristic = heuristicClassifyNews({ source, item });
+  if (heuristic && heuristic.type !== "待判定") {
+    return heuristic;
+  }
+
   const content = [
     `来源：${source.name}`,
-    `标题：${item.title || ""}`,
-    `内容：${stripHtml(item.contentSnippet || item.summary || item.content || "").slice(0, 3000)}`,
+    `标题：${stripHtml(item.title || "").slice(0, 180)}`,
+    `摘要：${stripHtml(item.contentSnippet || item.summary || item.content || "").slice(0, NEWS_LLM_INPUT_LIMIT)}`,
   ].join("\n\n");
 
   try {
     const result = await callLLM({
       system: NEWS_LLM_SYSTEM_PROMPT,
       user: content,
+      maxTokens: NEWS_LLM_MAX_TOKENS,
     });
     if (!result?.keep) return null;
     return {
@@ -130,7 +153,7 @@ async function classifyNews({ source, item }) {
       classification: { reason: "llm" },
     };
   } catch {
-    return heuristicClassifyNews({ source, item });
+    return heuristic && heuristic.type !== "待判定" ? heuristic : null;
   }
 }
 
@@ -210,3 +233,10 @@ export async function collectSources(sources) {
     errors: results.filter((result) => result.error),
   };
 }
+
+export async function collectDueSources(sources, now = new Date()) {
+  const dueSources = sources.filter((source) => shouldCollectSource(source, now));
+  return collectSources(dueSources);
+}
+
+export { shouldCollectSource };
