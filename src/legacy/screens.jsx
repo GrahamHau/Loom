@@ -470,7 +470,7 @@ function ProductImageSlot({ product, onChange }) {
 }
 
 // Compact text-input metric for platform card
-function PlatformInput({ label, value, onChange, prefix }) {
+function PlatformInput({ label, value, onChange, prefix, suffix, inputMode = "text" }) {
   return (
     <div className="metric">
       <div className="metric-label">{label}</div>
@@ -480,8 +480,9 @@ function PlatformInput({ label, value, onChange, prefix }) {
           className="metric-input"
           value={value ?? ""}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="—" />
-        
+          placeholder="—"
+          inputMode={inputMode} />
+        {suffix && <span className="metric-suffix">{suffix}</span>}
       </div>
     </div>);
 
@@ -717,11 +718,11 @@ function ProductsScreen({ data, api, refreshData }) {
                     <PlatformInput label="评论数" value={pl.reviews} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, reviews: v } : p);
                   updateSelected({ platforms: next });
-                }} />
+                }} inputMode="numeric" />
                     <PlatformInput label="月销估算" value={pl.sales} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, sales: v } : p);
                   updateSelected({ platforms: next });
-                }} />
+                }} suffix="/month" inputMode="numeric" />
                   </div>
                 </div>
             )}
@@ -1715,6 +1716,7 @@ function SettingsScreen({ data, api, refreshData }) {
   const [sources, setSources] = useState(data.rssSources);
   const [settings, setSettings] = useState(data.settings || {});
   const [notice, setNotice] = useState("");
+  const [settingsTab, setSettingsTab] = useState("general");
   const [newSource, setNewSource] = useState({ name: "", url: "", interval: 60 });
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [deleteSourceTarget, setDeleteSourceTarget] = useState(null);
@@ -1806,8 +1808,14 @@ function SettingsScreen({ data, api, refreshData }) {
       <div className="page" style={{ maxWidth: 760 }}>
         <h1 className="h1">系统设置</h1>
         <div className="muted text-sm" style={{ marginBottom: 24 }}>配置 AI 模型、飞书同步与数据源</div>
+        <div className="news-tabs" style={{ marginBottom: 16 }}>
+          <div className={`news-tab ${settingsTab === "general" ? "active" : ""}`} onClick={() => setSettingsTab("general")}>通用设置</div>
+          <div className={`news-tab ${settingsTab === "tags" ? "active" : ""}`} onClick={() => setSettingsTab("tags")}>Tag设置</div>
+        </div>
         {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
 
+        {settingsTab === "general" && (
+          <>
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="sparkles" size={14} style={{ color: "var(--accent)" }} />
@@ -2019,7 +2027,7 @@ function SettingsScreen({ data, api, refreshData }) {
             <div><h3>标签体系</h3><div className="desc">AI 打标使用的预设标签库</div></div>
           </div>
           <div className="settings-section-body">
-            <TagSystemEditor />
+            <TagSystemEditor settings={settings} setSettings={setSettings} saveSettings={saveSettings} />
           </div>
         </div>
 
@@ -2034,6 +2042,19 @@ function SettingsScreen({ data, api, refreshData }) {
             <div className="settings-row"><div className="label">&nbsp;</div><div><Btn>修改密码</Btn></div></div>
           </div>
         </div>
+          </>
+        )}
+        {settingsTab === "tags" && (
+          <div className="settings-section">
+            <div className="settings-section-head">
+              <Icon name="tag" size={14} style={{ color: "var(--accent)" }} />
+              <div><h3>Tag设置</h3><div className="desc">统一配置品牌、品类、场景、痛点、创新类型与自定义标签</div></div>
+            </div>
+            <div className="settings-section-body">
+              <TagSystemEditor settings={settings} setSettings={setSettings} saveSettings={saveSettings} />
+            </div>
+          </div>
+        )}
       </div>
       {deleteSourceTarget && (
         <DeleteSourceConfirmModal
@@ -2048,15 +2069,14 @@ function SettingsScreen({ data, api, refreshData }) {
 }
 window.SettingsScreen = SettingsScreen;
 
-function TagSystemEditor() {
-  const [groups, setGroups] = useState([
-  { name: "产品品类", tone: "default", tags: ["灯光", "稳定器", "三脚架", "镜头", "麦克风", "相机配件", "运动相机", "无人机"] },
-  { name: "使用场景", tone: "accent", tags: ["Vlog/自拍", "直播/带货", "短视频创作", "户外旅拍", "室内棚拍", "桌面俯拍", "运动/极限拍摄", "会议/活动记录", "产品摄影", "延时/慢动作", "街拍/纪实", "教育/网课"] },
-  { name: "用户痛点", tone: "danger", tags: ["携带不便/太重", "续航不足", "操作复杂/学习成本高", "画质不够", "防抖不足", "散热过热", "噪音大", "兼容性差", "配件缺失/需另购", "安装固定麻烦", "调光/调色不精准", "无线连接不稳定", "收纳困难", "价格过高/性价比低", "做工质感差"] },
-  { name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] }]
-  );
+function TagSystemEditor({ settings, setSettings, saveSettings }) {
+  const [groups, setGroups] = useState(safeArray(settings.tag_groups));
   const [drafts, setDrafts] = useState({});
   const [editing, setEditing] = useState(null); // index of group with input open
+
+  useEffect(() => {
+    setGroups(safeArray(settings.tag_groups));
+  }, [settings.tag_groups]);
 
   const addTag = (i) => {
     const v = (drafts[i] || "").trim();
@@ -2067,6 +2087,12 @@ function TagSystemEditor() {
   };
   const removeTag = (i, t) =>
   setGroups(groups.map((g, j) => j === i ? { ...g, tags: g.tags.filter((x) => x !== t) } : g));
+
+  const persist = async () => {
+    const next = { ...settings, tag_groups: groups };
+    setSettings(next);
+    await saveSettings(next);
+  };
 
   return (
     <>
@@ -2107,6 +2133,12 @@ function TagSystemEditor() {
           </div>
         </div>
       )}
+      <div className="settings-row">
+        <div className="label">&nbsp;</div>
+        <div className="row">
+          <Btn icon="save" onClick={persist}>保存 Tag 配置</Btn>
+        </div>
+      </div>
     </>);
 
 }

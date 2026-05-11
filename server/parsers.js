@@ -2,6 +2,8 @@ import { nanoid } from "nanoid";
 import { callLLM } from "./ai-service.js";
 import { fetchPageContent } from "./content-fetcher.js";
 import { buildSearchContext } from "./search-service.js";
+import { rawState } from "./repository.js";
+import { tagListText } from "./tag-config.js";
 
 function compactArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String).slice(0, 8);
@@ -14,10 +16,15 @@ function safeNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function tagGroups() {
+  return rawState().settings?.tag_groups || [];
+}
+
 export async function parseProductUrl({ url, platform }) {
   const page = await fetchPageContent(url);
   const detectedPlatform = platform || page.platform;
   const searchContext = await buildSearchContext(`${page.title} ${detectedPlatform} product review specs`, { limit: 4 });
+  const groups = tagGroups();
   const result = await callLLM({
     system: "你是产品经理的竞品信息结构化助手。只返回 JSON，不要解释。",
     user: `从以下网页内容中提取商品信息。允许字段为 null。返回 JSON：
@@ -34,6 +41,9 @@ export async function parseProductUrl({ url, platform }) {
   "negative_keywords": ["差评关键词"],
   "ai_summary": "80字以内中文摘要"
 }
+
+品牌字段：${tagListText(groups, "brands")}
+产品品类：${tagListText(groups, "product_categories")}
 
 平台：${detectedPlatform}
 URL：${page.url}
@@ -78,13 +88,15 @@ ${searchContext}`,
 export async function parseDemandUrl({ url }) {
   const page = await fetchPageContent(url);
   const searchContext = await buildSearchContext(`${page.title} creator problem use case trend`, { limit: 4 });
+  const groups = tagGroups();
   const result = await callLLM({
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
     user: `请对以下内容进行结构化打标。
 
-使用场景：["Vlog/自拍","直播/带货","短视频创作","户外旅拍","室内棚拍","桌面俯拍","会议/活动记录","运动/极限拍摄","产品摄影","延时/慢动作","街拍/纪实","教育/网课"]
-用户痛点：["携带不便/太重","续航不足","操作复杂/学习成本高","画质不够","防抖不足","散热过热","噪音大","兼容性差","配件缺失/需另购","安装固定麻烦","调光/调色不精准","无线连接不稳定","收纳困难","价格过高/性价比低","做工质感差"]
-创新类型：["技术创新","使用方式创新","形态创新","场景拓展","生态整合","性价比创新"]
+使用场景：${tagListText(groups, "scenarios")}
+用户痛点：${tagListText(groups, "painpoints")}
+创新类型：${tagListText(groups, "innovation_types")}
+自定义标签：${tagListText(groups, "custom_tags")}
 
 返回 JSON：
 {
