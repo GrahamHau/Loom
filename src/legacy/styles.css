@@ -255,6 +255,12 @@ a { color: inherit; text-decoration: none; }
   color: white;
 }
 .btn.primary:hover { filter: brightness(1.05); }
+.btn.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: white;
+}
+.btn.danger:hover { filter: brightness(1.04); }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--text-2); }
 .btn.ghost:hover { background: var(--hover); color: var(--text); }
 .btn.sm { height: 26px; padding: 0 9px; font-size: 12px; }
@@ -640,6 +646,41 @@ textarea.ghost-input { line-height: 1.6; }
   background: var(--surface-2);
   position: relative;
 }
+.demand-delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.78);
+  background: rgba(255,255,255,0.94);
+  color: var(--danger);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity .14s ease, transform .14s ease, background .12s ease, border-color .12s ease;
+  box-shadow: 0 8px 24px rgba(20,22,28,.12);
+}
+.demand-delete-btn:hover {
+  background: var(--danger-soft);
+  border-color: color-mix(in oklch, var(--danger) 30%, white);
+}
+.demand-card:hover .demand-delete-btn,
+.demand-card:focus-within .demand-delete-btn {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.demand-thumb-media {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
 .demand-thumb .platform-badge {
   position: absolute;
   top: 8px; left: 8px;
@@ -658,6 +699,30 @@ textarea.ghost-input { line-height: 1.6; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;}
 .demand-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .demand-foot { display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; color: var(--text-4); margin-top: auto; padding-top: 4px; border-top: 1px dashed var(--border);}
+
+.confirm-delete-summary {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.confirm-delete-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.confirm-delete-label {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.confirm-delete-value {
+  font-size: 12.5px;
+  color: var(--text);
+  word-break: break-word;
+}
 
 /* Research */
 .research-list { display: flex; flex-direction: column; gap: 10px; }

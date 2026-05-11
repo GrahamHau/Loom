@@ -18,7 +18,7 @@ function detectPlatform(url) {
 function firstMatch(html, patterns) {
   for (const pattern of patterns) {
     const match = html.match(pattern);
-    if (match?.[1]) return decodeHtml(match[1].trim());
+    if (match?.[1]) return normalizeExtractedValue(match[1]);
   }
   return "";
 }
@@ -31,6 +31,28 @@ function decodeHtml(text) {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ");
+}
+
+function normalizeExtractedValue(text) {
+  return decodeHtml(String(text || "")
+    .trim()
+    .replace(/^['"]|['"]$/g, "")
+    .replace(/\\u002F/gi, "/")
+    .replace(/\\\//g, "/")
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, " ")
+    .replace(/\s+/g, " "));
+}
+
+function resolveAssetUrl(rawUrl, baseUrl) {
+  const value = normalizeExtractedValue(rawUrl);
+  if (!value) return "";
+  if (value.startsWith("data:")) return "";
+  try {
+    return new URL(value, baseUrl).toString();
+  } catch {
+    return "";
+  }
 }
 
 export function cleanHtml(html) {
@@ -94,6 +116,7 @@ export async function fetchPageHtml(url) {
 export async function fetchPageContent(url) {
   try {
     const { parsed, response, html } = await fetchPageResponse(url);
+    const pageUrl = response.url || parsed.toString();
     const title = firstMatch(html, [
       /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
       /<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i,
@@ -103,14 +126,21 @@ export async function fetchPageContent(url) {
       /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
       /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i,
     ]);
-    const image = firstMatch(html, [
+    const image = resolveAssetUrl(firstMatch(html, [
       /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
       /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
-    ]);
+      /<meta[^>]+name=["']twitter:image:src["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+itemprop=["']image["'][^>]+content=["']([^"']+)["']/i,
+      /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i,
+      /"og:image"[^>]*content=["']([^"']+)["']/i,
+      /"image"\s*:\s*"([^"]+)"/i,
+      /"images"\s*:\s*\[\s*"([^"]+)"/i,
+      /"imageList"\s*:\s*\[\s*"([^"]+)"/i,
+    ]), pageUrl);
     const text = cleanHtml(html);
     return {
-      url: response.url || parsed.toString(),
-      platform: detectPlatform(response.url || parsed.toString()),
+      url: pageUrl,
+      platform: detectPlatform(pageUrl),
       title,
       description,
       image,

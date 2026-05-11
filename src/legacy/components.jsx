@@ -60,7 +60,7 @@ const Tag = ({ tone = "default", children, ...rest }) => (
   <span className={`tag ${tone === "default" ? "" : tone}`} {...rest}>{children}</span>
 );
 const Btn = ({ variant = "default", size, icon, children, ...rest }) => (
-  <button className={`btn ${variant === "primary" ? "primary" : variant === "ghost" ? "ghost" : ""} ${size === "sm" ? "sm" : ""} ${!children ? "icon" : ""}`} {...rest}>
+  <button className={`btn ${variant === "primary" ? "primary" : variant === "ghost" ? "ghost" : variant === "danger" ? "danger" : ""} ${size === "sm" ? "sm" : ""} ${!children ? "icon" : ""}`} {...rest}>
     {icon && <Icon name={icon} size={size === "sm" ? 13 : 14} />}
     {children}
   </button>
