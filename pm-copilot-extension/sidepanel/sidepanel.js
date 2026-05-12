@@ -71,6 +71,7 @@ async function loadCurrentPage(defaultMode = "auto") {
       return;
     }
     state.page = result;
+    state.message = "";
     state.mode = defaultMode === "demand"
       ? "demand"
       : defaultMode === "product"
@@ -88,11 +89,17 @@ async function loadCurrentPage(defaultMode = "auto") {
 
 async function readPageData(tab) {
   if (!tab?.id) throw new Error("没有可读取的当前页面");
+  const platform = detectPlatformFromUrl(tab.url || "");
   try {
+    if (platform) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["content/detector.js", EXTRACTOR_FILES[platform]],
+      });
+    }
     return await chrome.tabs.sendMessage(tab.id, { type: "PM_COPILOT_GET_PAGE_DATA" });
   } catch (error) {
     if (!String(error.message || "").includes("Receiving end does not exist")) throw error;
-    const platform = detectPlatformFromUrl(tab.url || "");
     if (!platform) throw new Error("当前页面不在插件支持范围内");
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -144,6 +151,25 @@ async function processRaw() {
   }
 }
 
+async function reloadCurrentPage() {
+  state.reloading = true;
+  renderLoading("正在重新抓取当前页面");
+  try {
+    const result = await readPageData(state.tab);
+    if (!result?.ok) throw new Error(result?.error || "重新抓取失败");
+    state.page = result;
+    state.processed = result.data;
+    state.form = buildDraft(state.mode, state.processed);
+    state.message = "页面已重新抓取";
+    await maybeProcess();
+    renderMain();
+  } catch (error) {
+    state.reloading = false;
+    state.message = `刷新失败：${error.message}`;
+    renderMain();
+  }
+}
+
 async function api(path, options = {}) {
   const res = await fetch(`${state.apiBase}${path}`, {
     ...options,
@@ -156,6 +182,15 @@ async function api(path, options = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || data.error || `请求失败 ${res.status}`);
   return data;
+}
+
+async function pingApiBase(apiBase) {
+  const res = await fetch(`${apiBase}/api/health`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json().catch(() => ({}));
 }
 
 function renderLogin() {
@@ -171,17 +206,72 @@ function renderLogin() {
         </div>
         <button class="icon-btn" id="open-options" title="设置">⚙</button>
       </div>
-      <div class="body">
-        <form class="card form" id="login-form">
-          <label>服务器地址<input id="api-base" type="url" value="${escapeHtml(state.apiBase)}" placeholder="https://ulanzi-copilot.my1panelsite.xyz"></label>
-          <label>用户名<input id="username" type="text" placeholder="graham"></label>
-          <label>密码<input id="password" type="password" placeholder="••••••••"></label>
-          <button class="btn primary" type="submit">登录</button>
-          <div class="status">Token 保存在 Chrome 本地 storage。</div>
+      <div class="cl-body cl-login-body">
+        <form class="cl-login" id="login-form">
+          <div class="cl-login-head">
+            <div class="cl-login-glyph">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div>
+              <div class="cl-login-title">登录 PM Copilot</div>
+              <div class="cl-login-sub">连接后端后才能保存采集到的竞品与需求</div>
+            </div>
+          </div>
+
+          <div class="cl-login-fields">
+            <label class="cl-login-field">
+              <span>服务器地址</span>
+              <input class="login-input mono" id="api-base" type="url" value="${escapeHtml(state.apiBase)}" placeholder="https://ulanzi-copilot.my1panelsite.xyz">
+            </label>
+            <label class="cl-login-field">
+              <span>用户名</span>
+              <input class="login-input" id="username" type="text" placeholder="graham">
+            </label>
+            <label class="cl-login-field">
+              <span>密码</span>
+              <div class="input-wrap">
+                <input class="login-input mono" id="password" type="password" placeholder="••••••••">
+                <button class="ico-btn sm" id="toggle-password" type="button" aria-label="显示密码">${eyeIcon()}</button>
+              </div>
+            </label>
+          </div>
+
+          <div class="cl-login-note hint-warn">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <span>账号信息会保存在 chrome.storage.local，仅本机使用</span>
+          </div>
+
+          <div class="cl-login-status mono" id="login-status">等待连接测试</div>
         </form>
+      </div>
+      <div class="cl-foot">
+        <button class="btn ghost grow" id="test-connection" type="button">测试连接</button>
+        <button class="btn primary grow" form="login-form" type="submit">登录并保存</button>
       </div>
     </div>`;
   document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
+  document.getElementById("toggle-password").onclick = () => {
+    const input = document.getElementById("password");
+    const button = document.getElementById("toggle-password");
+    const visible = input.type === "text";
+    input.type = visible ? "password" : "text";
+    button.innerHTML = visible ? eyeIcon() : eyeOffIcon();
+  };
+  document.getElementById("test-connection").onclick = async () => {
+    const apiBase = document.getElementById("api-base").value.trim().replace(/\/$/, "");
+    const status = document.getElementById("login-status");
+    if (!apiBase) {
+      status.textContent = "请先填写服务器地址";
+      return;
+    }
+    status.textContent = "正在测试连接…";
+    try {
+      await pingApiBase(apiBase);
+      status.textContent = "连接正常";
+    } catch (error) {
+      status.textContent = `连接失败：${error.message}`;
+    }
+  };
   document.getElementById("login-form").onsubmit = async (event) => {
     event.preventDefault();
     const apiBase = document.getElementById("api-base").value.trim().replace(/\/$/, "");
@@ -216,20 +306,40 @@ function renderLoading(text) {
   document.getElementById("app").innerHTML = `
     <div class="shell">
       ${headerHtml()}
+      <div class="cl-banner detecting">
+        <div class="cl-banner-ico">${spinIcon()}</div>
+        <div class="cl-banner-body">
+          <div class="cl-banner-title">${escapeHtml(text)}</div>
+          <div class="cl-banner-sub mono">${escapeHtml(state.tab?.url || state.page?.data?.url || "")}</div>
+        </div>
+      </div>
       <div class="cl-body">
-        <div class="cl-banner detecting">
-          <div class="cl-banner-ico">${spinIcon()}</div>
-          <div class="cl-banner-body">
-            <div class="cl-banner-title">${escapeHtml(text)}</div>
-            <div class="cl-banner-sub mono">${escapeHtml(state.tab?.url || state.page?.data?.url || "")}</div>
+        <div class="ai-parse">
+          <div class="ai-parse-head">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+            <span class="ai-parse-title">AI 正在处理页面</span>
+            <span class="muted mono">~8-12s</span>
+          </div>
+          <div class="ai-step done">
+            <span class="ai-dot"><svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+            <div><div class="ai-step-label">注入 content/detector.js</div><div class="ai-step-detail mono">platform = ${escapeHtml(state.page?.platform || "unknown")}</div></div>
+          </div>
+          <div class="ai-step done">
+            <span class="ai-dot"><svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+            <div><div class="ai-step-label">读取页面原始字段</div><div class="ai-step-detail mono">title · price · rating · features</div></div>
+          </div>
+          <div class="ai-step active">
+            <span class="ai-dot"></span>
+            <div><div class="ai-step-label">AI 结构化（aiBeforeSave）</div><div class="ai-step-detail mono">POST /api/products/parse-raw 或 /api/demands/parse-raw</div></div>
+          </div>
+          <div class="ai-step">
+            <span class="ai-dot"></span>
+            <div><div class="ai-step-label">构建表单草稿</div><div class="ai-step-detail mono">buildDraft(mode, processed)</div></div>
           </div>
         </div>
-        <div class="cl-empty">
-          <div class="cl-skel cl-skel-img"></div>
-          <div class="cl-skel cl-skel-h"></div>
-          <div class="cl-skel cl-skel-line"></div>
-          <div class="cl-skel cl-skel-line w70"></div>
-          <div class="cl-empty-hint">AI 正在读取页面 DOM，预计 8-12 秒</div>
+        <div class="cl-hint">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <span>解析在后台完成，关闭面板不会中断。完成后会回到当前标签页。</span>
         </div>
       </div>
       <div class="cl-foot">
@@ -244,14 +354,37 @@ function renderUnsupported(reason) {
   document.getElementById("app").innerHTML = `
     <div class="shell">
       ${headerHtml()}
-      <div class="body">
-        <div class="banner">${escapeHtml(reason)}</div>
-        <div class="card status">支持 Amazon、淘宝/天猫、小红书、Kickstarter。请打开商品页或笔记页后刷新右侧栏。</div>
-        <button class="btn primary" id="refresh">重新检测</button>
+      <div class="cl-banner banner-warn">
+        <div class="cl-banner-ico warn">${warnIcon()}</div>
+        <div class="cl-banner-body">
+          <div class="cl-banner-title">当前页面无法采集</div>
+          <div class="cl-banner-sub mono">${escapeHtml(reason)}</div>
+        </div>
+      </div>
+      <div class="cl-body cl-unsupported-body">
+        <div class="cl-unsupported">
+          <div class="cl-unsupported-title">未识别为支持的平台</div>
+          <div class="cl-unsupported-text">PM Copilot 目前只在以下平台自动采集，可以在设置中调整白名单。</div>
+          <div class="platform-list">
+            <div class="platform-list-row"><span class="platform-pill amz">Amazon</span><span class="platform-list-url mono">amazon.com/dp/*</span><span class="tag outline">竞品</span></div>
+            <div class="platform-list-row"><span class="platform-pill tb">淘宝/天猫</span><span class="platform-list-url mono">item.taobao.com · detail.tmall.com</span><span class="tag outline">竞品</span></div>
+            <div class="platform-list-row"><span class="platform-pill ks">Kickstarter</span><span class="platform-list-url mono">kickstarter.com/projects/*</span><span class="tag outline">竞品</span></div>
+            <div class="platform-list-row"><span class="platform-pill xhs">小红书</span><span class="platform-list-url mono">xiaohongshu.com/explore/*</span><span class="tag outline">需求</span></div>
+          </div>
+          <div class="cl-hint">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+            <span>也可以在 PM Copilot Web 端手动新建竞品 / 需求</span>
+          </div>
+        </div>
+      </div>
+      <div class="cl-foot">
+        <button class="btn ghost grow" id="refresh" type="button">重新检测</button>
+        <button class="btn primary grow" id="open-web" type="button">打开 Web 端</button>
       </div>
     </div>`;
   bindHeader();
   document.getElementById("refresh").onclick = () => loadCurrentPage();
+  document.getElementById("open-web").onclick = () => chrome.tabs.create({ url: state.apiBase });
 }
 
 function renderMain() {
@@ -264,11 +397,10 @@ function renderMain() {
       ${headerHtml()}
       <div class="cl-banner ${bannerClass(platform)}">
         ${state.reloading ? `<div class="cl-banner-ico">${spinIcon()}</div>` : bannerIcon(platform)}
-        <div class="cl-banner-body">
-          <div class="cl-banner-title">${escapeHtml(PLATFORM_LABELS[platform] || platform)} · ${state.mode === "product" ? "竞品采集" : "需求采集"}</div>
-          <div class="cl-banner-sub mono">${escapeHtml(state.page?.data?.url || "")}</div>
-        </div>
-        <button class="ico-btn sm" id="reload-page" title="刷新">${refreshIcon()}</button>
+      <div class="cl-banner-body">
+        <div class="cl-banner-title">${escapeHtml(PLATFORM_LABELS[platform] || platform)} · ${state.mode === "product" ? "竞品采集" : "需求采集"}</div>
+        <div class="cl-banner-sub mono">${escapeHtml(state.page?.data?.url || "")}</div>
+      </div>
       </div>
 
       <nav class="cl-tabs">
@@ -290,24 +422,6 @@ function renderMain() {
   bindHeader();
   document.getElementById("mode-product").onclick = () => switchMode("product", canProduct, "此页面建议使用需求模式");
   document.getElementById("mode-demand").onclick = () => switchMode("demand", canDemand, "此页面建议使用竞品模式");
-  document.getElementById("reload-page").onclick = async () => {
-    state.reloading = true;
-    renderLoading("正在重新抓取当前页面");
-    try {
-      const result = await readPageData(state.tab);
-      if (!result?.ok) throw new Error(result?.error || "重新抓取失败");
-      state.page = result;
-      state.processed = result.data;
-      state.form = buildDraft(state.mode, state.processed);
-      state.message = "页面已重新抓取";
-      await maybeProcess();
-      renderMain();
-    } catch (error) {
-      state.reloading = false;
-      state.message = `刷新失败：${error.message}`;
-      renderMain();
-    }
-  };
   document.getElementById("process").onclick = async () => {
     renderLoading("AI 结构化中");
     await processRaw();
@@ -351,6 +465,18 @@ function refreshIcon() {
   return `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>`;
 }
 
+function eyeIcon() {
+  return `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
+}
+
+function eyeOffIcon() {
+  return `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.58 10.58a3 3 0 0 0 4.24 4.24"/><path d="M9.88 5.09A10.74 10.74 0 0 1 12 5c7 0 10 7 10 7a18.73 18.73 0 0 1-4.2 5.38"/><path d="M6.11 6.11C3.46 8.17 2 12 2 12s3 7 10 7a10.93 10.93 0 0 0 5.3-1.39"/></svg>`;
+}
+
+function warnIcon() {
+  return `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>`;
+}
+
 function buildDraft(mode, item) {
   if (mode === "product") {
     return {
@@ -365,7 +491,6 @@ function buildDraft(mode, item) {
       image: cleanText(item?.thumbnail_url || item?.image, ""),
       tags: safeArray(item?.tags),
       selling_points: safeArray(item?.selling_points),
-      negative_keywords: safeArray(item?.negative_keywords),
       ai_summary: cleanText(item?.ai_summary, ""),
       platform: state.page?.platform || "",
       url: cleanText(item?.url || state.page?.data?.url, ""),
@@ -383,6 +508,7 @@ function buildDraft(mode, item) {
     url: cleanText(item?.url || state.page?.data?.url, ""),
     source: state.page?.platform || "",
     note: cleanText(item?.note, ""),
+    debug: item?.debug || state.page?.data?.debug || null,
   };
 }
 
@@ -400,17 +526,20 @@ function setArrayField(key, value) {
 
 function productView(item) {
   return `
-    <div class="cl-preview">
-      <div class="cl-preview-cover">
-        ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<div class="ph">PRODUCT<br>IMG</div>`}
-      </div>
-      <div class="cl-preview-meta">
-        <div class="cl-preview-platform">
-          <span class="platform-pill ${platformClass(state.page.platform)}">${PLATFORM_LABELS[state.page.platform] || state.page.platform}</span>
-          <span class="rating-mini">${item.rating ? `<span class="rating-star">★</span>${escapeHtml(item.rating)}` : ""}${item.review_count ? ` <span class="muted">· ${escapeHtml(item.review_count)}</span>` : ""}</span>
+    <div class="product-capture-card">
+      <div class="product-capture-top">
+        <div class="cl-preview-cover">
+          ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<div class="ph">PRODUCT<br>IMG</div>`}
         </div>
-        <div class="cl-preview-price">${escapeHtml(item.price || "—")} <span class="muted">/ 月销 ${escapeHtml(item.monthly_sales || "—")}</span></div>
+        <div class="cl-preview-meta">
+          <div class="cl-preview-platform">
+            <span class="platform-pill ${platformClass(state.page.platform)}">${PLATFORM_LABELS[state.page.platform] || state.page.platform}</span>
+            ${showMarketplaceRating(state.page.platform) ? `<span class="rating-mini">${item.rating ? `<span class="rating-star">★</span>${escapeHtml(item.rating)}` : ""}${item.review_count ? ` <span class="muted">· ${escapeHtml(item.review_count)}</span>` : ""}</span>` : ""}
+          </div>
+          <div class="cl-preview-price">${escapeHtml(item.price || "—")} <span class="muted">/ 月销 ${escapeHtml(item.monthly_sales || "—")}</span></div>
+        </div>
       </div>
+      ${platformCardsHtml(item)}
     </div>
     <div class="cl-section">
       <div class="cl-section-label">名称</div>
@@ -427,23 +556,8 @@ function productView(item) {
       </div>
     </div>
     <div class="cl-section">
-      <div class="cl-section-label">品类标签</div>
-      <div class="tag-row">
-        ${safeArray(item.tags).map((t) => `<span class="tag accent removable" data-tag-key="tags" data-tag-value="${escapeAttr(t)}">${escapeHtml(t)}<button type="button">×</button></span>`).join("")}
-        <button class="tag dashed" data-add-key="tags">+ 添加</button>
-      </div>
-    </div>
-    <div class="cl-section">
-      <div class="cl-section-label">平台信息</div>
-      ${platformCardsHtml(item)}
-    </div>
-    <div class="cl-section">
       <div class="cl-section-label">核心卖点 · AI 总结</div>
       ${listEditor("selling_points", safeArray(item.selling_points), "输入卖点，回车添加", "success")}
-    </div>
-    <div class="cl-section">
-      <div class="cl-section-label">差评关键词</div>
-      ${listEditor("negative_keywords", safeArray(item.negative_keywords), "输入差评关键词", "danger")}
     </div>
     <div class="cl-section">
       <div class="cl-section-label">AI 摘要</div>
@@ -464,6 +578,10 @@ function demandView(item) {
     <div class="cl-section">
       <div class="cl-section-label">AI 摘要 / 原文</div>
       <textarea class="ghost-input full" data-key="summary" placeholder="补充摘要或原文">${escapeHtml(item.summary || "")}</textarea>
+    </div>
+    <div class="cl-section">
+      <div class="cl-section-label">首图 URL</div>
+      <input class="ghost-input full mono" data-key="thumbnail_url" value="${escapeAttr(item.thumbnail_url || "")}" placeholder="未采到时可手动粘贴首图链接">
     </div>
     <div class="cl-section">
       <div class="cl-section-label">创新类型 · 多选</div>
@@ -490,6 +608,11 @@ function demandView(item) {
       <div class="cl-section-label">来源链接</div>
       <div class="source-link mono">${escapeHtml(item.url || state.page?.data?.url || "")}</div>
     </div>
+    ${item.debug ? `
+    <div class="cl-section">
+      <div class="cl-section-label">调试信息</div>
+      <div class="source-link mono">${escapeHtml(JSON.stringify(item.debug, null, 2))}</div>
+    </div>` : ""}
     <div class="cl-section">
       <div class="cl-section-label">备注</div>
       <textarea class="ghost-input full" data-key="note" placeholder="可选备注">${escapeHtml(item.note || "")}</textarea>
@@ -507,7 +630,7 @@ function platformCardsHtml(item) {
     sales: item.monthly_sales || "",
   }];
   return platforms.map((pl, index) => `
-    <div class="platform-card">
+    <div class="platform-card compact">
       <div class="platform-card-head">
         <span class="platform-pill ${platformClass(pl.platform)}">${PLATFORM_LABELS[pl.platform] || pl.platform || "平台"}</span>
         <span class="platform-card-link mono">${escapeHtml(pl.url || "")}</span>
@@ -515,21 +638,26 @@ function platformCardsHtml(item) {
       <div class="platform-card-grid">
         ${metric("售价", `platforms.${index}.price`, pl.price || "", "$")}
         ${metric("参考成本", `platforms.${index}.cost`, pl.cost || item.cost_estimate || "", "¥")}
-        ${metric("评分", `platforms.${index}.rating`, pl.rating ?? "", "★")}
-        ${metric("评论数", `platforms.${index}.reviews`, pl.reviews ?? "", "")}
-        ${metric("月销估算", `platforms.${index}.sales`, pl.sales || "", "/月")}
+        ${showMarketplaceRating(pl.platform) ? metric("评分", `platforms.${index}.rating`, pl.rating ?? "", "★") : ""}
+        ${showMarketplaceRating(pl.platform) ? metric("评论数", `platforms.${index}.reviews`, pl.reviews ?? "", "") : ""}
+        ${metric("月销估算", `platforms.${index}.sales`, pl.sales || "", "", "/月")}
       </div>
     </div>
   `).join("");
 }
 
-function metric(label, key, value, prefix) {
+function showMarketplaceRating(platform) {
+  return platform !== "taobao";
+}
+
+function metric(label, key, value, prefix, suffix = "") {
   return `
     <label class="metric${label === "月销估算" ? " span-2" : ""}">
       <div class="metric-label">${escapeHtml(label)}</div>
       <div class="metric-input-wrap">
         ${prefix ? `<span class="metric-prefix ${prefix === "★" ? "rating-star" : ""}">${escapeHtml(prefix)}</span>` : ""}
         <input class="metric-input" data-key="${escapeAttr(key)}" value="${escapeAttr(value || "")}">
+        ${suffix ? `<span class="metric-suffix">${escapeHtml(suffix)}</span>` : ""}
       </div>
     </label>
   `;
@@ -569,6 +697,8 @@ function platformClass(platform) {
 
 function bindHeader() {
   document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
+  const reloadButton = document.getElementById("header-reload");
+  if (reloadButton) reloadButton.onclick = () => reloadCurrentPage();
 }
 
 function handleGlobalClick(event) {
@@ -647,8 +777,8 @@ document.addEventListener("input", (event) => {
     state.form = { ...(state.form || {}), platforms };
     return;
   }
-  if (key === "tags" || key === "scenarios" || key === "painpoints") return;
-  if (key === "selling_points" || key === "negative_keywords") {
+  if (key === "scenarios" || key === "painpoints") return;
+  if (key === "selling_points") {
     state.form = { ...(state.form || {}), [key]: String(el.value || "").split(/[\n,，；;]+/).map((item) => item.trim()).filter(Boolean) };
     return;
   }
@@ -676,7 +806,6 @@ function productPayload(item) {
     thumbnail_url: item.thumbnail_url || item.image || "",
     tags: safeArray(item.tags),
     selling_points: safeArray(item.selling_points),
-    negative_keywords: safeArray(item.negative_keywords),
     platforms: safeArray(item.platforms).length ? item.platforms : [{
       id: `${state.page.platform}-${Date.now()}`,
       platform: state.page.platform,
@@ -758,6 +887,7 @@ function headerHtml() {
           <div class="cl-conn"><span class="dot dot-ok"></span>已连接 · ${escapeHtml(name)}</div>
         </div>
       </div>
+      ${state.page ? `<button class="ico-btn" id="header-reload" aria-label="刷新">${refreshIcon()}</button>` : ""}
       <button class="ico-btn" id="open-options" aria-label="设置">${settingsIcon()}</button>
     </div>`;
 }

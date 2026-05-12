@@ -95,9 +95,15 @@ ${searchContext}`,
 export async function parseProductRaw({ platform, data }) {
   const groups = tagGroups();
   const source = data || {};
+  const rawBullets = compactArray(source.raw_bullets);
   const result = await callLLM({
     system: "你是竞品分析助手，服务于摄影配件品牌产品经理。只返回 JSON，不要解释。",
     user: `从插件采集的商品信息中提取结构化数据。字段缺失可返回 null。
+
+规则：
+- selling_points 只能来自“原始卖点/规格”或商品名/描述中明确出现的信息，不要把“新品、旗舰店、品牌不在白名单、品类不匹配”当卖点。
+- negative_keywords 只有输入里出现明确差评、缺陷、限制时才返回；没有就返回 []，不要编造。
+- 如果商品不属于摄影/影像器材，也照样提取真实商品信息，但 category 用最接近的真实品类或“其他”。
 
 返回 JSON：
 {
@@ -125,7 +131,7 @@ URL：${source.url || ""}
 评分：${source.rating || ""} (${source.review_count || 0} 评)
 月销：${source.monthly_sales || ""}
 描述：${source.description || source.content || ""}
-原始卖点：${compactArray(source.raw_bullets).join("；")}`,
+原始卖点/规格：${rawBullets.join("；")}`,
     maxTokens: 260,
   });
 
@@ -142,7 +148,7 @@ URL：${source.url || ""}
     review_count: safeNumber(result.review_count ?? source.review_count),
     monthly_sales: normalizeMonthlySales(result.monthly_sales || source.monthly_sales),
     thumbnail_url: source.thumbnail_url || result.image_url || "",
-    selling_points: compactArray(result.selling_points || source.raw_bullets),
+    selling_points: compactArray(result.selling_points).length ? compactArray(result.selling_points) : rawBullets,
     negative_keywords: compactArray(result.negative_keywords),
     ai_summary: result.ai_summary || source.description || "",
   };
@@ -212,6 +218,10 @@ export async function parseDemandRaw({ platform, data }) {
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
     user: `请对插件采集的内容进行需求结构化打标。
 
+规则：
+- title 必须基于原始标题压缩或清洗，不要改成另一个事件，也不要凭空重写。
+- 如果原始标题已经清晰，直接沿用原始标题。
+
 使用场景：${tagListText(groups, "scenarios")}
 用户痛点：${tagListText(groups, "painpoints")}
 创新类型：${tagListText(groups, "innovation_types")}
@@ -240,7 +250,7 @@ URL：${source.url || ""}
   return {
     ...source,
     platform,
-    title: result.title || source.title || source.name || "未命名需求",
+    title: source.title || source.name || result.title || "未命名需求",
     summary: result.summary || source.content || source.description || "",
     tags_scenario: compactArray(result.tags_scenario),
     tags_painpoint: compactArray(result.tags_painpoint),
