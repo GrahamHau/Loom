@@ -53,7 +53,38 @@
       ].join(","));
       return Boolean(badContainer);
     };
-    const bootstrapTitleNode = first(["#detail-title", ".title", "h1"]);
+    const currentPath = (() => {
+      try {
+        return new URL(window.location.href).pathname.replace(/\/+$/, "");
+      } catch {
+        return String(window.location.pathname || "").replace(/\/+$/, "");
+      }
+    })();
+    const sameCurrentPath = (href) => {
+      if (!href || !currentPath) return false;
+      try {
+        return new URL(href, window.location.href).pathname.replace(/\/+$/, "") === currentPath;
+      } catch {
+        return false;
+      }
+    };
+    const findCurrentNoteAnchor = () => {
+      const anchors = Array.from(document.querySelectorAll("a[href*='/explore/']"))
+        .filter((anchor) => sameCurrentPath(anchor.href));
+      const ranked = anchors
+        .map((anchor) => {
+          const rect = anchor.getBoundingClientRect();
+          const area = Math.max(rect.width, 0) * Math.max(rect.height, 0);
+          const centerPenalty = Math.abs((rect.left + rect.width / 2) - window.innerWidth / 2) * 1000;
+          const viewportBonus = rect.top < window.innerHeight && rect.bottom > 0 ? 400_000 : 0;
+          return { anchor, score: area + viewportBonus - centerPenalty };
+        })
+        .sort((a, b) => b.score - a.score);
+      return ranked[0]?.anchor || null;
+    };
+    const currentNoteAnchor = findCurrentNoteAnchor();
+    const currentNoteCard = currentNoteAnchor?.closest("section, article, [class*='note-item'], [class*='noteItem'], [class*='feed-card'], [class*='card']") || null;
+    const bootstrapTitleNode = first(["#detail-title", ".title", "h1"], currentNoteAnchor?.closest("div, section, article") || document) || first(["#detail-title", ".title", "h1"]);
     const candidateRootSelectors = [
       "#noteContainer",
       ".note-container",
@@ -114,7 +145,8 @@
         depth += 1;
       }
       ranked.sort((a, b) => b.score - a.score);
-      return ranked[0]?.node || null;
+      if (ranked[0]?.node) return ranked[0].node;
+      return currentNoteCard || currentNoteAnchor?.closest("div, section, article") || null;
     };
     const overlayScore = (node) => {
       const rect = node.getBoundingClientRect();
@@ -158,6 +190,24 @@
       return area + titleBonus + mediaBonus + widthBonus;
     };
     const findNoteRoot = () => {
+      if (currentNoteCard || currentNoteAnchor) {
+        const anchorAncestors = [];
+        let current = currentNoteCard || currentNoteAnchor;
+        let depth = 0;
+        while (current && depth < 12) {
+          if (current instanceof Element) {
+            const rect = current.getBoundingClientRect();
+            const area = Math.max(rect.width, 0) * Math.max(rect.height, 0);
+            const titleBonus = bootstrapTitleNode && current.contains(bootstrapTitleNode) ? 800_000 : 0;
+            const mediaBonus = hasMedia(current) ? 1_200_000 : 0;
+            anchorAncestors.push({ node: current, score: area + titleBonus + mediaBonus });
+          }
+          current = current.parentElement;
+          depth += 1;
+        }
+        anchorAncestors.sort((a, b) => b.score - a.score);
+        if (anchorAncestors[0]?.node) return anchorAncestors[0].node;
+      }
       if (detailRoot) {
         const detailAncestors = [];
         let current = detailRoot;
@@ -367,6 +417,109 @@
       }
       return "";
     };
+    const videoHintText = (node) => {
+      if (!node || !(node instanceof Element)) return "";
+      return [
+        node.className || "",
+        node.getAttribute("data-type") || "",
+        node.getAttribute("role") || "",
+        node.getAttribute("aria-label") || "",
+      ].join(" ").toLowerCase();
+    };
+    const hasVideoPosterAttrs = (node) => {
+      if (!node || !(node instanceof Element)) return false;
+      return Boolean(
+        node.getAttribute("poster") ||
+        node.getAttribute("data-poster") ||
+        node.getAttribute("x5-video-poster") ||
+        node.querySelector("video[poster], video[data-poster], video[x5-video-poster], [poster], [data-poster], [x5-video-poster]")
+      );
+    };
+    const isVideoNote = () => {
+      const root = mediaFrame || noteRoot;
+      if (!root || !(root instanceof Element)) return false;
+      if (root.querySelector("video")) return true;
+      if (hasVideoPosterAttrs(root)) return true;
+      const rootText = String(root.textContent || "").replace(/\s+/g, " ");
+      if (/\b\d{2}:\d{2}\s*\/\s*\d{2}:\d{2}\b/.test(rootText)) return true;
+      if (/(倍速|高清|点击播放|播放)/.test(rootText) && hasMedia(root)) return true;
+      const videoLikeNode = Array.from(root.querySelectorAll("*")).find((node) => {
+        if (!(node instanceof Element) || isIrrelevantNode(node)) return false;
+        const hint = videoHintText(node);
+        const textHint = String(node.textContent || "").replace(/\s+/g, " ");
+        return (/video|player|live-photo|playable/.test(hint) || /\b\d{2}:\d{2}\s*\/\s*\d{2}:\d{2}\b/.test(textHint) || /(倍速|高清|点击播放|播放)/.test(textHint)) && (
+          hasVideoPosterAttrs(node) ||
+          Boolean(node.querySelector("img")) ||
+          Boolean(cssImageUrl(window.getComputedStyle(node).backgroundImage)) ||
+          hasMedia(node)
+        );
+      });
+      return Boolean(videoLikeNode);
+    };
+    const pickVideoThumbnail = () => {
+      const root = mediaFrame || noteRoot;
+      if (!root || !(root instanceof Element)) return { url: "", source: "video-none", top: [] };
+      const candidates = [];
+      const pushCandidate = (node, url, source) => {
+        if (!url || isBadImage(url) || !node || !(node instanceof Element) || isIrrelevantNode(node)) return;
+        const score = viewportMediaScore(node) + 500_000;
+        if (score <= 0) return;
+        candidates.push({
+          url,
+          source,
+          score,
+          tag: node.tagName,
+          className: node.className || "",
+        });
+      };
+      const videoRoots = [
+        root,
+        ...Array.from(root.querySelectorAll("video, [poster], [data-poster], [x5-video-poster], [class*='video'], [class*='player'], [class*='poster'], .media-container")),
+      ];
+      for (const node of videoRoots) {
+        if (!(node instanceof Element) || isIrrelevantNode(node)) continue;
+        const hint = videoHintText(node);
+        if (node !== root && !/video|player|live-photo|playable|poster/.test(hint) && !hasVideoPosterAttrs(node) && !node.querySelector("video")) continue;
+
+        const directPoster = normalizeImageUrl(
+          node.getAttribute("poster") ||
+          node.getAttribute("data-poster") ||
+          node.getAttribute("x5-video-poster")
+        );
+        pushCandidate(node, directPoster, "video-attr");
+
+        const directVideo = node.tagName === "VIDEO" ? node : node.querySelector("video");
+        const videoPoster = normalizeImageUrl(
+          directVideo?.getAttribute("poster") ||
+          directVideo?.getAttribute("data-poster") ||
+          directVideo?.getAttribute("x5-video-poster")
+        );
+        pushCandidate(directVideo || node, videoPoster, "video-poster");
+
+        const posterImg = node.tagName === "IMG" ? node : node.querySelector("img");
+        const posterImgUrl = normalizeImageUrl(
+          posterImg?.currentSrc ||
+          posterImg?.getAttribute("src") ||
+          posterImg?.getAttribute("data-src") ||
+          posterImg?.getAttribute("data-original") ||
+          posterImg?.getAttribute("data-lazy-src") ||
+          urlFromSrcset(posterImg?.getAttribute("srcset"))
+        );
+        pushCandidate(posterImg || node, posterImgUrl, "video-img");
+
+        const inlineBg = cssImageUrl(node instanceof HTMLElement ? node.style?.backgroundImage : "");
+        pushCandidate(node, inlineBg, "video-inline-bg");
+
+        const computedBg = cssImageUrl(window.getComputedStyle(node).backgroundImage);
+        pushCandidate(node, computedBg, "video-bg");
+      }
+      const ranked = candidates.sort((a, b) => b.score - a.score);
+      return {
+        url: ranked[0]?.url || "",
+        source: ranked[0]?.source || "video-none",
+        top: ranked.slice(0, 8),
+      };
+    };
     const viewportMediaScore = (node) => {
       const rect = node.getBoundingClientRect();
       const frameRect = getMediaRect();
@@ -503,8 +656,58 @@
         .sort((a, b) => b.score - a.score);
       return { url: ranked[0]?.url || "", top: ranked.slice(0, 5) };
     };
+    const pickScopedThumbnail = (root, sourcePrefix = "scoped") => {
+      if (!root || !(root instanceof Element)) return { url: "", source: `${sourcePrefix}-none`, top: [] };
+      const imgCandidates = Array.from(root.querySelectorAll("img"));
+      const rankedImages = imgCandidates
+        .map((img) => {
+          if (isIrrelevantNode(img)) return { url: "", score: 0 };
+          const url = normalizeImageUrl(
+            img.currentSrc ||
+            img.src ||
+            img.getAttribute("src") ||
+            img.getAttribute("data-src") ||
+            img.getAttribute("data-original") ||
+            img.getAttribute("data-lazy-src") ||
+            urlFromSrcset(img.getAttribute("srcset"))
+          );
+          return { url, score: visibleScore(img), tag: img.tagName, className: img.className || "" };
+        })
+        .filter((item) => item.score > 0 && !isBadImage(item.url))
+        .sort((a, b) => b.score - a.score);
+      if (rankedImages[0]?.url) return { url: rankedImages[0].url, source: `${sourcePrefix}-image`, top: rankedImages.slice(0, 6) };
+
+      const iframeCandidates = Array.from(root.querySelectorAll("iframe"));
+      const rankedIframes = iframeCandidates
+        .map((iframe) => {
+          if (isIrrelevantNode(iframe)) return { url: "", score: 0 };
+          return { url: extractMediaUrlFromNode(iframe), score: visibleScore(iframe), tag: iframe.tagName, className: iframe.className || "" };
+        })
+        .filter((item) => item.score > 0 && !isBadImage(item.url))
+        .sort((a, b) => b.score - a.score);
+      if (rankedIframes[0]?.url) return { url: rankedIframes[0].url, source: `${sourcePrefix}-iframe`, top: rankedIframes.slice(0, 6) };
+
+      const bgCandidates = Array.from(root.querySelectorAll("div, section, article, figure, span"));
+      const rankedBackgrounds = bgCandidates
+        .map((node) => {
+          if (isIrrelevantNode(node)) return { url: "", score: 0 };
+          const inlineUrl = cssImageUrl(node.style?.backgroundImage);
+          const computedUrl = inlineUrl || cssImageUrl(window.getComputedStyle(node).backgroundImage);
+          return { url: computedUrl, score: backgroundScore(node), tag: node.tagName, className: node.className || "" };
+        })
+        .filter((item) => item.score > 0 && !isBadImage(item.url))
+        .sort((a, b) => b.score - a.score);
+      if (rankedBackgrounds[0]?.url) return { url: rankedBackgrounds[0].url, source: `${sourcePrefix}-background`, top: rankedBackgrounds.slice(0, 6) };
+
+      return { url: "", source: `${sourcePrefix}-none`, top: [] };
+    };
     const pickThumbnail = () => {
+      const mediaKind = isVideoNote() ? "video" : "image";
       const debug = {
+        mediaKind,
+        currentPath,
+        currentNoteHref: currentNoteAnchor?.href || "",
+        currentNoteCardClass: currentNoteCard?.className || "",
         titleText: bootstrapTitleNode?.textContent?.trim() || "",
         noteRootTag: noteRoot?.tagName || "",
         noteRootClass: noteRoot?.className || "",
@@ -512,6 +715,16 @@
         activeOverlayClass: activeOverlay?.className || "",
         mediaFrameClass: mediaFrame?.className || "",
       };
+
+      if (mediaKind === "video") {
+        const videoThumb = pickVideoThumbnail();
+        debug.video = videoThumb;
+        if (videoThumb.url && !isBadImage(videoThumb.url)) return { url: videoThumb.url, source: videoThumb.source, debug };
+      }
+
+      const scopedThumb = pickScopedThumbnail(detailRoot || currentNoteCard || mediaFrame, "current-note");
+      debug.scoped = scopedThumb;
+      if (scopedThumb.url && !isBadImage(scopedThumb.url)) return { url: scopedThumb.url, source: scopedThumb.source, debug };
 
       const viewportThumb = pickViewportThumbnail();
       debug.viewport = viewportThumb;
@@ -591,8 +804,28 @@
       }
       return "";
     };
+    const extractDetailContent = () => {
+      const direct = scopedText(["#detail-desc", ".desc", "[class*='content']", "[class*='note-text']", "[class*='desc']", "[class*='detail-desc']"], detailRoot);
+      if (direct) return direct.slice(0, 1000);
+      const root = detailRoot || scopedRoot;
+      if (!root) return "";
+      const titleText = bootstrapTitleNode?.textContent?.trim() || "";
+      const authorText = scopedText(["[class*='username']", ".author-name", "a[href*='/user/profile/']"], detailRoot) || "";
+      const lines = String(root.innerText || root.textContent || "")
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter((line) => {
+          if (line === titleText || line === authorText) return false;
+          if (/^(关注|添加|说点什么|评论|点击评论|这是一片荒地|- THE END -)$/.test(line)) return false;
+          if (/^共\s*\d+\s*条评论$/.test(line)) return false;
+          if (/^展开\s*\d+\s*条回复$/.test(line)) return false;
+          return line.length >= 2;
+        });
+      return lines.join("\n").slice(0, 1000);
+    };
     const title = scopedText(["#detail-title", ".title", "h1"], detailRoot) || bootstrapTitleNode?.textContent?.trim() || document.title;
-    const content = scopedText(["#detail-desc", ".desc", "[class*='content']", "[class*='note-text']", "[class*='desc']"], detailRoot).slice(0, 1000);
+    const content = extractDetailContent();
     const thumbnailResult = pickThumbnail();
     const thumbnail = thumbnailResult.url || "";
     const debug = {

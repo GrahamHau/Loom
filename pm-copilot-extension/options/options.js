@@ -1,7 +1,7 @@
 const DEFAULTS = {
   pmcopilot_api_base: "https://ulanzi-copilot.my1panelsite.xyz",
   pmcopilot_default_mode: "auto",
-  pmcopilot_ai_before_save: true,
+  pmcopilot_ai_before_save: false,
   pmcopilot_platforms: {
     amazon: true,
     taobao: true,

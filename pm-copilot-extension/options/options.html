@@ -49,10 +49,10 @@
             <option value="demand">需求</option>
           </select>
         </label>
-        <label>AI 处理
+        <label>AI 整理
           <select id="ai-before-save">
-            <option value="true">保存前自动结构化</option>
-            <option value="false">只提取原始字段</option>
+            <option value="false">默认关闭，仅采集原始字段</option>
+            <option value="true">默认开启，采集后自动整理</option>
           </select>
         </label>
       </div>
@@ -82,7 +82,7 @@
     </section>
 
     <section class="section note">
-      插件只会在用户打开右侧栏并点击保存时，把当前页面提取到的数据发送到 PM Copilot。
+      插件默认先做快速采集。用户可以直接保存到 Web 版，也可以手动点击 AI 整理后再保存。
     </section>
   </main>
   <script src="options.js"></script>

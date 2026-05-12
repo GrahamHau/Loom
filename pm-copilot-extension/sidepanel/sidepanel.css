@@ -78,6 +78,41 @@ input,textarea,select{font-family:inherit;color:inherit}
   flex-shrink:0;
   background:var(--surface);
 }
+.cl-top-actions{
+  display:flex;
+  gap:8px;
+  padding:10px 12px 0;
+  flex-shrink:0;
+}
+.cl-top-actions .btn{
+  min-width:0;
+}
+.top-action{
+  flex:0 0 auto;
+  justify-content:center;
+}
+.top-action.action-4{
+  flex:4;
+}
+.top-action.action-2{
+  flex:2;
+}
+.top-action.icon-only{
+  padding-left:0;
+  padding-right:0;
+}
+.top-action.icon-only svg{
+  width:16px;
+  height:16px;
+}
+.cl-top-actions .btn.primary{
+  background:var(--accent);
+  color:#fff;
+  border-color:var(--accent);
+}
+.cl-top-actions .btn.primary:hover{
+  filter:brightness(1.05);
+}
 .cl-brand{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
 .cl-mark{
   width:24px;height:24px;border-radius:6px;

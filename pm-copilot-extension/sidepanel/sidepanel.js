@@ -24,6 +24,7 @@ const state = {
   token: "",
   user: null,
   tab: null,
+  lastSeenUrl: "",
   page: null,
   mode: "product",
   processed: null,
@@ -32,6 +33,10 @@ const state = {
   reloading: false,
   message: "",
 };
+
+let autoSyncTimer = null;
+let autoSyncPoller = null;
+let pendingUrlSync = false;
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -47,7 +52,7 @@ document.addEventListener("DOMContentLoaded", init);
 document.addEventListener("click", handleGlobalClick);
 
 async function init() {
-  const stored = await chrome.storage.local.get([API_BASE_KEY, TOKEN_KEY, USER_KEY, DEFAULT_MODE_KEY]);
+  const stored = await chrome.storage.local.get([API_BASE_KEY, TOKEN_KEY, USER_KEY, DEFAULT_MODE_KEY, AI_BEFORE_SAVE_KEY]);
   state.apiBase = (stored[API_BASE_KEY] || "https://ulanzi-copilot.my1panelsite.xyz").replace(/\/$/, "");
   state.token = stored[TOKEN_KEY] || "";
   state.user = stored[USER_KEY] || null;
@@ -55,7 +60,11 @@ async function init() {
     renderLogin();
     return;
   }
+  if (stored[AI_BEFORE_SAVE_KEY] === undefined) {
+    await chrome.storage.local.set({ [AI_BEFORE_SAVE_KEY]: false });
+  }
   renderLoading("正在读取当前页面");
+  bindAutoSync();
   await loadCurrentPage(stored[DEFAULT_MODE_KEY] || "auto");
 }
 
@@ -64,6 +73,7 @@ async function loadCurrentPage(defaultMode = "auto") {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     state.tab = tab;
+    state.lastSeenUrl = tab?.url || "";
     const result = await readPageData(tab);
     if (!result?.ok) {
       state.page = null;
@@ -79,7 +89,7 @@ async function loadCurrentPage(defaultMode = "auto") {
         : DEMAND_PLATFORMS.has(result.platform) ? "demand" : "product";
     state.processed = result.data;
     state.form = buildDraft(state.mode, state.processed);
-    await maybeProcess();
+    state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
     renderMain();
   } catch (error) {
     state.page = null;
@@ -124,10 +134,14 @@ function detectPlatformFromUrl(url) {
   return null;
 }
 
-async function maybeProcess() {
-  const stored = await chrome.storage.local.get([AI_BEFORE_SAVE_KEY]);
-  if (stored[AI_BEFORE_SAVE_KEY] === false) return;
-  await processRaw();
+function shouldAutoSyncUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.includes("xiaohongshu.com")) return true;
+    return /^\/explore\/[a-z0-9]+$/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
 }
 
 async function processRaw() {
@@ -155,19 +169,74 @@ async function reloadCurrentPage() {
   state.reloading = true;
   renderLoading("正在重新抓取当前页面");
   try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) state.tab = tab;
+    state.lastSeenUrl = state.tab?.url || state.lastSeenUrl;
     const result = await readPageData(state.tab);
     if (!result?.ok) throw new Error(result?.error || "重新抓取失败");
     state.page = result;
     state.processed = result.data;
     state.form = buildDraft(state.mode, state.processed);
-    state.message = "页面已重新抓取";
-    await maybeProcess();
+    state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
     renderMain();
   } catch (error) {
     state.reloading = false;
     state.message = `刷新失败：${error.message}`;
     renderMain();
+  } finally {
+    state.reloading = false;
+    if (pendingUrlSync) {
+      pendingUrlSync = false;
+      await scheduleAutoSync();
+    }
   }
+}
+
+function bindAutoSync() {
+  chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+    if (!state.tab?.id || tabId !== state.tab.id) return;
+    await scheduleAutoSync();
+  });
+
+  chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+    if (!state.tab?.id || tabId !== state.tab.id) return;
+    if (!changeInfo.url && changeInfo.status !== "complete") return;
+    await scheduleAutoSync();
+  });
+
+  if (!autoSyncPoller) {
+    autoSyncPoller = setInterval(() => {
+      void scheduleAutoSync();
+    }, 800);
+  }
+}
+
+async function scheduleAutoSync() {
+  if (autoSyncTimer) clearTimeout(autoSyncTimer);
+  autoSyncTimer = setTimeout(async () => {
+    autoSyncTimer = null;
+    await syncIfUrlChanged();
+  }, 250);
+}
+
+async function syncIfUrlChanged() {
+  if (state.busy || state.reloading) {
+    pendingUrlSync = true;
+    return;
+  }
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  if (state.tab?.id && tab.id !== state.tab.id) return;
+  const nextUrl = tab.url || "";
+  if (!nextUrl || nextUrl === state.lastSeenUrl) return;
+  if (!shouldAutoSyncUrl(nextUrl)) {
+    state.tab = tab;
+    state.lastSeenUrl = nextUrl;
+    return;
+  }
+  state.tab = tab;
+  state.lastSeenUrl = nextUrl;
+  await reloadCurrentPage();
 }
 
 async function api(path, options = {}) {
@@ -395,6 +464,11 @@ function renderMain() {
   document.getElementById("app").innerHTML = `
     <div class="shell">
       ${headerHtml()}
+      <div class="cl-top-actions">
+        <button class="btn primary top-action action-4" id="save-top" ${state.busy ? "disabled" : ""}>保存</button>
+        <button class="btn primary top-action action-4" id="process-top" ${state.busy ? "disabled" : ""}>${state.busy ? "处理中..." : "AI 整理"}</button>
+        <button class="btn primary top-action action-2 icon-only" id="refresh-page-top" type="button" aria-label="刷新页面">${refreshIcon()}</button>
+      </div>
       <div class="cl-banner ${bannerClass(platform)}">
         ${state.reloading ? `<div class="cl-banner-ico">${spinIcon()}</div>` : bannerIcon(platform)}
       <div class="cl-banner-body">
@@ -415,19 +489,21 @@ function renderMain() {
       </div>
 
       <div class="cl-foot">
-        <button class="btn ghost grow" id="process" ${state.busy ? "disabled" : ""}>${state.busy ? "处理中..." : "AI 处理"}</button>
-        <button class="btn primary grow" id="save" ${state.busy ? "disabled" : ""}>保存到 ${state.mode === "product" ? "竞品库" : "需求管理"}</button>
+        <button class="btn ghost grow" id="refresh-bottom" type="button">重新抓取</button>
       </div>
     </div>`;
   bindHeader();
   document.getElementById("mode-product").onclick = () => switchMode("product", canProduct, "此页面建议使用需求模式");
   document.getElementById("mode-demand").onclick = () => switchMode("demand", canDemand, "此页面建议使用竞品模式");
-  document.getElementById("process").onclick = async () => {
+  const handleProcess = async () => {
     renderLoading("AI 结构化中");
     await processRaw();
     renderMain();
   };
-  document.getElementById("save").onclick = saveCurrent;
+  document.getElementById("process-top").onclick = handleProcess;
+  document.getElementById("save-top").onclick = saveCurrent;
+  document.getElementById("refresh-page-top").onclick = () => reloadCurrentPage();
+  document.getElementById("refresh-bottom").onclick = () => reloadCurrentPage();
 }
 
 async function switchMode(mode, supported, message) {
@@ -435,9 +511,7 @@ async function switchMode(mode, supported, message) {
   state.mode = mode;
   state.processed = state.page.data;
   state.form = buildDraft(state.mode, state.processed);
-  state.message = "";
-  renderLoading("正在切换模式");
-  await maybeProcess();
+  state.message = "模式已切换，可直接保存；如需摘要和标签，再点 AI 整理。";
   renderMain();
 }
 
@@ -501,6 +575,7 @@ function buildDraft(mode, item) {
   return {
     title: cleanText(item?.title || item?.name, ""),
     summary: cleanText(item?.summary || item?.ai_summary || item?.content || item?.description, ""),
+    content: cleanText(item?.content || item?.original_content || item?.description, ""),
     innovation: cleanText(item?.innovation || item?.tags_innovation, "待分类"),
     scenarios: safeArray(item?.scenarios),
     painpoints: safeArray(item?.painpoints),
@@ -828,7 +903,7 @@ function demandPayload(item) {
     source: state.page.platform,
     source_platform: state.page.platform,
     summary: item.summary || "",
-    original_content: item.content || item.description || "",
+    original_content: item.content || item.original_content || item.description || state.page?.data?.content || "",
     scenarios: safeArray(item.scenarios),
     painpoints: safeArray(item.painpoints),
     innovation: item.innovation || "待分类",
