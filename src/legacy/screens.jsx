@@ -289,7 +289,7 @@ function RemovableTagList({ items, tone = "default", onRemove, addLabel = "+ 添
 }
 
 // ============ LOGIN ============
-function LoginScreen({ onLogin, onVisitorLogin, onFeishuLogin, error, providers = {} }) {
+function LoginScreen({ onLogin, onDemoLogin, onFeishuLogin, error, providers = {} }) {
   const [user, setUser] = useState("");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
@@ -303,10 +303,10 @@ function LoginScreen({ onLogin, onVisitorLogin, onFeishuLogin, error, providers 
       setBusy(false);
     }
   };
-  const enterVisitorMode = async () => {
+  const enterDemoMode = async () => {
     setBusy(true);
     try {
-      await onVisitorLogin?.();
+      await onDemoLogin?.();
     } finally {
       setBusy(false);
     }
@@ -358,17 +358,6 @@ function LoginScreen({ onLogin, onVisitorLogin, onFeishuLogin, error, providers 
             <div className="login-oauth-divider"><span>其他方式</span></div>
             <div className="login-oauth-actions">
               <button
-                className="login-oauth-btn login-oauth-btn-with-label"
-                type="button"
-                title="进入访客模式"
-                aria-label="进入访客模式"
-                onClick={enterVisitorMode}
-                disabled={busy}
-              >
-                <span className="visitor-login-mark" aria-hidden="true">V</span>
-                <span>访客模式</span>
-              </button>
-              <button
                 className="login-oauth-btn"
                 type="button"
                 title="使用飞书登录"
@@ -380,12 +369,20 @@ function LoginScreen({ onLogin, onVisitorLogin, onFeishuLogin, error, providers 
               </button>
             </div>
           </div>
+          <button
+            className="login-demo-link"
+            type="button"
+            onClick={enterDemoMode}
+            disabled={busy}
+          >
+            进入演示模式
+          </button>
           <div className="login-inline-tip">
-            {feishuEnabled ? "访客模式可直接体验示例工作区；公司成员可使用飞书登录个人账号。" : "访客模式可直接体验示例工作区；飞书登录完成 OAuth 配置后即可启用。"}
+            {feishuEnabled ? "演示模式可直接体验示例工作区；公司成员可使用飞书登录个人账号。" : "演示模式可直接体验示例工作区；飞书登录完成 OAuth 配置后即可启用。"}
           </div>
         </div>
         <div style={{ borderTop: "1px solid var(--border)", marginTop: 22, paddingTop: 14, fontSize: 11, color: "var(--text-3)", textAlign: "center" }}>
-          LOOM v2.0 · 支持访客、账号密码与飞书登录
+          LOOM v2.0 · 支持演示、账号密码与飞书登录
         </div>
       </div>
     </div>);

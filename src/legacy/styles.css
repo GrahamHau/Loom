@@ -1704,17 +1704,6 @@ a.platform-card-link:hover {
   padding: 0;
   transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
-.login-oauth-btn-with-label {
-  width: auto;
-  min-width: 106px;
-  grid-template-columns: auto auto;
-  gap: 8px;
-  padding: 0 12px 0 10px;
-  color: var(--text-1);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-}
 .login-oauth-btn:hover:not(:disabled) {
   border-color: var(--text-3);
   transform: translateY(-1px);
@@ -1730,17 +1719,25 @@ a.platform-card-link:hover {
   display: block;
   object-fit: contain;
 }
-.visitor-login-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  background: var(--text-1);
-  color: var(--surface);
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 800;
+.login-demo-link {
+  align-self: flex-start;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.login-demo-link:hover:not(:disabled) {
+  color: var(--text-2);
+}
+.login-demo-link:disabled {
+  cursor: not-allowed;
+  opacity: .45;
 }
 
 /* Scrollbars */

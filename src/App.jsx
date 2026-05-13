@@ -368,14 +368,14 @@ function App() {
     }
   };
 
-  const loginAsVisitor = async () => {
+  const loginAsDemo = async () => {
     setError("");
     try {
       const result = await api("/api/auth/visitor", { method: "POST" });
       setMe(result.user);
       await refreshData();
     } catch (err) {
-      setError(err.message || "访客模式暂时不可用，请稍后重试");
+      setError(err.message || "演示模式暂时不可用，请稍后重试");
     }
   };
 
@@ -407,7 +407,7 @@ function App() {
   if (!me || t.showLogin) {
     return (
       <>
-        <LoginScreen onLogin={login} onVisitorLogin={loginAsVisitor} onFeishuLogin={loginWithFeishu} error={error} providers={providers} />
+        <LoginScreen onLogin={login} onDemoLogin={loginAsDemo} onFeishuLogin={loginWithFeishu} error={error} providers={providers} />
       </>
     );
   }
