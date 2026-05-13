@@ -1669,6 +1669,12 @@ a.platform-card-link:hover {
   align-items: flex-start;
   gap: 12px;
 }
+.login-oauth-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .login-oauth-divider {
   width: 100%;
   display: flex;
@@ -1698,6 +1704,17 @@ a.platform-card-link:hover {
   padding: 0;
   transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
+.login-oauth-btn-with-label {
+  width: auto;
+  min-width: 106px;
+  grid-template-columns: auto auto;
+  gap: 8px;
+  padding: 0 12px 0 10px;
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
 .login-oauth-btn:hover:not(:disabled) {
   border-color: var(--text-3);
   transform: translateY(-1px);
@@ -1712,6 +1729,18 @@ a.platform-card-link:hover {
   height: 22px;
   display: block;
   object-fit: contain;
+}
+.visitor-login-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--text-1);
+  color: var(--surface);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 /* Scrollbars */

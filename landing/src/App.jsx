@@ -6,6 +6,7 @@ import Modules from "./sections/Modules.jsx";
 import WhyNow from "./sections/WhyNow.jsx";
 import Weave from "./sections/Weave.jsx";
 import Vision from "./sections/Vision.jsx";
+import Milestones from "./sections/Milestones.jsx";
 import FinalCTA from "./sections/FinalCTA.jsx";
 import Footer from "./sections/Footer.jsx";
 
@@ -30,6 +31,7 @@ export default function App() {
         <WhyNow />
         <Weave />
         <Vision />
+        <Milestones />
         <FinalCTA />
       </main>
       <Footer />

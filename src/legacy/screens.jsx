@@ -289,7 +289,7 @@ function RemovableTagList({ items, tone = "default", onRemove, addLabel = "+ 添
 }
 
 // ============ LOGIN ============
-function LoginScreen({ onLogin, onFeishuLogin, error, providers = {} }) {
+function LoginScreen({ onLogin, onVisitorLogin, onFeishuLogin, error, providers = {} }) {
   const [user, setUser] = useState("");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
@@ -299,6 +299,14 @@ function LoginScreen({ onLogin, onFeishuLogin, error, providers = {} }) {
     setBusy(true);
     try {
       await onLogin?.({ username: user, password: pw });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const enterVisitorMode = async () => {
+    setBusy(true);
+    try {
+      await onVisitorLogin?.();
     } finally {
       setBusy(false);
     }
@@ -348,23 +356,36 @@ function LoginScreen({ onLogin, onFeishuLogin, error, providers = {} }) {
           )}
           <div className="login-oauth">
             <div className="login-oauth-divider"><span>其他方式</span></div>
-            <button
-              className="login-oauth-btn"
-              type="button"
-              title="使用飞书登录"
-              aria-label="使用飞书登录"
-              onClick={() => onFeishuLogin?.()}
-              disabled={busy || !feishuEnabled}
-            >
-              <img src="/feishu.png" alt="飞书" />
-            </button>
+            <div className="login-oauth-actions">
+              <button
+                className="login-oauth-btn login-oauth-btn-with-label"
+                type="button"
+                title="进入访客模式"
+                aria-label="进入访客模式"
+                onClick={enterVisitorMode}
+                disabled={busy}
+              >
+                <span className="visitor-login-mark" aria-hidden="true">V</span>
+                <span>访客模式</span>
+              </button>
+              <button
+                className="login-oauth-btn"
+                type="button"
+                title="使用飞书登录"
+                aria-label="使用飞书登录"
+                onClick={() => onFeishuLogin?.()}
+                disabled={busy || !feishuEnabled}
+              >
+                <img src="/feishu.png" alt="飞书" />
+              </button>
+            </div>
           </div>
           <div className="login-inline-tip">
-            {feishuEnabled ? "公司成员可直接使用飞书登录，首次通过校验后会自动开通个人账号。" : "飞书登录入口已预留，完成 OAuth 配置后即可启用。"}
+            {feishuEnabled ? "访客模式可直接体验示例工作区；公司成员可使用飞书登录个人账号。" : "访客模式可直接体验示例工作区；飞书登录完成 OAuth 配置后即可启用。"}
           </div>
         </div>
         <div style={{ borderTop: "1px solid var(--border)", marginTop: 22, paddingTop: 14, fontSize: 11, color: "var(--text-3)", textAlign: "center" }}>
-          LOOM v2.0 · 支持账号密码与飞书登录
+          LOOM v2.0 · 支持访客、账号密码与飞书登录
         </div>
       </div>
     </div>);

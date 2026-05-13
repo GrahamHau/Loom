@@ -6,7 +6,7 @@ const PIPELINE = [
   },
   {
     label: "Step 02 · 关联",
-    title: "拉入 Lens + Spark 数据",
+    title: "拉入竞品库 + 灵感库数据",
     body: "SmallRig、Ulanzi、Peak Design 的同类品 × 小红书、B 站、Reddit 上的真实抱怨与需求线索。",
   },
   {
@@ -51,8 +51,9 @@ export default function Weave() {
               <div className="pipeline-step-label">输出 A · 洞察</div>
               <h3 className="pipeline-step-title">结构化的产品分析</h3>
               <p className="pipeline-step-body">
-                定位、卖点、价格带、差异点 —— 每个论断都能追溯回 Lens / Spark
-                里你留下的判断。
+                定位、卖点、价格带、差异点 —— 每个论断都能追溯回竞品库 /
+                灵感库里你留下的判断。你在前面边看边整理的内容，到这里直接变成结构化分析
+                —— 省掉了传统 MRD 里最费时间的信息梳理环节。
               </p>
             </div>
             <div className="pipeline-step">

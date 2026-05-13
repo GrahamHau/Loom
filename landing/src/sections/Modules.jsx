@@ -22,7 +22,7 @@ const MODULES = [
     name: "Lens",
     sub: "竞品库",
     icon: BoxesIcon,
-    lede: "把隐性知识，从浏览器一键织进 AI 语料。",
+    lede: "边看竞品，边完成信息整理 —— 不用事后再翻收藏夹。",
     body: "浏览亚马逊 / 淘宝看 SmallRig、Ulanzi、Peak Design 时，用 Loom 浏览器插件一键采集图片、卖点、价格、规格、标签 —— 落到统一的结构化卡片。",
     annotation: (
       <>
@@ -37,7 +37,7 @@ const MODULES = [
     name: "Spark",
     sub: "灵感库",
     icon: LightbulbIcon,
-    lede: "跨平台需求 + PM 判断 = 补齐 AI 的 skill 层。",
+    lede: "跨平台需求 + 你的判断 = 补齐 AI 的 skill 层。",
     body: "小红书摄影博主吐槽 / B 站测评 / Reddit r/photography / Kickstarter 摄影配件众筹的线索，沉淀成可追溯的需求脉络。",
     annotation: (
       <>

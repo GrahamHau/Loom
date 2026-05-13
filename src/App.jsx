@@ -364,6 +364,13 @@ function App() {
     await refreshData();
   };
 
+  const loginAsVisitor = async () => {
+    setError("");
+    const result = await api("/api/auth/visitor", { method: "POST" });
+    setMe(result.user);
+    await refreshData();
+  };
+
   const loginWithFeishu = () => {
     setError("");
     const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -392,7 +399,7 @@ function App() {
   if (!me || t.showLogin) {
     return (
       <>
-        <LoginScreen onLogin={login} onFeishuLogin={loginWithFeishu} error={error} providers={providers} />
+        <LoginScreen onLogin={login} onVisitorLogin={loginAsVisitor} onFeishuLogin={loginWithFeishu} error={error} providers={providers} />
       </>
     );
   }

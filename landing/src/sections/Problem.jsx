@@ -12,7 +12,7 @@ const PROBLEMS = [
   {
     num: "03",
     title: "AI 有资料，但没 skill",
-    body: "它读过整个小红书，但没读过你作为 PM 对「这个云台为什么跟手」的判断。它缺的是经验，不是数据。",
+    body: "它读过整个小红书，但没读过你对「这个云台为什么跟手」的判断。它缺的是经验，不是数据。",
   },
 ];
 
@@ -23,8 +23,8 @@ export default function Problem() {
         <div className="kicker">问题</div>
         <h2 className="section-title">为什么现在的 AI 不懂你的业务</h2>
         <p className="section-lead">
-          不是因为模型不够大，是因为它从没读过你作为产品经理沉淀下来的那些
-          —— 关于摄影配件这一行的判断、直觉和评价。
+          不是因为模型不够大，是因为它从没读过你在这个行业里沉淀下来的那些
+          —— 关于摄影配件的判断、直觉和评价。
         </p>
 
         <div className="problem-grid">

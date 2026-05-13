@@ -168,6 +168,21 @@ function refreshSampleWorkspaceNews(userId, { force = false } = {}) {
   });
 }
 
+function signInLegacyUser(req, res) {
+  refreshSampleWorkspaceNews(legacyUser.id);
+  const state = bootstrap(legacyUser.id);
+  const token = apiToken();
+  revokeUserApiTokens(legacyUser.id);
+  upsertApiToken(token, legacyUser.id);
+  req.session.regenerate((error) => {
+    if (error) return res.status(500).json({ error: "session_regenerate_failed" });
+    touchUserLogin(legacyUser.id);
+    req.session.userId = legacyUser.id;
+    req.session.user = sessionUserResponse(legacyUser);
+    res.json({ user: state.user, token });
+  });
+}
+
 function visibleNewsItems(userId) {
   const state = rawState(userId);
   return listNews(userId).filter((item) => !isSampleWorkspace(state) || isRecentSampleNews(item));
@@ -205,18 +220,11 @@ app.post("/api/auth/login", (req, res) => {
   if (req.body?.username !== username || req.body?.password !== password) {
     return res.status(401).json({ error: "用户名或密码不正确" });
   }
-  refreshSampleWorkspaceNews(legacyUser.id);
-  const state = bootstrap(legacyUser.id);
-  const token = apiToken();
-  revokeUserApiTokens(legacyUser.id);
-  upsertApiToken(token, legacyUser.id);
-  req.session.regenerate((error) => {
-    if (error) return res.status(500).json({ error: "session_regenerate_failed" });
-    touchUserLogin(legacyUser.id);
-    req.session.userId = legacyUser.id;
-    req.session.user = sessionUserResponse(legacyUser);
-    res.json({ user: state.user, token });
-  });
+  signInLegacyUser(req, res);
+});
+
+app.post("/api/auth/visitor", (req, res) => {
+  signInLegacyUser(req, res);
 });
 
 app.get("/api/auth/feishu/start", (req, res) => {

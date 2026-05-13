@@ -7,6 +7,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scroll-snap-type: y proximity;
+  scroll-behavior: smooth;
+}
 html,
 body {
   margin: 0;
@@ -48,6 +52,7 @@ a {
 .section {
   position: relative;
   padding: var(--section-py) var(--section-px);
+  scroll-snap-align: start;
 }
 
 .container {
@@ -776,6 +781,79 @@ a {
 }
 
 /* ============================================================
+ * Milestones — current capabilities
+ * ============================================================ */
+.milestones-grid {
+  margin-top: 44px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.milestone-card {
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.milestone-card-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0 0 14px;
+  color: var(--text);
+}
+.milestone-card-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.7;
+}
+.milestone-card-list li + li {
+  margin-top: 6px;
+}
+.milestones-export {
+  margin-top: 32px;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.milestones-export-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0 0 14px;
+  color: var(--text);
+}
+.milestones-export-row {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.milestones-export-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+}
+.milestones-export-label {
+  font-weight: 600;
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+.milestones-export-items {
+  color: var(--text-2);
+}
+@media (max-width: 720px) {
+  .milestones-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
  * Final CTA + login
  * ============================================================ */
 .finalcta {
@@ -785,14 +863,12 @@ a {
     var(--surface-2) 100%
   );
 }
-.finalcta-grid {
-  display: grid;
-  grid-template-columns: 1.05fr 1fr;
-  gap: 56px;
-  align-items: center;
+.finalcta-stack {
+  max-width: 720px;
 }
 .finalcta-copy {
-  max-width: 52ch;
+  max-width: 60ch;
+  margin-bottom: 48px;
 }
 .finalcta-title {
   font-family: var(--font-display);
@@ -809,11 +885,34 @@ a {
   line-height: 1.75;
   margin: 0;
 }
-@media (max-width: 860px) {
-  .finalcta-grid {
-    grid-template-columns: 1fr;
-    gap: 36px;
-  }
+.finalcta-steps {
+  display: grid;
+  gap: 36px;
+}
+.finalcta-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 20px;
+}
+.finalcta-step-num {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--accent-text);
+  line-height: 1.2;
+}
+.finalcta-step-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--text);
+}
+.finalcta-step-desc {
+  font-size: 14px;
+  color: var(--text-3);
+  margin: 0 0 16px;
+  line-height: 1.6;
 }
 
 .login-card {

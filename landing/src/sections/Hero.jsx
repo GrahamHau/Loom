@@ -24,7 +24,10 @@ export default function Hero() {
       <div className="hero-grid" aria-hidden="true" />
       <div className="container hero-content reveal">
         <div className="brand-wordmark">LOOM</div>
-        <div className="hero-tagline">Personal Intelligence Workspace</div>
+        <div className="hero-tagline">
+          <span>Link</span> · <span>Observe</span> · <span>Organize</span> ·{" "}
+          <span>Make</span>
+        </div>
 
         <h1 className="hero-headline">
           给 AI 织一份

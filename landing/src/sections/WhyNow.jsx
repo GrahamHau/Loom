@@ -18,7 +18,7 @@ const STEPS = [
     body: (
       <>
         摄影行业的判断 —— 哪个卡口好、哪个用户痛点真、哪种价格带能打 ——
-        是 PM 在工位上 <em>一年一年攒出来</em> 的隐性知识。
+        是在工位上 <em>一年一年攒出来</em> 的隐性知识。
         它从来没被结构化过，所以 AI 也从来调用不到。
         当前 LLM 的处境是「读过资料，但没和高手共事过」。
       </>
@@ -71,7 +71,7 @@ export default function WhyNow() {
             「Specific knowledge（专属知识）是无法被培训出来的。
             如果社会能培训你，就能培训别人来替代你。」
           </p>
-          <cite className="whynow-quote-cite">— Naval Ravikant</cite>
+          <cite className="whynow-quote-cite">— Naval Ravikant（纳瓦尔·拉维坎特）</cite>
           <p className="whynow-quote-gloss">
             你对这个行业的判断就是这种 specific knowledge。AI
             读过全网，但它从没跟高手共事过。Loom 让你把这种知识织进去。
