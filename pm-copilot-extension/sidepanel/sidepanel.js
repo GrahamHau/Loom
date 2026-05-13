@@ -267,9 +267,9 @@ function renderLogin() {
     <div class="shell">
       <div class="header">
         <div class="brand">
-          <div class="logo">P</div>
+          <div class="logo">L</div>
           <div>
-            <div class="title">PM Copilot</div>
+            <div class="title">LOOM Web Clipper</div>
             <div class="sub">连接情报中台</div>
           </div>
         </div>
@@ -282,8 +282,8 @@ function renderLogin() {
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             </div>
             <div>
-              <div class="cl-login-title">登录 PM Copilot</div>
-              <div class="cl-login-sub">连接后端后才能保存采集到的竞品与需求</div>
+              <div class="cl-login-title">登录 LOOM</div>
+              <div class="cl-login-sub">连接后端后才能保存采集到的竞品与灵感</div>
             </div>
           </div>
 
@@ -294,12 +294,12 @@ function renderLogin() {
             </label>
             <label class="cl-login-field">
               <span>用户名</span>
-              <input class="login-input" id="username" type="text" placeholder="graham">
+              <input class="login-input" id="username" type="text" placeholder="请输入你的账号">
             </label>
             <label class="cl-login-field">
               <span>密码</span>
               <div class="input-wrap">
-                <input class="login-input mono" id="password" type="password" placeholder="••••••••">
+                <input class="login-input mono" id="password" type="password" placeholder="请输入你的密码">
                 <button class="ico-btn sm" id="toggle-password" type="button" aria-label="显示密码">${eyeIcon()}</button>
               </div>
             </label>
@@ -307,7 +307,7 @@ function renderLogin() {
 
           <div class="cl-login-note hint-warn">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-            <span>账号信息会保存在 chrome.storage.local，仅本机使用</span>
+            <span>登录凭证会保存在 chrome.storage.local，仅用于当前浏览器本机</span>
           </div>
 
           <div class="cl-login-status mono" id="login-status">等待连接测试</div>
@@ -346,7 +346,7 @@ function renderLogin() {
     const apiBase = document.getElementById("api-base").value.trim().replace(/\/$/, "");
     const username = document.getElementById("username").value.trim();
     const password = document.getElementById("password").value;
-    if (!apiBase || !username || !password) return alert("请填写服务器地址、用户名和密码");
+    if (!apiBase || !username || !password) return alert("请填写服务器地址、账号和密码");
     try {
       const res = await fetch(`${apiBase}/api/auth/login`, {
         method: "POST",
@@ -433,22 +433,22 @@ function renderUnsupported(reason) {
       <div class="cl-body cl-unsupported-body">
         <div class="cl-unsupported">
           <div class="cl-unsupported-title">未识别为支持的平台</div>
-          <div class="cl-unsupported-text">PM Copilot 目前只在以下平台自动采集，可以在设置中调整白名单。</div>
+          <div class="cl-unsupported-text">LOOM Web Clipper 目前只在以下平台自动采集，可以在设置中调整白名单。</div>
           <div class="platform-list">
             <div class="platform-list-row"><span class="platform-pill amz">Amazon</span><span class="platform-list-url mono">amazon.com/dp/*</span><span class="tag outline">竞品</span></div>
             <div class="platform-list-row"><span class="platform-pill tb">淘宝/天猫</span><span class="platform-list-url mono">item.taobao.com · detail.tmall.com</span><span class="tag outline">竞品</span></div>
             <div class="platform-list-row"><span class="platform-pill ks">Kickstarter</span><span class="platform-list-url mono">kickstarter.com/projects/*</span><span class="tag outline">竞品</span></div>
-            <div class="platform-list-row"><span class="platform-pill xhs">小红书</span><span class="platform-list-url mono">xiaohongshu.com/explore/*</span><span class="tag outline">需求</span></div>
+            <div class="platform-list-row"><span class="platform-pill xhs">小红书</span><span class="platform-list-url mono">xiaohongshu.com/explore/*</span><span class="tag outline">灵感</span></div>
           </div>
           <div class="cl-hint">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
-            <span>也可以在 PM Copilot Web 端手动新建竞品 / 需求</span>
+            <span>也可以在 LOOM 中手动新建 Lens 竞品 / Spark 灵感</span>
           </div>
         </div>
       </div>
       <div class="cl-foot">
         <button class="btn ghost grow" id="refresh" type="button">重新检测</button>
-        <button class="btn primary grow" id="open-web" type="button">打开 Web 端</button>
+        <button class="btn primary grow" id="open-web" type="button">打开 LOOM</button>
       </div>
     </div>`;
   bindHeader();
@@ -472,14 +472,14 @@ function renderMain() {
       <div class="cl-banner ${bannerClass(platform)}">
         ${state.reloading ? `<div class="cl-banner-ico">${spinIcon()}</div>` : bannerIcon(platform)}
       <div class="cl-banner-body">
-        <div class="cl-banner-title">${escapeHtml(PLATFORM_LABELS[platform] || platform)} · ${state.mode === "product" ? "竞品采集" : "需求采集"}</div>
+        <div class="cl-banner-title">${escapeHtml(PLATFORM_LABELS[platform] || platform)} · ${state.mode === "product" ? "Lens 竞品采集" : "Spark 灵感采集"}</div>
         <div class="cl-banner-sub mono">${escapeHtml(state.page?.data?.url || "")}</div>
       </div>
       </div>
 
       <nav class="cl-tabs">
         <button class="cl-tab ${state.mode === "product" ? "active" : ""}" id="mode-product">竞品</button>
-        <button class="cl-tab ${state.mode === "demand" ? "active" : ""}" id="mode-demand">需求</button>
+        <button class="cl-tab ${state.mode === "demand" ? "active" : ""}" id="mode-demand">Spark 灵感</button>
       </nav>
 
       <div class="cl-body">
@@ -493,7 +493,7 @@ function renderMain() {
       </div>
     </div>`;
   bindHeader();
-  document.getElementById("mode-product").onclick = () => switchMode("product", canProduct, "此页面建议使用需求模式");
+  document.getElementById("mode-product").onclick = () => switchMode("product", canProduct, "此页面建议使用 Spark 灵感模式");
   document.getElementById("mode-demand").onclick = () => switchMode("demand", canDemand, "此页面建议使用竞品模式");
   const handleProcess = async () => {
     renderLoading("AI 结构化中");
@@ -916,7 +916,7 @@ async function saveCurrent() {
   const item = handleSaveMutation();
   if (!state.page?.data?.url) return alert("缺少页面 URL，不能保存");
   if (state.mode === "product" && !item.name) return alert("缺少商品名称，不能保存");
-  if (state.mode === "demand" && !item.title) return alert("缺少需求标题，不能保存");
+  if (state.mode === "demand" && !item.title) return alert("缺少灵感标题，不能保存");
   renderLoading("正在保存");
   try {
     const payload = state.mode === "product" ? productPayload(item) : demandPayload(item);
@@ -937,13 +937,13 @@ function renderSuccess(payload) {
     <div class="shell">
       ${headerHtml()}
       <div class="cl-body">
-        <div class="cl-hint">已保存到 ${state.mode === "product" ? "竞品库" : "需求管理"} · ${escapeHtml(payload.name || payload.title || "")}</div>
-        <div class="cl-empty-hint">你可以继续抓取下一条页面，或者打开 Web 端查看结果。</div>
+        <div class="cl-hint">已保存到 ${state.mode === "product" ? "Lens 竞品库" : "Spark 灵感库"} · ${escapeHtml(payload.name || payload.title || "")}</div>
+        <div class="cl-empty-hint">你可以继续抓取下一条页面，或者打开 LOOM 查看结果。</div>
         <div class="cl-spacer"></div>
       </div>
       <div class="cl-foot">
         <button class="btn ghost grow" id="again">继续采集</button>
-        <button class="btn primary grow" id="open-web">打开 Web 端</button>
+        <button class="btn primary grow" id="open-web">打开 LOOM</button>
       </div>
     </div>`;
   bindHeader();
@@ -956,9 +956,9 @@ function headerHtml() {
   return `
     <div class="cl-top">
       <div class="cl-brand">
-        <div class="cl-mark">P</div>
+        <div class="cl-mark">L</div>
         <div>
-          <div class="cl-name">PM Copilot</div>
+          <div class="cl-name">LOOM Web Clipper</div>
           <div class="cl-conn"><span class="dot dot-ok"></span>已连接 · ${escapeHtml(name)}</div>
         </div>
       </div>

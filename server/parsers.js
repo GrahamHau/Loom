@@ -23,16 +23,17 @@ function normalizeMonthlySales(value) {
     .trim();
 }
 
-function tagGroups() {
-  return rawState().settings?.tag_groups || [];
+function tagGroups(userId) {
+  return rawState(userId)?.settings?.tag_groups || [];
 }
 
-export async function parseProductUrl({ url, platform }) {
+export async function parseProductUrl(userId, { url, platform }) {
   const page = await fetchPageContent(url);
   const detectedPlatform = platform || page.platform;
-  const searchContext = await buildSearchContext(`${page.title} ${detectedPlatform} product review specs`, { limit: 4 });
-  const groups = tagGroups();
+  const searchContext = await buildSearchContext(userId, `${page.title} ${detectedPlatform} product review specs`, { limit: 4 });
+  const groups = tagGroups(userId);
   const result = await callLLM({
+    userId,
     system: "你是产品经理的竞品信息结构化助手。只返回 JSON，不要解释。",
     user: `从以下网页内容中提取商品信息。允许字段为 null。返回 JSON：
 {
@@ -92,11 +93,12 @@ ${searchContext}`,
   };
 }
 
-export async function parseProductRaw({ platform, data }) {
-  const groups = tagGroups();
+export async function parseProductRaw(userId, { platform, data }) {
+  const groups = tagGroups(userId);
   const source = data || {};
   const rawBullets = compactArray(source.raw_bullets);
   const result = await callLLM({
+    userId,
     system: "你是竞品分析助手，服务于摄影配件品牌产品经理。只返回 JSON，不要解释。",
     user: `从插件采集的商品信息中提取结构化数据。字段缺失可返回 null。
 
@@ -154,11 +156,12 @@ URL：${source.url || ""}
   };
 }
 
-export async function parseDemandUrl({ url }) {
+export async function parseDemandUrl(userId, { url }) {
   const page = await fetchPageContent(url);
-  const searchContext = await buildSearchContext(`${page.title} creator problem use case trend`, { limit: 4 });
-  const groups = tagGroups();
+  const searchContext = await buildSearchContext(userId, `${page.title} creator problem use case trend`, { limit: 4 });
+  const groups = tagGroups(userId);
   const result = await callLLM({
+    userId,
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
     user: `请对以下内容进行结构化打标。
 
@@ -211,10 +214,11 @@ ${searchContext}`,
   };
 }
 
-export async function parseDemandRaw({ platform, data }) {
+export async function parseDemandRaw(userId, { platform, data }) {
   const source = data || {};
-  const groups = tagGroups();
+  const groups = tagGroups(userId);
   const result = await callLLM({
+    userId,
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
     user: `请对插件采集的内容进行需求结构化打标。
 

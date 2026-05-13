@@ -66,7 +66,7 @@ async function login() {
   const apiBase = document.getElementById("api-base").value.trim().replace(/\/$/, "");
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value;
-  if (!apiBase || !username || !password) return alert("请填写服务器地址、用户名和密码");
+  if (!apiBase || !username || !password) return alert("请填写服务器地址、账号和密码");
   try {
     const res = await fetch(`${apiBase}/api/auth/login`, {
       method: "POST",

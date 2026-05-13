@@ -11,8 +11,8 @@ export class AppError extends Error {
   }
 }
 
-function getSettings() {
-  const settings = rawState().settings || {};
+function getSettings(userId) {
+  const settings = rawState(userId)?.settings || {};
   return {
     ...settings,
     llm_api_url: settings.llm_api_url || process.env.LLM_API_URL || process.env.OPENAI_BASE_URL || "",
@@ -21,8 +21,8 @@ function getSettings() {
   };
 }
 
-function configuredSettings() {
-  const settings = getSettings();
+function configuredSettings(userId) {
+  const settings = getSettings(userId);
   if (!settings.llm_api_url || !settings.llm_model || !settings.llm_api_key) {
     throw new AppError(400, "llm_not_configured", "LLM 未配置完整，请先在系统设置填写 API URL、模型和 API Key。");
   }
@@ -59,8 +59,8 @@ export function parseJsonObject(text, fallback = {}) {
   }
 }
 
-export async function callLLM({ system, user, responseFormat = "json", temperature = 0.2, maxTokens }) {
-  const settings = configuredSettings();
+export async function callLLM({ userId, system, user, responseFormat = "json", temperature = 0.2, maxTokens }) {
+  const settings = configuredSettings(userId);
   const timeoutMs = Number(settings.llm_timeout_ms || process.env.LLM_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -105,11 +105,12 @@ export async function callLLM({ system, user, responseFormat = "json", temperatu
   }
 }
 
-export async function testLLM() {
+export async function testLLM(userId) {
   const result = await callLLM({
+    userId,
     system: "你是连接测试助手，只返回 JSON。",
     user: '返回 {"ok":true,"message":"pong"}',
   });
-  updateSettings({ last_llm_test_at: new Date().toISOString() });
+  updateSettings(userId, { last_llm_test_at: new Date().toISOString() });
   return { ok: Boolean(result.ok ?? true), result };
 }

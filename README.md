@@ -1,8 +1,27 @@
-# PM Copilot
+# LOOM
 
-PM Copilot is a single-user product intelligence workspace. This repository turns the existing frontend prototype into a Vite + React app with an Express API, SQLite persistence, session login, Docker deployment, and VPS-ready configuration.
+LOOM is a single-user personal intelligence workspace. It turns signals from everyday browsing into structured, reusable decision assets through a pipeline:
+
+```text
+采集 → 结构化 → 沉淀 → 分析 / 生成
+```
+
+The product module names are bilingual in the UI:
+
+| Product name | 中文说明 | Current implementation |
+|---|---|---|
+| Stream | 资讯流 | RSS / webpage collection, AI filtering, Chinese summary, starred items |
+| Lens | 竞品库 | Product records, multi-platform product data, AI extraction, Feishu sync |
+| Spark | 灵感库 | Inspiration / demand samples, source links, scenario / painpoint / innovation tags |
+| Weave | 调研工坊 | Research projects and AI analysis based on accumulated local data |
+| Settings | 系统设置 | AI, Stream sources, Feishu sync, tag system, account settings |
+
+For the product source of truth, see `docs/LOOM_Product_Definition_v2.md`.
 
 ## Local Development
+
+Use Node.js 22.x for local development. The current project dependency tree
+includes `better-sqlite3`, which is not compatible with Node 26 in this repo.
 
 ```bash
 npm install
@@ -25,6 +44,18 @@ password: pm-copilot
 ```
 
 Set `APP_PASSWORD` in `.env` before using the app outside local development.
+
+Optional Feishu OAuth login:
+
+```text
+FEISHU_OAUTH_APP_ID=cli_xxx
+FEISHU_OAUTH_APP_SECRET=xxx
+FEISHU_OAUTH_REDIRECT_URI=https://your-domain.com/api/auth/feishu/callback
+FEISHU_OAUTH_ALLOWED_TENANT_KEYS=tenant_xxx
+FEISHU_OAUTH_AUTO_PROVISION=true
+```
+
+When these values are configured, the login page will show both password login and `使用飞书登录`. In production, use the HTTPS callback URL of your deployed domain and whitelist your company tenant.
 
 ## Checks
 
@@ -81,16 +112,17 @@ curl http://127.0.0.1:3000/api/health
 
 Implemented:
 
-- Existing frontend prototype moved into Vite without redesigning the UI.
 - Single-user login with server-side session cookie.
-- SQLite-backed persistence for products, demands, news flags, RSS sources, research seed data, and settings.
-- Basic product creation/editing, demand creation/editing, and news star persistence.
-- Docker Compose deployment.
-- OpenAI-compatible LLM calls, lightweight URL parsing, RSS collection, research analysis, and one-way Feishu sync endpoints.
+- Optional Feishu OAuth login that reuses the same server-side session.
+- SQLite-backed persistence for Lens products, Spark inspirations, Stream items, Stream sources, Weave research projects, and Settings.
+- Basic Lens / Spark create, edit, delete, and batch delete flows.
+- Stream collection, AI filtering, Chinese summary, read/star state, and source management.
+- OpenAI-compatible LLM calls, lightweight URL parsing, research analysis, and one-way Feishu sync endpoints.
+- `LOOM Web Clipper` browser extension for collecting Lens products and Spark inspirations from supported platforms.
 
 Current real-integration boundary:
 
 - URL parsing uses lightweight HTML/meta/body extraction first, not deep anti-bot browser scraping.
-- RSS collection runs manually from the News page and periodically inside the production container.
-- Feishu sync is one-way from SQLite to Bitable for products, demands, and News.
-- Feishu table schema must already contain the mapped fields shown in the product spec.
+- Stream collection runs manually from Stream and periodically inside the production container.
+- Feishu sync is one-way from SQLite to Bitable for Lens, Spark, and Stream.
+- API route names still use historical internal names such as `/api/news`, `/api/products`, `/api/demands`, and `/api/research`; these are implementation details, not product-facing names.

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PM Copilot 设置</title>
+  <title>LOOM Web Clipper 设置</title>
   <link rel="stylesheet" href="../styles/design-tokens.css">
   <link rel="stylesheet" href="options.css">
 </head>
@@ -11,13 +11,13 @@
   <main class="page">
     <header class="top">
       <div class="brand">
-        <div class="mark">P</div>
+        <div class="mark">L</div>
         <div>
-          <h1>PM Copilot Clipper</h1>
+          <h1>LOOM Web Clipper</h1>
           <p>配置采集插件的服务器、登录状态、平台和字段映射。</p>
         </div>
       </div>
-      <button id="open-web" class="btn">打开 Web 端</button>
+      <button id="open-web" class="btn">打开 LOOM</button>
     </header>
 
     <section class="section">
@@ -27,8 +27,8 @@
       </div>
       <div class="form-grid">
         <label>服务器地址<input id="api-base" type="url" placeholder="https://ulanzi-copilot.my1panelsite.xyz"></label>
-        <label>用户名<input id="username" type="text" placeholder="graham"></label>
-        <label>密码<input id="password" type="password" placeholder="••••••••"></label>
+        <label>用户名<input id="username" type="text" placeholder="请输入你的账号"></label>
+        <label>密码<input id="password" type="password" placeholder="请输入你的密码"></label>
       </div>
       <div class="actions">
         <button id="save-login" class="btn primary">登录并保存</button>
@@ -46,7 +46,7 @@
           <select id="default-mode">
             <option value="auto">自动判断</option>
             <option value="product">竞品</option>
-            <option value="demand">需求</option>
+            <option value="demand">Spark 灵感</option>
           </select>
         </label>
         <label>AI 整理
@@ -72,8 +72,8 @@
         <label>商品名称字段<input id="map-product-name" type="text"></label>
         <label>品牌字段<input id="map-product-brand" type="text"></label>
         <label>品类字段<input id="map-product-category" type="text"></label>
-        <label>需求标题字段<input id="map-demand-title" type="text"></label>
-        <label>需求摘要字段<input id="map-demand-summary" type="text"></label>
+        <label>灵感标题字段<input id="map-demand-title" type="text"></label>
+        <label>灵感摘要字段<input id="map-demand-summary" type="text"></label>
       </div>
       <div class="actions">
         <button id="save-settings" class="btn primary">保存设置</button>

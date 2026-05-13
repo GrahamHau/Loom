@@ -1,12 +1,12 @@
 import { AppError } from "./ai-service.js";
 import { rawState } from "./repository.js";
 
-function settings() {
-  return rawState().settings || {};
+function settings(userId) {
+  return rawState(userId)?.settings || {};
 }
 
-function configuredSettings() {
-  const s = settings();
+function configuredSettings(userId) {
+  const s = settings(userId);
   const tavilyEnabled = Boolean(s.search_tavily_enabled);
   const serpapiEnabled = Boolean(s.search_serpapi_enabled);
   if (!tavilyEnabled && !serpapiEnabled && !s.search_enabled) return null;
@@ -103,8 +103,8 @@ async function searchSerpApi(query, s, limit) {
   return normalizeResults(body.organic_results, limit);
 }
 
-export async function searchWeb(query, { limit = 5 } = {}) {
-  const s = configuredSettings();
+export async function searchWeb(userId, query, { limit = 5 } = {}) {
+  const s = configuredSettings(userId);
   if (!s) return [];
   if (!query) return [];
   if (s.provider === "serpapi") {
@@ -113,9 +113,9 @@ export async function searchWeb(query, { limit = 5 } = {}) {
   return searchTavily(query, s, limit);
 }
 
-export async function buildSearchContext(query, { limit = 4 } = {}) {
+export async function buildSearchContext(userId, query, { limit = 4 } = {}) {
   try {
-    const results = await searchWeb(query, { limit });
+    const results = await searchWeb(userId, query, { limit });
     if (!results.length) return "";
     return results.map((item, index) => (
       `${index + 1}. ${item.title}\nURL: ${item.url}\n摘要: ${item.snippet}`

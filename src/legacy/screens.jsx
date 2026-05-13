@@ -26,6 +26,33 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizeEditorTagGroups(groups) {
+  const defaults = [
+    { key: "competitor_brands", name: "竞品品牌", tone: "outline", tags: ["Ulanzi", "DJI", "Insta360", "SmallRig", "NEEWER", "Tilta", "K&F CONCEPT", "Godox", "Nanlite", "Zhiyun", "智云", "Aputure", "Rode", "RODE"] },
+    { key: "camera_brands", name: "主机品牌", tone: "outline", tags: ["影石", "GoPro", "Apple", "Sony", "Canon", "Nikon", "Fujifilm", "Panasonic", "LUMIX"] },
+    { key: "product_categories", name: "产品品类", tone: "default", tags: ["灯光", "稳定器", "三脚架", "镜头", "麦克风", "相机配件", "运动相机", "无人机"] },
+    { key: "scenarios", name: "使用场景", tone: "accent", tags: ["Vlog/自拍", "直播/带货", "短视频创作", "户外旅拍", "室内棚拍", "桌面俯拍", "运动/极限拍摄", "会议/活动记录", "产品摄影", "延时/慢动作", "街拍/纪实", "教育/网课"] },
+    { key: "painpoints", name: "用户痛点", tone: "danger", tags: ["携带不便/太重", "续航不足", "操作复杂/学习成本高", "画质不够", "防抖不足", "散热过热", "噪音大", "兼容性差", "配件缺失/需另购", "安装固定麻烦", "调光/调色不精准", "无线连接不稳定", "收纳困难", "价格过高/性价比低", "做工质感差"] },
+    { key: "innovation_types", name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] },
+    { key: "custom_tags", name: "自定义标签", tone: "outline", tags: ["便携", "高显色", "模块化", "磁吸", "手机摄影"] },
+  ];
+  const input = safeArray(groups);
+  const legacyBrands = input.find((item) => item?.key === "brands" || item?.name === "品牌字段");
+  const legacyBrandTags = safeArray(legacyBrands?.tags).filter(Boolean).map(String);
+  return defaults.map((group) => {
+    const match = input.find((item) => item?.key === group.key || item?.name === group.name);
+    let tags = safeArray(match?.tags).filter(Boolean).map(String);
+    if (!tags.length) tags = group.tags;
+    if (!match && legacyBrandTags.length && group.key === "competitor_brands") {
+      tags = legacyBrandTags.filter((tag) => group.tags.includes(tag));
+    }
+    if (!match && legacyBrandTags.length && group.key === "camera_brands") {
+      tags = legacyBrandTags.filter((tag) => group.tags.includes(tag));
+    }
+    return { key: group.key, name: group.name, tone: match?.tone || group.tone, tags };
+  });
+}
+
 function normalizeMonthlySales(value) {
   return String(value || "")
     .replace(/\s*\/\s*(month|mo|mth|月)\s*$/i, "")
@@ -106,7 +133,7 @@ function DeleteSourceConfirmModal({ source, busy, onClose, onConfirm }) {
         </div>
         <div className="modal-body">
           <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 14 }}>
-            删除后这个 News 数据源将不会再继续采集。
+            删除后这个 Stream 数据源将不会再继续采集。
           </div>
           <div className="confirm-delete-summary">
             <div className="confirm-delete-row">
@@ -242,11 +269,71 @@ function RemovableTagList({ items, tone = "default", onRemove, addLabel = "+ 添
   );
 }
 
+function TagPicker({ options, value = [], placeholder = "搜索或新建", onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const normalized = String(query || "").trim().toLowerCase();
+  const available = safeArray(options).filter(Boolean).filter((item) => !safeArray(value).includes(item));
+  const matches = available.filter((item) => item.toLowerCase().includes(normalized)).slice(0, 8);
+
+  const submit = (nextValue) => {
+    const clean = String(nextValue || "").trim();
+    if (!clean) return;
+    onAdd?.(clean);
+    setQuery("");
+    setOpen(false);
+  };
+
+  return (
+    <div className="tag-picker">
+      <button type="button" className="tag-picker-trigger" onClick={() => setOpen((current) => !current)}>
+        <Icon name="plus" size={10} /> 添加
+      </button>
+      {open && (
+        <div className="tag-picker-panel">
+          <input
+            autoFocus
+            className="tag-picker-input"
+            placeholder={placeholder}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submit(query);
+              }
+              if (event.key === "Escape") {
+                setOpen(false);
+                setQuery("");
+              }
+            }}
+          />
+          <div className="tag-picker-list">
+            {matches.map((item) => (
+              <button key={item} type="button" className="tag-picker-option" onClick={() => submit(item)}>
+                <span>{item}</span>
+                <span className="tag-picker-hint">选择</span>
+              </button>
+            ))}
+            {normalized && !available.some((item) => item.toLowerCase() === normalized) && (
+              <button type="button" className="tag-picker-option" onClick={() => submit(query)}>
+                <span className="tag-picker-create">新建 “{query.trim()}”</span>
+                <span className="tag-picker-hint">回车添加</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ LOGIN ============
-function LoginScreen({ onLogin, error }) {
-  const [user, setUser] = useState("graham");
+function LoginScreen({ onLogin, onFeishuLogin, error, providers = { password: true, feishu: false } }) {
+  const [user, setUser] = useState("");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
+  const [oauthBusy, setOauthBusy] = useState(false);
   const submit = async () => {
     setBusy(true);
     try {
@@ -255,36 +342,77 @@ function LoginScreen({ onLogin, error }) {
       setBusy(false);
     }
   };
+  const submitFeishu = async () => {
+    setOauthBusy(true);
+    try {
+      await onFeishuLogin?.();
+    } finally {
+      setOauthBusy(false);
+    }
+  };
   return (
     <div className="login-stage">
       <div className="login-card">
         <div className="login-brand">
-          <div className="mark">P</div>
+          <div className="mark">L</div>
           <div>
-            <div className="name">PM Copilot</div>
-            <div className="sub">产品经理的个人情报中台</div>
+            <div className="name">LOOM</div>
+            <div className="sub">Personal Intelligence Workspace</div>
           </div>
         </div>
-        <div className="col" style={{ gap: 14 }}>
+        <div className="login-hero">
+          <div className="login-kicker">欢迎回来</div>
+          <div className="login-title">登录 LOOM</div>
+          <div className="login-copy">继续进入你的本地情报工作台。你可以使用账号密码登录，也可以直接走飞书认证。</div>
+        </div>
+        <div className="col login-form" style={{ gap: 14 }}>
+          {providers.feishu ? (
+            <button className="btn login-oauth-btn" onClick={submitFeishu} disabled={oauthBusy || busy}>
+              <span className="login-oauth-icon">F</span>
+              {oauthBusy ? "正在跳转飞书..." : "使用飞书登录"}
+            </button>
+          ) : null}
+
+          {providers.feishu && providers.password ? (
+            <div className="login-divider">
+              <span>或使用账号密码</span>
+            </div>
+          ) : null}
+
           <div>
             <label className="field-label">用户名</label>
-            <input className="input lg" style={{ width: "100%" }} value={user} onChange={(e) => setUser(e.target.value)} />
+            <input
+              className="input lg login-input-main"
+              style={{ width: "100%" }}
+              value={user}
+              onChange={(e) => setUser(e.target.value)}
+              placeholder="请输入你的账号"
+              autoComplete="username"
+            />
           </div>
           <div>
             <label className="field-label">密码</label>
-            <input className="input lg" style={{ width: "100%" }} type="password" value={pw} onChange={(e) => setPw(e.target.value)} />
+            <input
+              className="input lg login-input-main"
+              style={{ width: "100%" }}
+              type="password"
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              placeholder="请输入你的密码"
+              autoComplete="current-password"
+            />
           </div>
           {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
-          <button className="btn primary" style={{ height: 38, marginTop: 6, justifyContent: "center" }} onClick={submit} disabled={busy || !user || !pw}>
-            {busy ? "登录中..." : "登录 PM Copilot"}
+          <button className="btn primary login-submit-btn" style={{ height: 44, marginTop: 6, justifyContent: "center" }} onClick={submit} disabled={busy || !user || !pw}>
+            {busy ? "登录中..." : "登录 LOOM"}
           </button>
         </div>
         <div style={{ borderTop: "1px solid var(--border)", marginTop: 22, paddingTop: 14, fontSize: 11, color: "var(--text-3)", textAlign: "center" }}>
-          PM Copilot v1.0 · 单用户版本
+          LOOM v2.0 · 本地单用户工作台
         </div>
       </div>
-    </div>);
-
+    </div>
+  );
 }
 window.LoginScreen = LoginScreen;
 
@@ -301,6 +429,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [selectedIds, setSelectedIds] = useState([]);
+  const [selectMode, setSelectMode] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -395,6 +524,9 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
   }, [items]);
+  useEffect(() => {
+    if (!selectMode) setSelectedIds([]);
+  }, [selectMode]);
 
   const selectedItems = items.filter((item) => selectedIds.includes(item.id));
   const toggleSelect = (id) => {
@@ -444,7 +576,13 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           </div>
         )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, padding: "6px 0" }}>
-          <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+          {selectMode ?
+          <>
+              <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+              <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
+            </> :
+          <Btn size="sm" variant="ghost" onClick={() => setSelectMode(true)}>选择</Btn>
+          }
           <Btn size="sm" variant="ghost" icon="filter">筛选</Btn>
           <Btn size="sm" variant="ghost" icon="sparkles" onClick={processLlm} disabled={busy}>{busy ? "处理中..." : "LLM处理"}</Btn>
           <Btn size="sm" variant="ghost" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>
@@ -454,7 +592,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
       <div className="viewport">
         <div className="page" style={{ paddingTop: 8 }}>
           {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
-          {items.length > 0 &&
+          {selectMode && items.length > 0 &&
             <div className="bulk-toolbar" style={{ marginBottom: 12 }}>
               <label className="bulk-check">
                 <input type="checkbox" checked={selectedIds.length > 0 && selectedIds.length === items.length} onChange={toggleSelectAll} />
@@ -466,7 +604,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           {dates.length === 0 &&
             <EmptyState
               icon="newspaper"
-              title="还没有真实 News"
+              title="还没有真实 Stream"
               action={<Btn size="sm" variant="primary" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>}>
               先到系统设置添加 RSS 源，或点击立即采集导入真实资讯。
             </EmptyState>
@@ -479,13 +617,15 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
                 const brand = n.type === "新品发布" ? guessBrand(n) : "";
                 const showSource = !sameMetaLabel(brand, n.source);
                 return (
-            <div className={`news-card ${n.unread ? "unread" : ""}`} key={n.id} role="button" tabIndex={0}
-              onClick={() => openNews(n)}
-              onKeyDown={(e) => { if (e.key === "Enter") openNews(n); }}>
+            <div className={`news-card ${n.unread ? "unread" : ""} ${selectMode ? "select-mode" : ""}`} key={n.id} role="button" tabIndex={0}
+              onClick={() => selectMode ? toggleSelect(n.id) : openNews(n)}
+              onKeyDown={(e) => { if (e.key === "Enter") selectMode ? toggleSelect(n.id) : openNews(n); }}>
+                  {selectMode &&
+                  <label className="news-card-check" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedIds.includes(n.id)} onChange={() => toggleSelect(n.id)} />
+                    </label>
+                  }
                   <NewsThumb item={n} />
-                  <label className="card-select" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={selectedIds.includes(n.id)} onChange={() => toggleSelect(n.id)} />
-                  </label>
                   <div className="news-body">
                     <div className="news-title">{n.titleZh}</div>
                     <div className="news-summary">{n.summary}</div>
@@ -498,7 +638,6 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
                     </div>
                   </div>
                   <div className="news-actions">
-                    <Btn size="sm" variant="ghost" icon="trash" onClick={(e) => { e.stopPropagation(); setDeleteTarget(n); }} />
                     <Btn size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); toggleStar(n.id); }}
                 icon={n.starred ? "star-fill" : "star"}
                 style={{ color: n.starred ? "var(--warn)" : undefined }} />
@@ -672,10 +811,11 @@ function BulletListEditor({ items, onChange, tone = "default", placeholder = "�
 
 }
 
-function ProductsScreen({ data, api, refreshData }) {
+function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailCollapsed }) {
   const [products, setProducts] = useState(safeArray(data.products));
   const [notice, setNotice] = useState("");
   const [selectedIds, setSelectedIds] = useState([]);
+  const [selectMode, setSelectMode] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -701,6 +841,9 @@ function ProductsScreen({ data, api, refreshData }) {
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => products.some((item) => item.id === id)));
   }, [products]);
+  useEffect(() => {
+    if (!selectMode) setSelectedIds([]);
+  }, [selectMode]);
 
   const categories = ["全部", ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))];
   const filtered = products.filter((p) =>
@@ -714,16 +857,13 @@ function ProductsScreen({ data, api, refreshData }) {
     try {
       await api("/api/sync/feishu", { method: "POST", body: JSON.stringify({ kinds: ["products"] }) });
       await refreshData?.();
-      setNotice("竞品库已同步到飞书。");
+      setNotice("Lens 已同步到飞书。");
     } catch (error) {
       setNotice(error.message);
     }
   };
   const toggleSelect = (id) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-  };
-  const toggleSelectAll = () => {
-    setSelectedIds((current) => current.length === filtered.length ? [] : filtered.map((item) => item.id));
   };
   const deleteOne = async () => {
     if (!api || !deleteTarget) return;
@@ -761,10 +901,10 @@ function ProductsScreen({ data, api, refreshData }) {
   };
 
   return (
-    <div className={`products-layout ${selected ? "" : "no-detail"}`} style={{ height: "100%" }}>
+    <div className={`products-layout ${selected && !detailCollapsed ? "" : "no-detail"}`} style={{ height: "100%" }}>
       <div className="products-main">
         <div className="products-toolbar">
-          <div style={{ position: "relative", flex: "0 1 280px" }}>
+          <div style={{ position: "relative", flex: detailCollapsed ? "1 1 340px" : "1 1 220px", minWidth: 160 }}>
             <Icon name="search" size={14} style={{ position: "absolute", left: 9, top: 8, color: "var(--text-3)" }} />
             <input className="input" placeholder="搜索竞品..." value={query} onChange={(e) => setQuery(e.target.value)}
             style={{ paddingLeft: 30, width: "100%" }} />
@@ -775,7 +915,7 @@ function ProductsScreen({ data, api, refreshData }) {
             <option key={c} value={c}>{c === "全部" ? "全部品类" : c}</option>
             )}
           </select>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexShrink: 0 }}>
             <Tag tone="outline">{filtered.length} 条</Tag>
             <Btn size="sm" variant="ghost" icon="sync" onClick={syncProducts}>同步飞书</Btn>
             <Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>添加竞品</Btn>
@@ -784,12 +924,14 @@ function ProductsScreen({ data, api, refreshData }) {
         {notice && <div className="ai-block" style={{ margin: "0 12px 10px" }}>{notice}</div>}
         {filtered.length > 0 &&
           <div className="bulk-toolbar" style={{ margin: "0 12px 10px" }}>
-            <label className="bulk-check">
-              <input type="checkbox" checked={selectedIds.length > 0 && selectedIds.length === filtered.length} onChange={toggleSelectAll} />
-              <span>全选当前结果</span>
-            </label>
-            <span className="muted text-sm">{selectedIds.length} 条已选择</span>
-            <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+            {selectMode ?
+            <>
+                <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
+                <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+              </> :
+            <Btn size="sm" variant="ghost" onClick={() => setSelectMode(true)}>选择</Btn>
+            }
           </div>
         }
 
@@ -797,7 +939,7 @@ function ProductsScreen({ data, api, refreshData }) {
           <table className="products-table">
             <thead>
               <tr>
-                <th style={{ width: 34 }} />
+                {selectMode && <th style={{ width: 34 }} />}
                 <th>商品名称</th><th>品类</th><th>平台</th><th>售价</th><th>参考成本</th><th>评分</th><th>月销估算</th><th>状态</th><th style={{ width: 52 }}>操作</th>
               </tr>
             </thead>
@@ -807,10 +949,12 @@ function ProductsScreen({ data, api, refreshData }) {
                 const main = platforms[0] || {};
                 const reviews = Number(main.reviews);
                 return (
-                  <tr key={p.id} className={selectedId === p.id ? "selected" : ""} onClick={() => setSelectedId(p.id)}>
+                  <tr key={p.id} className={selectedId === p.id ? "selected" : ""} onClick={() => { setSelectedId(p.id); setDetailCollapsed?.(false); }}>
+                    {selectMode &&
                     <td onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggleSelect(p.id)} />
-                    </td>
+                        <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggleSelect(p.id)} />
+                      </td>
+                    }
                     <td>
                       <div className="product-name">
                         <div className="products-thumb">{p.emoji || "📦"}</div>
@@ -864,7 +1008,7 @@ function ProductsScreen({ data, api, refreshData }) {
         </div>
       </div>
 
-      {selected &&
+      {selected && !detailCollapsed &&
       <div className="detail">
           <div className="detail-head">
             <ProductImageSlot product={selected} onChange={(img) => updateSelected({ image: img })} />
@@ -903,19 +1047,19 @@ function ProductsScreen({ data, api, refreshData }) {
                     <span className="platform-card-link">{pl.url}</span>
                     <Icon name="external" size={12} style={{ color: "var(--text-3)" }} />
                   </div>
-                  <div className="platform-card-grid">
+                  <div className={`platform-card-grid ${pl.platform === "taobao" ? "compact" : ""}`}>
                     <PlatformInput label="售价" value={pl.price} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, price: v } : p);
                   updateSelected({ platforms: next });
                 }} />
-                    <PlatformInput label="评分" value={pl.rating} onChange={(v) => {
+                    {pl.platform !== "taobao" && <PlatformInput label="评分" value={pl.rating} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, rating: v } : p);
                   updateSelected({ platforms: next });
-                }} prefix={<span className="rating-star" style={{ fontSize: 11 }}>★</span>} />
-                    <PlatformInput label="评论数" value={pl.reviews} onChange={(v) => {
+                }} prefix={<span className="rating-star" style={{ fontSize: 11 }}>★</span>} />}
+                    {pl.platform !== "taobao" && <PlatformInput label="评论数" value={pl.reviews} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, reviews: v } : p);
                   updateSelected({ platforms: next });
-                }} inputMode="numeric" />
+                }} inputMode="numeric" />}
                     <PlatformInput label="月销估算" value={normalizeMonthlySales(pl.sales)} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, sales: v } : p);
                   updateSelected({ platforms: next });
@@ -1158,6 +1302,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   const [showAdd, setShowAdd] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [selectMode, setSelectMode] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -1175,7 +1320,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
     try {
       await api("/api/sync/feishu", { method: "POST", body: JSON.stringify({ kinds: ["demands"] }) });
       await refreshData?.();
-      setNotice("需求管理已同步到飞书。");
+      setNotice("Spark 已同步到飞书。");
     } catch (error) {
       setNotice(error.message);
     }
@@ -1193,6 +1338,9 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => demands.some((item) => item.id === id)));
   }, [demands]);
+  useEffect(() => {
+    if (!selectMode) setSelectedIds([]);
+  }, [selectMode]);
 
   const confirmDelete = async () => {
     if (!api || !deleteTarget) return;
@@ -1214,9 +1362,6 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   const selectedItems = demands.filter((item) => selectedIds.includes(item.id));
   const toggleSelect = (id) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-  };
-  const toggleSelectAll = () => {
-    setSelectedIds((current) => current.length === filtered.length ? [] : filtered.map((item) => item.id));
   };
   const deleteSelected = async () => {
     if (!api || !selectedItems.length) return;
@@ -1241,7 +1386,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
       <div className="page page-fluid">
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div>
-            <h1 className="h1">需求管理</h1>
+            <h1 className="h1">Spark <span className="heading-subtle">灵感库</span></h1>
             <div className="muted text-sm">{demands.length} 条已录入 · 使用真实链接解析或手动录入</div>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
@@ -1252,12 +1397,14 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
         {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
         {filtered.length > 0 &&
           <div className="bulk-toolbar" style={{ marginBottom: 12 }}>
-            <label className="bulk-check">
-              <input type="checkbox" checked={selectedIds.length > 0 && selectedIds.length === filtered.length} onChange={toggleSelectAll} />
-              <span>全选当前结果</span>
-            </label>
-            <span className="muted text-sm">{selectedIds.length} 条已选择</span>
-            <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+            {selectMode ?
+            <>
+                <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
+                <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+              </> :
+            <Btn size="sm" variant="ghost" onClick={() => setSelectMode(true)}>选择</Btn>
+            }
           </div>
         }
 
@@ -1281,14 +1428,11 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           {filtered.map((d) =>
           <div className="demand-card" key={d.id} onClick={() => setSelectedId(d.id)} style={{ cursor: "pointer" }}>
               <div className="demand-thumb">
-                <label className="card-select">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.includes(d.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => toggleSelect(d.id)}
-                  />
-                </label>
+                {selectMode &&
+                <label className="news-card-check" style={{ position: "absolute", top: 10, right: 10, zIndex: 3 }} onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} />
+                  </label>
+                }
                 <DemandImage demand={d} label={d.source.toUpperCase() + " · INSPIRATION"} className="demand-thumb-media" />
                 <div className="platform-badge">
                   <Icon name="link" size={10} /> {PLATFORM_LABEL[d.source] || d.source}
@@ -1334,7 +1478,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
       </div>
 
       {showAdd && <AddDemandModal api={api} refreshData={refreshData} onClose={() => setShowAdd(false)} />}
-      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
+      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} tagGroups={safeArray(data.settings?.tag_groups)} />}
       {deleteTarget && <DeleteDemandConfirmModal demand={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={confirmDelete} />}
       {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="需求" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={async () => { await deleteSelected(); setShowBulkDeleteConfirm(false); }} />}
     </div>);
@@ -1342,13 +1486,16 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
 }
 window.DemandsScreen = DemandsScreen;
 
-function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete }) {
+function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete, tagGroups = [] }) {
   const save = async (patch) => {
     if (api) {
       await api(`/api/demands/${demand.id}`, { method: "PATCH", body: JSON.stringify(patch) });
       await refreshData?.();
     }
   };
+  const innovationOptions = safeArray(tagGroups.find((group) => group.key === "innovation_types")?.tags);
+  const scenarioOptions = safeArray(tagGroups.find((group) => group.key === "scenarios")?.tags);
+  const painpointOptions = safeArray(tagGroups.find((group) => group.key === "painpoints")?.tags);
   return (
     <div className="drawer-root" onClick={onClose}>
       <div className="drawer-overlay" />
@@ -1383,7 +1530,12 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
             <div className="detail-section-label">创新类型 · 多选</div>
             <div className="tag-row">
               <Tag tone="accent">{demand.innovation}</Tag>
-              <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
+              <TagPicker
+                options={innovationOptions}
+                value={demand.innovation ? [demand.innovation] : []}
+                placeholder="搜索创新类型"
+                onAdd={(nextValue) => save({ innovation: nextValue })}
+              />
             </div>
           </div>
 
@@ -1392,6 +1544,13 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
             <DemandTagList
               items={demand.scenarios}
               onRemove={(value) => save({ scenarios: safeArray(demand.scenarios).filter((item) => item !== value) })}
+              addLabel=""
+            />
+            <TagPicker
+              options={scenarioOptions}
+              value={safeArray(demand.scenarios)}
+              placeholder="搜索使用场景"
+              onAdd={(nextValue) => save({ scenarios: [...safeArray(demand.scenarios), nextValue] })}
             />
           </div>
 
@@ -1401,12 +1560,26 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
               items={demand.painpoints}
               tone="danger"
               onRemove={(value) => save({ painpoints: safeArray(demand.painpoints).filter((item) => item !== value) })}
+              addLabel=""
+            />
+            <TagPicker
+              options={painpointOptions}
+              value={safeArray(demand.painpoints)}
+              placeholder="搜索用户痛点"
+              onAdd={(nextValue) => save({ painpoints: [...safeArray(demand.painpoints), nextValue] })}
             />
           </div>
 
           <div className="detail-section">
             <div className="detail-section-label">来源链接</div>
-            <div style={{ fontSize: 12, color: "var(--accent)", wordBreak: "break-all" }}>{demand.url || `${demand.source}.com/...`}</div>
+            <a
+              href={demand.url || "#"}
+              target="_blank"
+              rel="noreferrer"
+              style={{ fontSize: 12, color: "var(--accent)", wordBreak: "break-all", textDecoration: "underline" }}
+            >
+              {demand.url || `${demand.source}.com/...`}
+            </a>
           </div>
 
           <div className="detail-section">
@@ -1597,6 +1770,7 @@ function ResearchScreen({ data, api, refreshData }) {
   const [activeId, setActiveId] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [selectMode, setSelectMode] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -1605,13 +1779,13 @@ function ResearchScreen({ data, api, refreshData }) {
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
   }, [items]);
+  useEffect(() => {
+    if (!selectMode) setSelectedIds([]);
+  }, [selectMode]);
 
   const selectedItems = items.filter((item) => selectedIds.includes(item.id));
   const toggleSelect = (id) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-  };
-  const toggleSelectAll = () => {
-    setSelectedIds((current) => current.length === items.length ? [] : items.map((item) => item.id));
   };
   const deleteOne = async () => {
     if (!api || !deleteTarget) return;
@@ -1651,30 +1825,28 @@ function ResearchScreen({ data, api, refreshData }) {
       <div className="page page-fluid">
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div>
-            <h1 className="h1">市场调研</h1>
-            <div className="muted text-sm">从竞品库与需求管理中匹配数据,AI 生成结构化分析报告</div>
+            <h1 className="h1">Weave <span className="heading-subtle">调研工坊</span></h1>
+            <div className="muted text-sm">从 Lens 与 Spark 中匹配数据，AI 生成结构化分析报告</div>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-            <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+            {selectMode ?
+            <>
+                <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
+              </> :
+            <Btn size="sm" variant="ghost" onClick={() => setSelectMode(true)}>选择</Btn>
+            }
             <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>新建调研项目</Btn>
           </div>
         </div>
 
-        {items.length > 0 &&
-          <div className="bulk-toolbar" style={{ marginBottom: 12 }}>
-            <label className="bulk-check">
-              <input type="checkbox" checked={selectedIds.length > 0 && selectedIds.length === items.length} onChange={toggleSelectAll} />
-              <span>全选当前结果</span>
-            </label>
-            <span className="muted text-sm">{selectedIds.length} 条已选择</span>
-          </div>
-        }
+        {selectMode && items.length > 0 && <div className="muted text-sm" style={{ marginBottom: 12 }}>{selectedIds.length} 条已选择</div>}
 
         <div className="research-list">
           {items.map((r) =>
           <div className="research-row" key={r.id} onClick={() => setActiveId(r.id)}>
               <div className="icon"><Icon name="compass" size={18} /></div>
-              <input type="checkbox" checked={selectedIds.includes(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(r.id)} />
+              {selectMode && <input type="checkbox" checked={selectedIds.includes(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(r.id)} />}
               <div className="research-info">
                 <h4>{r.title}</h4>
                 <div className="meta">
@@ -1716,9 +1888,12 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [status, setStatus] = useState(research.status || "草稿");
+  const [draftDesc, setDraftDesc] = useState(research.desc || "");
+  const [descSaving, setDescSaving] = useState(false);
   const products = productIds.map((id) => safeArray(data.products).find((p) => p.id === id)).filter(Boolean);
   const demands = demandIds.map((id) => safeArray(data.demands).find((d) => d.id === id)).filter(Boolean);
   useEffect(() => setStatus(research.status || "草稿"), [research.status]);
+  useEffect(() => setDraftDesc(research.desc || ""), [research.desc]);
   const saveLinks = async (nextProducts = productIds, nextDemands = demandIds) => {
     await api?.(`/api/research/${research.id}`, {
       method: "PATCH",
@@ -1733,6 +1908,23 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
       body: JSON.stringify({ status: nextStatus }),
     });
     await refreshData?.();
+  };
+  const saveDesc = async () => {
+    if (draftDesc === (research.desc || "")) return;
+    setDescSaving(true);
+    setNotice("");
+    try {
+      await api?.(`/api/research/${research.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ desc: draftDesc }),
+      });
+      await refreshData?.();
+      setNotice("产品描述已更新。");
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setDescSaving(false);
+    }
   };
   const analyze = async () => {
     setBusy(true);setNotice("");
@@ -1778,8 +1970,19 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
         {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
 
         <Section icon="edit" label="产品描述">
-          <div className="card" style={{ padding: 14, fontSize: 13, lineHeight: 1.7, color: "var(--text-2)" }}>
-            {research.desc}
+          <div className="card" style={{ padding: 14 }}>
+            <textarea
+              className="input"
+              value={draftDesc}
+              onChange={(e) => setDraftDesc(e.target.value)}
+              onBlur={saveDesc}
+              placeholder="描述目标用户、场景、价格段、差异化设想..."
+              style={{ width: "100%", minHeight: 84, resize: "vertical", border: "none", padding: 0, background: "transparent", lineHeight: 1.7, color: "var(--text-2)" }}
+            />
+            <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--text-3)" }}>
+              <span>点击后可直接编辑，失焦自动保存</span>
+              <span>{descSaving ? "保存中..." : draftDesc === (research.desc || "") ? "已同步" : "待保存"}</span>
+            </div>
           </div>
         </Section>
 
@@ -1806,7 +2009,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
             {products.length === 0 &&
             <button className="card" style={{ padding: 18, border: "1px dashed var(--border)", color: "var(--text-3)", cursor: "pointer", background: "transparent", gridColumn: "1 / -1", textAlign: "center" }}
             onClick={() => setPicker("product")}>
-                <Icon name="plus" size={12} /> 从竞品库添加
+                <Icon name="plus" size={12} /> 从 Lens 添加
               </button>
             }
           </div>
@@ -1836,7 +2039,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
             {demands.length === 0 &&
             <button style={{ display: "block", width: "100%", padding: "18px", border: "none", color: "var(--text-3)", cursor: "pointer", background: "transparent", textAlign: "center" }}
             onClick={() => setPicker("demand")}>
-                <Icon name="plus" size={12} /> 从需求管理添加
+                <Icon name="plus" size={12} /> 从 Spark 添加
               </button>
             }
           </div>
@@ -1845,7 +2048,12 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
         {picker === "product" &&
         <PickerModal title="添加关联竞品" items={data.products} excludeIds={productIds}
         onClose={() => setPicker(null)}
-        onPick={(id) => {const next = [...productIds, id];setProductIds(next);setPicker(null);saveLinks(next, demandIds);}}
+        matchText={`${research.title} ${draftDesc}`}
+        onImport={(ids) => {
+          if (!ids.length) return setPicker(null);
+          const next = [...productIds, ...ids];
+          setProductIds(next);setPicker(null);saveLinks(next, demandIds);
+        }}
         renderItem={(p) =>
         <>
                 <div className="products-thumb" style={{ width: 32, height: 32, fontSize: 16 }}>{p.emoji}</div>
@@ -1860,7 +2068,12 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
         {picker === "demand" &&
         <PickerModal title="添加关联需求" items={data.demands} excludeIds={demandIds}
         onClose={() => setPicker(null)}
-        onPick={(id) => {const next = [...demandIds, id];setDemandIds(next);setPicker(null);saveLinks(productIds, next);}}
+        matchText={`${research.title} ${draftDesc}`}
+        onImport={(ids) => {
+          if (!ids.length) return setPicker(null);
+          const next = [...demandIds, ...ids];
+          setDemandIds(next);setPicker(null);saveLinks(productIds, next);
+        }}
         renderItem={(d) =>
         <>
                 <div style={{ width: 32, height: 32, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
@@ -1907,6 +2120,14 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
       </div>
     </div>);
 
+}
+
+function tokenizeMatchText(text) {
+  return Array.from(new Set(String(text || "").
+  toLowerCase().
+  split(/[\s,，。.;；:：/|·!！?？()（）[\]【】"'“”‘’-]+/).
+  map((item) => item.trim()).
+  filter((item) => item.length >= 2)));
 }
 
 function Section({ icon, label, children, action }) {
@@ -1971,16 +2192,37 @@ function CreateResearchModal({ api, refreshData, onClose }) {
     </div>);
 }
 
-function PickerModal({ title, items, excludeIds = [], onClose, onPick, renderItem, searchKey }) {
+function PickerModal({ title, items, excludeIds = [], onClose, onImport, renderItem, searchKey, matchText = "" }) {
   const [q, setQ] = useState("");
+  const [checkedIds, setCheckedIds] = useState([]);
+  const [matchNotice, setMatchNotice] = useState("");
   const available = items.filter((it) => !excludeIds.includes(it.id));
   const filtered = q ? available.filter((it) => searchKey(it).toLowerCase().includes(q.toLowerCase())) : available;
+  const toggleChecked = (id) => {
+    setCheckedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+  const autoMatch = () => {
+    const keywords = tokenizeMatchText(matchText);
+    const matched = available.map((item) => {
+      const haystack = searchKey(item).toLowerCase();
+      const score = keywords.reduce((sum, keyword) => sum + (haystack.includes(keyword) ? 1 : 0), 0);
+      return { id: item.id, score };
+    }).filter((item) => item.score > 0).
+    sort((a, b) => b.score - a.score).
+    slice(0, 6).
+    map((item) => item.id);
+    setCheckedIds(matched);
+    setMatchNotice(matched.length ? `已为你勾选 ${matched.length} 条候选项` : "暂时没有找到合适候选项");
+  };
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <Icon name="search" size={14} />
           <h3>{title}</h3>
+          <button className="btn sm ghost" onClick={autoMatch}>
+            <Icon name="sparkles" size={12} /> AI匹配
+          </button>
           <Btn variant="ghost" icon="x" onClick={onClose} />
         </div>
         <div style={{ padding: "12px 16px 0" }}>
@@ -1988,24 +2230,36 @@ function PickerModal({ title, items, excludeIds = [], onClose, onPick, renderIte
           placeholder={`搜索 ${available.length} 条...`}
           value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        {matchNotice && <div style={{ padding: "8px 16px 0", fontSize: 11.5, color: "var(--text-3)" }}>{matchNotice}</div>}
         <div className="modal-body" style={{ paddingTop: 8, maxHeight: 360 }}>
           {filtered.length === 0 ?
           <div className="empty">没有匹配的结果</div> :
 
           <div className="col" style={{ gap: 4 }}>
               {filtered.map((it) =>
-            <button key={it.id} onClick={() => onPick(it.id)}
-            style={{ display: "flex", alignItems: "center", gap: 10, padding: 8, borderRadius: 6,
-              background: "transparent", border: "1px solid transparent", cursor: "pointer",
+            <button key={it.id} onClick={() => toggleChecked(it.id)}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: 10, borderRadius: 8,
+              background: checkedIds.includes(it.id) ? "var(--surface-2)" : "transparent", border: `1px solid ${checkedIds.includes(it.id) ? "var(--accent)" : "transparent"}`, cursor: "pointer",
               width: "100%", textAlign: "left", color: "inherit" }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "var(--hover)"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+            onMouseEnter={(e) => {
+              if (!checkedIds.includes(it.id)) e.currentTarget.style.background = "var(--hover)";
+            }}
+            onMouseLeave={(e) => {
+              if (!checkedIds.includes(it.id)) e.currentTarget.style.background = "transparent";
+            }}>
+                  <input type="checkbox" checked={checkedIds.includes(it.id)} onChange={() => toggleChecked(it.id)} onClick={(e) => e.stopPropagation()} />
                   {renderItem(it)}
-                  <Icon name="plus" size={14} style={{ color: "var(--text-3)" }} />
                 </button>
             )}
             </div>
           }
+        </div>
+        <div className="modal-foot" style={{ justifyContent: "space-between" }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-3)" }}>已选择 {checkedIds.length} 项</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn variant="ghost" onClick={onClose}>取消</Btn>
+            <Btn variant="primary" onClick={() => onImport?.(checkedIds)} disabled={!checkedIds.length}>导入</Btn>
+          </div>
         </div>
       </div>
     </div>);
@@ -2107,11 +2361,11 @@ function SettingsScreen({ data, api, refreshData }) {
   return (
     <div className="viewport">
       <div className="page" style={{ maxWidth: 760 }}>
-        <h1 className="h1">系统设置</h1>
+            <h1 className="h1">Settings <span className="heading-subtle">系统设置</span></h1>
         <div className="muted text-sm" style={{ marginBottom: 24 }}>配置 AI 模型、飞书同步与数据源</div>
         <div className="news-tabs" style={{ marginBottom: 16 }}>
           <div className={`news-tab ${settingsTab === "general" ? "active" : ""}`} onClick={() => setSettingsTab("general")}>通用设置</div>
-          <div className={`news-tab ${settingsTab === "tags" ? "active" : ""}`} onClick={() => setSettingsTab("tags")}>Tag设置</div>
+          <div className={`news-tab ${settingsTab === "tags" ? "active" : ""}`} onClick={() => setSettingsTab("tags")}>标签设置</div>
         </div>
         {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
 
@@ -2258,9 +2512,9 @@ function SettingsScreen({ data, api, refreshData }) {
             <div className="settings-row">
               <div className="label">表 ID</div>
               <div className="col" style={{ gap: 8, width: "100%" }}>
-                <input className="input" style={{ width: "100%" }} value={settings.feishu_products_table_id || ""} onChange={(e) => setSettings({ ...settings, feishu_products_table_id: e.target.value })} placeholder="竞品表 table_id" />
-                <input className="input" style={{ width: "100%" }} value={settings.feishu_demands_table_id || ""} onChange={(e) => setSettings({ ...settings, feishu_demands_table_id: e.target.value })} placeholder="需求表 table_id" />
-                <input className="input" style={{ width: "100%" }} value={settings.feishu_news_table_id || ""} onChange={(e) => setSettings({ ...settings, feishu_news_table_id: e.target.value })} placeholder="News 表 table_id" />
+                <input className="input" style={{ width: "100%" }} value={settings.feishu_products_table_id || ""} onChange={(e) => setSettings({ ...settings, feishu_products_table_id: e.target.value })} placeholder="Lens 表 table_id" />
+                <input className="input" style={{ width: "100%" }} value={settings.feishu_demands_table_id || ""} onChange={(e) => setSettings({ ...settings, feishu_demands_table_id: e.target.value })} placeholder="Spark 表 table_id" />
+                <input className="input" style={{ width: "100%" }} value={settings.feishu_news_table_id || ""} onChange={(e) => setSettings({ ...settings, feishu_news_table_id: e.target.value })} placeholder="Stream 表 table_id" />
               </div>
             </div>
             <div className="settings-row">
@@ -2277,7 +2531,7 @@ function SettingsScreen({ data, api, refreshData }) {
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="rss" size={14} style={{ color: "var(--accent)" }} />
-            <div><h3>News 数据源</h3><div className="desc">RSS 与定向网页源,定时拉取后经 AI 中间层筛选</div></div>
+            <div><h3>Stream 数据源</h3><div className="desc">RSS 与定向网页源，定时拉取后经 AI 中间层筛选</div></div>
           </div>
           <div className="settings-section-body">
             {visibleSources.map((s) =>
@@ -2324,16 +2578,6 @@ function SettingsScreen({ data, api, refreshData }) {
 
         <div className="settings-section">
           <div className="settings-section-head">
-            <Icon name="tag" size={14} style={{ color: "var(--accent)" }} />
-            <div><h3>标签体系</h3><div className="desc">AI 打标使用的预设标签库</div></div>
-          </div>
-          <div className="settings-section-body">
-            <TagSystemEditor settings={settings} setSettings={setSettings} saveSettings={saveSettings} />
-          </div>
-        </div>
-
-        <div className="settings-section">
-          <div className="settings-section-head">
             <Icon name="key" size={14} style={{ color: "var(--accent)" }} />
             <div><h3>账号信息</h3><div className="desc">当前为单用户模式,架构已预留多用户字段</div></div>
           </div>
@@ -2349,7 +2593,7 @@ function SettingsScreen({ data, api, refreshData }) {
           <div className="settings-section">
             <div className="settings-section-head">
               <Icon name="tag" size={14} style={{ color: "var(--accent)" }} />
-              <div><h3>Tag设置</h3><div className="desc">统一配置品牌、品类、场景、痛点、创新类型与自定义标签</div></div>
+              <div><h3>标签设置</h3><div className="desc">统一配置品牌、品类、场景、痛点、创新类型与自定义标签</div></div>
             </div>
             <div className="settings-section-body">
               <TagSystemEditor settings={settings} setSettings={setSettings} saveSettings={saveSettings} />
@@ -2371,13 +2615,13 @@ function SettingsScreen({ data, api, refreshData }) {
 window.SettingsScreen = SettingsScreen;
 
 function TagSystemEditor({ settings, setSettings, saveSettings }) {
-  const [groups, setGroups] = useState(safeArray(settings.tag_groups));
+  const [groups, setGroups] = useState(normalizeEditorTagGroups(settings.tag_groups));
   const [drafts, setDrafts] = useState({});
   const [editing, setEditing] = useState(null); // index of group with input open
   const [tagTab, setTagTab] = useState("common");
 
   useEffect(() => {
-    setGroups(safeArray(settings.tag_groups));
+    setGroups(normalizeEditorTagGroups(settings.tag_groups));
   }, [settings.tag_groups]);
 
   const addTag = (i) => {
@@ -2397,11 +2641,11 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
   };
 
   const TAB_GROUPS = {
-    common: ["brands", "custom_tags"],
-    news: ["brands"],
-    products: ["brands", "product_categories"],
+    common: ["competitor_brands", "camera_brands", "custom_tags"],
+    news: ["competitor_brands", "camera_brands"],
+    products: ["competitor_brands", "camera_brands", "product_categories"],
     demands: ["scenarios", "painpoints", "innovation_types", "custom_tags"],
-    research: ["brands", "product_categories", "scenarios", "painpoints", "innovation_types", "custom_tags"],
+    research: ["competitor_brands", "camera_brands", "product_categories", "scenarios", "painpoints", "innovation_types", "custom_tags"],
   };
 
   const visibleGroups = groups.filter((group) => TAB_GROUPS[tagTab]?.includes(group.key));
@@ -2410,10 +2654,10 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
     <>
       <div className="news-tabs" style={{ marginBottom: 16 }}>
         <div className={`news-tab ${tagTab === "common" ? "active" : ""}`} onClick={() => setTagTab("common")}>通用</div>
-        <div className={`news-tab ${tagTab === "news" ? "active" : ""}`} onClick={() => setTagTab("news")}>News</div>
-        <div className={`news-tab ${tagTab === "products" ? "active" : ""}`} onClick={() => setTagTab("products")}>竞品</div>
-        <div className={`news-tab ${tagTab === "demands" ? "active" : ""}`} onClick={() => setTagTab("demands")}>需求</div>
-        <div className={`news-tab ${tagTab === "research" ? "active" : ""}`} onClick={() => setTagTab("research")}>调研</div>
+        <div className={`news-tab ${tagTab === "news" ? "active" : ""}`} onClick={() => setTagTab("news")}>资讯流</div>
+        <div className={`news-tab ${tagTab === "products" ? "active" : ""}`} onClick={() => setTagTab("products")}>竞品库</div>
+        <div className={`news-tab ${tagTab === "demands" ? "active" : ""}`} onClick={() => setTagTab("demands")}>灵感库</div>
+        <div className={`news-tab ${tagTab === "research" ? "active" : ""}`} onClick={() => setTagTab("research")}>调研工坊</div>
       </div>
       {visibleGroups.map((g) => {
         const i = groups.findIndex((item) => item.key === g.key);
@@ -2457,7 +2701,7 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
       <div className="settings-row">
         <div className="label">&nbsp;</div>
         <div className="row">
-          <Btn icon="save" onClick={persist}>保存 Tag 配置</Btn>
+          <Btn icon="save" onClick={persist}>保存标签配置</Btn>
         </div>
       </div>
     </>);

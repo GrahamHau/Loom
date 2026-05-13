@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildEmptyState } from "./seed.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -14,12 +15,32 @@ export const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
+const LEGACY_USER_ID = "legacy-default";
+const LEGACY_USER_KEY = "legacy_user_id";
+
 export function migrate() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_data (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT,
+      name TEXT NOT NULL,
+      initials TEXT DEFAULT 'L',
+      role TEXT DEFAULT '成员',
+      status TEXT DEFAULT 'active',
+      auth_provider TEXT DEFAULT 'password',
+      feishu_open_id TEXT,
+      feishu_union_id TEXT,
+      feishu_tenant_key TEXT,
+      avatar_url TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_login_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS news_sources (
@@ -75,6 +96,8 @@ export function migrate() {
     CREATE INDEX IF NOT EXISTS idx_news_items_type ON news_items(type);
     CREATE INDEX IF NOT EXISTS idx_news_items_starred ON news_items(is_starred);
     CREATE INDEX IF NOT EXISTS idx_news_items_url ON news_items(original_url);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_feishu_open_id ON users(feishu_open_id) WHERE feishu_open_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_feishu_union_id ON users(feishu_union_id) WHERE feishu_union_id IS NOT NULL;
   `);
 
   const newsSourceColumns = new Set(db.prepare("PRAGMA table_info(news_sources)").all().map((column) => column.name));
@@ -87,10 +110,131 @@ export function migrate() {
   if (!newsSourceColumns.has("last_item_count")) {
     db.exec("ALTER TABLE news_sources ADD COLUMN last_item_count INTEGER DEFAULT 0;");
   }
+
+  const newsItemsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'news_items'").get()?.sql || "";
+  if (newsItemsSql.includes("original_url TEXT NOT NULL UNIQUE")) {
+    db.exec(`
+      ALTER TABLE news_items RENAME TO news_items_legacy_unique;
+
+      CREATE TABLE news_items (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL DEFAULT 'default',
+        source_id TEXT NOT NULL,
+        source_name TEXT NOT NULL,
+        source_authority TEXT DEFAULT 'watchlist',
+        original_title TEXT NOT NULL,
+        original_url TEXT NOT NULL,
+        original_summary TEXT,
+        original_content TEXT,
+        title_zh TEXT,
+        summary_zh TEXT,
+        content_zh TEXT,
+        type TEXT,
+        thumbnail_url TEXT,
+        thumb_hue INTEGER DEFAULT 40,
+        is_kept INTEGER DEFAULT 0,
+        is_read INTEGER DEFAULT 0,
+        is_starred INTEGER DEFAULT 0,
+        published_at TEXT,
+        llm_processed INTEGER DEFAULT 0,
+        needs_translation INTEGER DEFAULT 0,
+        classification_json TEXT,
+        synced_at TEXT,
+        feishu_record_id TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      INSERT INTO news_items (
+        id, user_id, source_id, source_name, source_authority, original_title, original_url,
+        original_summary, original_content, title_zh, summary_zh, content_zh, type, thumbnail_url,
+        thumb_hue, is_kept, is_read, is_starred, published_at, llm_processed, needs_translation,
+        classification_json, synced_at, feishu_record_id, created_at, updated_at
+      )
+      SELECT
+        id, user_id, source_id, source_name, source_authority, original_title, original_url,
+        original_summary, original_content, title_zh, summary_zh, content_zh, type, thumbnail_url,
+        thumb_hue, is_kept, is_read, is_starred, published_at, llm_processed, needs_translation,
+        classification_json, synced_at, feishu_record_id, created_at, updated_at
+      FROM news_items_legacy_unique;
+
+      DROP TABLE news_items_legacy_unique;
+
+      CREATE INDEX IF NOT EXISTS idx_news_items_user_date ON news_items(user_id, published_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_news_items_type ON news_items(type);
+      CREATE INDEX IF NOT EXISTS idx_news_items_starred ON news_items(is_starred);
+      CREATE INDEX IF NOT EXISTS idx_news_items_url ON news_items(original_url);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_news_items_user_url ON news_items(user_id, original_url);
+    `);
+  } else {
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_news_items_user_url ON news_items(user_id, original_url);");
+  }
+}
+
+function stateKeyForUser(userId) {
+  return `state:user:${userId}`;
+}
+
+function legacyStateKey() {
+  return "state";
+}
+
+function ensureLegacyUser(seedState) {
+  const state = seedState || getLegacyState();
+  if (!state?.user) return LEGACY_USER_ID;
+  const user = {
+    id: LEGACY_USER_ID,
+    email: "",
+    name: state.user.name || "Graham",
+    initials: state.user.initials || "G",
+    role: state.user.role || "产品经理",
+    status: "active",
+    auth_provider: "password",
+    feishu_open_id: null,
+    feishu_union_id: null,
+    feishu_tenant_key: null,
+    avatar_url: "",
+    last_login_at: null,
+    updated_at: new Date().toISOString(),
+  };
+  db.prepare(`
+    INSERT INTO users (
+      id, email, name, initials, role, status, auth_provider,
+      feishu_open_id, feishu_union_id, feishu_tenant_key, avatar_url, last_login_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      initials = excluded.initials,
+      role = excluded.role,
+      updated_at = excluded.updated_at
+  `).run(
+    user.id, user.email, user.name, user.initials, user.role, user.status, user.auth_provider,
+    user.feishu_open_id, user.feishu_union_id, user.feishu_tenant_key, user.avatar_url, user.last_login_at, user.updated_at
+  );
+  writeJson(LEGACY_USER_KEY, user.id);
+  return user.id;
+}
+
+function migrateLegacyState(seedState) {
+  const legacy = seedState || getLegacyState();
+  if (!legacy) return;
+  const legacyUserId = ensureLegacyUser(legacy);
+  const existing = getUserState(legacyUserId);
+  if (!existing) {
+    const migrated = {
+      ...legacy,
+      user: {
+        ...(legacy.user || {}),
+        id: legacyUserId,
+        auth_provider: (legacy.user || {}).auth_provider || "password",
+      },
+    };
+    saveUserState(legacyUserId, migrated);
+  }
 }
 
 function syncLegacyNewsTables() {
-  const state = getState();
+  const state = getUserState(getLegacyUserId()) || getLegacyState();
   if (!state) return;
 
   const sourceCount = db.prepare("SELECT COUNT(*) AS count FROM news_sources").get().count;
@@ -108,7 +252,7 @@ function syncLegacyNewsTables() {
       for (const source of sources) {
         insertSource.run({
           id: source.id,
-          user_id: source.user_id || "default",
+          user_id: source.user_id || getLegacyUserId(),
           name: source.name || "未命名数据源",
           url: source.url || "",
           type: source.type || "rss",
@@ -149,7 +293,7 @@ function syncLegacyNewsTables() {
       for (const item of items) {
         insertItem.run({
           id: item.id,
-          user_id: item.user_id || "default",
+          user_id: item.user_id || getLegacyUserId(),
           source_id: item.source_id || item.source || "unknown",
           source_name: item.source || "",
           source_authority: item.source_authority || item.classification?.authority || "watchlist",
@@ -203,10 +347,48 @@ export function saveState(state) {
   writeJson("state", state);
 }
 
+export function getLegacyState() {
+  return readJson(legacyStateKey(), null);
+}
+
+export function getLegacyUserId() {
+  return readJson(LEGACY_USER_KEY, LEGACY_USER_ID) || LEGACY_USER_ID;
+}
+
+export function getUserState(userId) {
+  return readJson(stateKeyForUser(userId), null);
+}
+
+export function saveUserState(userId, state) {
+  writeJson(stateKeyForUser(userId), state);
+}
+
+export function ensureUserState(user) {
+  const current = getUserState(user.id);
+  if (current) return current;
+  const fallback = user.id === getLegacyUserId() ? getLegacyState() : null;
+  const next = fallback
+    ? {
+        ...fallback,
+        user: {
+          ...(fallback.user || {}),
+          id: user.id,
+          name: user.name,
+          role: user.role || (fallback.user || {}).role || "成员",
+          initials: user.initials || (fallback.user || {}).initials || "L",
+          auth_provider: user.auth_provider || (fallback.user || {}).auth_provider || "feishu",
+        },
+      }
+    : buildEmptyState(user);
+  saveUserState(user.id, next);
+  return next;
+}
+
 export function ensureSeed(seed) {
   migrate();
   if (!getState()) {
     saveState(seed);
   }
+  migrateLegacyState(seed);
   syncLegacyNewsTables();
 }

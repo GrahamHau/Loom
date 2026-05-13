@@ -170,7 +170,7 @@ async function fetchFeed(source) {
   return parser.parseString(xml);
 }
 
-export async function collectSource(source) {
+export async function collectSource(userId, source) {
   const feed = await fetchFeed(source);
   const items = [...(feed.items || [])]
     .sort((a, b) => new Date(publishedAtOf(b)).getTime() - new Date(publishedAtOf(a)).getTime())
@@ -199,8 +199,8 @@ export async function collectSource(source) {
     });
   }
 
-  const result = upsertNews(newsItems);
-  updateNewsSource(source.id, {
+  const result = upsertNews(userId, newsItems);
+  updateNewsSource(userId, source.id, {
     last_fetched_at: new Date().toISOString(),
     last_item_count: items.length,
     last_error: null,
@@ -208,17 +208,17 @@ export async function collectSource(source) {
   return { source_id: source.id, source: source.name, fetched: items.length, kept: newsItems.length, ...result };
 }
 
-export async function collectSources(sources) {
+export async function collectSources(userId, sources) {
   const active = sources.filter((source) => source.active !== false && source.url);
   const results = [];
   for (const source of active) {
     try {
-      const result = await collectSource(source);
+      const result = await collectSource(userId, source);
       results.push(result);
     } catch (error) {
       const message = error.message || "采集失败";
       console.error(`[News Fetch] ${source.name}: ${message}`);
-      updateNewsSource(source.id, {
+      updateNewsSource(userId, source.id, {
         last_fetched_at: new Date().toISOString(),
         last_item_count: 0,
         last_error: message,
@@ -235,15 +235,15 @@ export async function collectSources(sources) {
   };
 }
 
-export async function collectDueSources(sources, now = new Date()) {
+export async function collectDueSources(userId, sources, now = new Date()) {
   const dueSources = sources.filter((source) => shouldCollectSource(source, now));
-  return collectSources(dueSources);
+  return collectSources(userId, dueSources);
 }
 
 export { shouldCollectSource };
 
-export async function processNewsWithLlm(limit = 20) {
-  const pending = listPendingNewsForLlm(limit);
+export async function processNewsWithLlm(userId, limit = 20) {
+  const pending = listPendingNewsForLlm(userId, limit);
   let processed = 0;
   let kept = 0;
   let filtered = 0;
@@ -259,12 +259,13 @@ export async function processNewsWithLlm(limit = 20) {
 
     try {
       const result = await callLLM({
+        userId,
         system: NEWS_LLM_SYSTEM_PROMPT,
         user: content,
         maxTokens: NEWS_LLM_MAX_TOKENS,
       });
       if (result?.keep) {
-        updateNews(item.id, {
+        updateNews(userId, item.id, {
           type: mapType(result.type) || "行业趋势",
           titleZh: result.title_zh || item.titleZh,
           summary: result.summary_zh || item.summary,
@@ -276,7 +277,7 @@ export async function processNewsWithLlm(limit = 20) {
         });
         kept += 1;
       } else {
-        updateNews(item.id, {
+        updateNews(userId, item.id, {
           is_kept: 0,
           llm_processed: 1,
           classification: { reason: "manual_llm_filtered" },
@@ -300,6 +301,6 @@ export async function processNewsWithLlm(limit = 20) {
     filtered,
     failed,
     errors: errors.slice(0, 5),
-    remaining: listPendingNewsForLlm(1000).length,
+    remaining: listPendingNewsForLlm(userId, 1000).length,
   };
 }
