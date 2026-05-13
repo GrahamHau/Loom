@@ -229,8 +229,8 @@ function ensureLegacyUser(seedState) {
   `).run(
     LEGACY_USER_ID,
     "",
-    state.user.name || "Graham",
-    state.user.initials || "G",
+    state.user.name || "visitor",
+    state.user.initials || "VI",
     state.user.role || "产品经理",
     "active",
     state.user.auth_provider || "password",

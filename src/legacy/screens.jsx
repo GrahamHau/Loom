@@ -33,6 +33,16 @@ function normalizeMonthlySales(value) {
     .trim();
 }
 
+function externalHref(url) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function demandSourceUrl(demand) {
+  return demand?.url || demand?.source_url || "";
+}
+
 function DemandImage({ demand, label, className = "", style }) {
   const [failed, setFailed] = useState(false);
   const image = demand?.thumbnail_url || demand?.image || "";
@@ -482,7 +492,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
             {label} <span style={{ color: "var(--text-4)", marginLeft: 4 }}>{count}</span>
           </div>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, padding: "6px 0" }}>
+        <div className="page-actions news-page-actions">
           {selectMode ?
           <>
               <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
@@ -493,7 +503,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           }
           <Btn size="sm" variant="ghost" icon="filter">筛选</Btn>
           <Btn size="sm" variant="ghost" icon="sparkles" onClick={processLlm} disabled={busy}>{busy ? "处理中..." : "LLM处理"}</Btn>
-          <Btn size="sm" variant="ghost" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>
+          <Btn size="sm" variant="primary" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>
         </div>
       </div>
 
@@ -546,7 +556,6 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
                     <Btn size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); toggleStar(n.id); }}
                 icon={n.starred ? "star-fill" : "star"}
                 style={{ color: n.starred ? "var(--warn)" : undefined }} />
-                    <Btn size="sm" variant="ghost" icon="more" onClick={(e) => e.stopPropagation()} />
                   </div>
                 </div>
                 );
@@ -819,7 +828,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
             <option key={c} value={c}>{c === "全部" ? "全部品类" : c}</option>
             )}
           </select>
-          <div className="products-toolbar-actions">
+          <div className="products-toolbar-actions page-actions">
             <Tag tone="outline" className="products-toolbar-count">{filtered.length} 条</Tag>
             <Btn size="sm" variant="ghost" icon="sync" onClick={syncProducts}>同步飞书</Btn>
             <Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>添加竞品</Btn>
@@ -827,12 +836,25 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
         </div>
         {notice && <div className="ai-block" style={{ margin: "0 12px 10px" }}>{notice}</div>}
         {filtered.length > 0 &&
-          <div className={`bulk-toolbar ${selectMode ? "" : "idle"}`} style={{ margin: "0 12px 10px" }}>
+          <div className={`bulk-toolbar products-selection-bar ${selectMode ? "" : "idle"}`} style={{ margin: "0 12px 10px" }}>
             {selectMode ?
             <>
-                <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
-                <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
-                <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+                <div className="bulk-left">
+                  <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
+                  <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>删除</Btn>
+                  <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+                </div>
+                <label className="bulk-check">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every((item) => selectedIds.includes(item.id))}
+                    onChange={(event) => {
+                      const visibleIds = filtered.map((item) => item.id);
+                      setSelectedIds(event.target.checked ? Array.from(new Set([...selectedIds, ...visibleIds])) : selectedIds.filter((id) => !visibleIds.includes(id)));
+                    }}
+                  />
+                  <span>全选</span>
+                </label>
               </> :
             <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
             }
@@ -844,7 +866,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
             <thead>
               <tr>
                 {selectMode && <th style={{ width: 34 }} />}
-                <th>商品名称</th><th>品类</th><th>平台</th><th>售价</th><th>参考成本</th><th>评分</th><th>月销估算</th><th>状态</th><th style={{ width: 52 }}>操作</th>
+                <th>商品名称</th><th>品类</th><th>平台</th><th>售价</th><th>参考成本</th><th>评分</th><th>月销估算</th><th>状态</th>
               </tr>
             </thead>
             <tbody>
@@ -887,15 +909,12 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                     <td>
                       <Tag tone={p.status === "跟踪中" ? "success" : p.status === "已归档" ? "default" : "accent"}>{p.status}</Tag>
                     </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <Btn size="sm" variant="ghost" icon="trash" onClick={() => setDeleteTarget(p)} />
-                    </td>
                   </tr>);
 
               })}
               {filtered.length === 0 &&
                 <tr>
-                  <td colSpan="10">
+                  <td colSpan={selectMode ? 9 : 8}>
                     <EmptyState
                       icon="boxes"
                       title={products.length ? "没有匹配的竞品" : "还没有真实竞品"}
@@ -946,14 +965,20 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
             <div className="platform-card" key={i}>
                   <div className="platform-card-head">
                     <span className={`platform-pill ${PLATFORM_KEY[pl.platform]}`}>{PLATFORM_LABEL[pl.platform]}</span>
-                    <span className="platform-card-link">{pl.url}</span>
-                    <Icon name="external" size={12} style={{ color: "var(--text-3)" }} />
+                    {pl.url ?
+                    <a className="platform-card-link" href={externalHref(pl.url)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                        {pl.url}
+                        <Icon name="external" size={12} />
+                      </a> :
+                    <span className="platform-card-link">{pl.platform || "未知平台"}</span>
+                    }
                   </div>
-                  <div className="platform-card-grid">
+                  <div className={`platform-card-grid ${pl.platform === "taobao" ? "compact" : ""}`}>
                     <PlatformInput label="售价" value={pl.price} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, price: v } : p);
                   updateSelected({ platforms: next });
                 }} />
+                    {pl.platform !== "taobao" && <>
                     <PlatformInput label="评分" value={pl.rating} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, rating: v } : p);
                   updateSelected({ platforms: next });
@@ -962,6 +987,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, reviews: v } : p);
                   updateSelected({ platforms: next });
                 }} inputMode="numeric" />
+                    </>}
                     <PlatformInput label="月销估算" value={normalizeMonthlySales(pl.sales)} onChange={(v) => {
                   const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, sales: v } : p);
                   updateSelected({ platforms: next });
@@ -1289,7 +1315,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             <h1 className="h1">Spark 灵感库</h1>
             <div className="muted text-sm">{demands.length} 条已录入 · 使用真实链接解析或手动录入</div>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <div className="page-actions">
             <Btn size="sm" icon="sync" onClick={syncDemands}>同步飞书</Btn>
             <Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>录入需求</Btn>
           </div>
@@ -1347,18 +1373,19 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
                 </div>
               </div>
               <div className="demand-body">
-                <button
-                  type="button"
-                  className="demand-open-btn"
-                  aria-label={`打开 ${d.title || "需求"} 来源`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (d.url) window.open(d.url, "_blank", "noopener,noreferrer");
-                  }}
+                {demandSourceUrl(d) ?
+                <a
+                  className="demand-title demand-title-link"
+                  href={externalHref(demandSourceUrl(d))}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <Icon name="external" size={14} />
-                </button>
+                    <span>{d.title}</span>
+                    <Icon name="external" size={12} />
+                  </a> :
                 <div className="demand-title">{d.title}</div>
+                }
                 <div className="demand-summary">{d.summary}</div>
                 <div className="demand-tags">
                   <Tag tone="accent">{d.innovation}</Tag>
@@ -1413,7 +1440,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
                   <td style={{ color: "var(--text-2)" }}>{safeArray(d.scenarios).slice(0, 2).join(" · ") || "—"}</td>
                   <td style={{ color: "var(--text-3)" }}>{d.date || "—"}</td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <Btn size="sm" variant="ghost" icon="external" onClick={() => d.url && window.open(d.url, "_blank", "noopener,noreferrer")} />
+                    <Btn size="sm" variant="ghost" icon="external" onClick={() => demandSourceUrl(d) && window.open(externalHref(demandSourceUrl(d)), "_blank", "noopener,noreferrer")} />
                   </td>
                 </tr>
               )}
@@ -1499,12 +1526,12 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
           <div className="detail-section">
             <div className="detail-section-label">来源链接</div>
             <a
-              href={demand.url || "#"}
+              href={externalHref(demandSourceUrl(demand)) || "#"}
               target="_blank"
               rel="noreferrer"
               style={{ fontSize: 12, color: "var(--accent)", wordBreak: "break-all", textDecoration: "underline" }}
             >
-              {demand.url || `${demand.source}.com/...`}
+              {demandSourceUrl(demand) || `${demand.source}.com/...`}
             </a>
           </div>
 
@@ -1567,15 +1594,19 @@ function ProductDetailDrawer({ product, onClose, api, refreshData }) {
                 <div className="platform-card-head">
                   <span className={`platform-pill ${PLATFORM_KEY[pl.platform]}`}>{PLATFORM_LABEL[pl.platform] || pl.platform}</span>
                   {pl.url ?
-                    <a className="platform-card-link" href={pl.url} target="_blank" rel="noreferrer">{pl.url}</a> :
+                    <a className="platform-card-link" href={externalHref(pl.url)} target="_blank" rel="noreferrer">
+                      {pl.url}
+                      <Icon name="external" size={12} />
+                    </a> :
                     <span className="platform-card-link">{pl.platform || "未知平台"}</span>
                   }
-                  <Icon name="external" size={12} style={{ color: "var(--text-3)" }} />
                 </div>
-                <div className="platform-card-grid">
+                <div className={`platform-card-grid ${pl.platform === "taobao" ? "compact" : ""}`}>
                   <div><div className="metric-label">售价</div><div className="metric-value">{pl.price || "—"}</div></div>
+                  {pl.platform !== "taobao" && <>
                   <div><div className="metric-label">评分</div><div className="metric-value">{pl.rating ?? "—"}</div></div>
                   <div><div className="metric-label">评论数</div><div className="metric-value">{pl.reviews ?? "—"}</div></div>
+                  </>}
                   <div><div className="metric-label">月销估算</div><div className="metric-value">{pl.sales || "—"}</div></div>
                 </div>
               </div>
@@ -1829,7 +1860,7 @@ function ResearchScreen({ data, api, refreshData }) {
             <h1 className="h1">Weave 调研工坊</h1>
             <div className="muted text-sm">从 Lens 与 Spark 中匹配数据，AI 生成结构化分析报告</div>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+          <div className="page-actions">
             {selectMode ?
             <>
                 <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
@@ -1926,11 +1957,13 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
   return (
     <div className="viewport">
       <div className="page" style={{ maxWidth: 920 }}>
-        <div className="row" style={{ marginBottom: 18 }}>
+        <div className="row page-actions-row" style={{ marginBottom: 18 }}>
           <Btn variant="ghost" icon="arrow-left" onClick={onBack}>返回</Btn>
           <div className="grow" />
-          <Btn icon="sync" onClick={analyze} disabled={busy}>{busy ? "分析中..." : "重新分析"}</Btn>
-          <Btn variant="primary" icon="external">导出报告</Btn>
+          <div className="page-actions">
+            <Btn icon="sync" onClick={analyze} disabled={busy}>{busy ? "分析中..." : "重新分析"}</Btn>
+            <Btn variant="primary" icon="external">导出报告</Btn>
+          </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 6 }}>
@@ -1953,14 +1986,14 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
         {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
 
         <Section icon="edit" label="产品描述">
-          <div className="card" style={{ padding: 14, fontSize: 13, lineHeight: 1.7, color: "var(--text-2)" }}>
+          <div className="research-detail-box research-desc-box">
             {research.desc}
           </div>
         </Section>
 
         <Section icon="boxes" label={`关联竞品 · ${products.length}`}
         action={<button className="btn sm ghost" onClick={() => setPicker("product")}><Icon name="plus" size={12} /> 添加竞品</button>}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          <div className={`research-detail-box research-products-box ${products.length === 0 ? "is-empty" : ""}`}>
             {products.map((p) =>
             <div className="card research-linked-card" key={p.id} onClick={() => setDetailTarget({ type: "product", id: p.id })} style={{ padding: 12, display: "flex", gap: 10, position: "relative" }}>
                 <div className="products-thumb" style={{ width: 36, height: 36, fontSize: 18 }}>{p.emoji}</div>
@@ -1980,7 +2013,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
               </div>
             )}
             {products.length === 0 &&
-            <button className="card" style={{ padding: 18, border: "1px dashed var(--border)", color: "var(--text-3)", cursor: "pointer", background: "transparent", gridColumn: "1 / -1", textAlign: "center" }}
+            <button className="research-empty-add"
             onClick={() => setPicker("product")}>
                 <Icon name="plus" size={12} /> 从竞品库添加
               </button>
@@ -1990,7 +2023,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
 
         <Section icon="lightbulb" label={`关联需求 · ${demands.length}`}
         action={<button className="btn sm ghost" onClick={() => setPicker("demand")}><Icon name="plus" size={12} /> 添加需求</button>}>
-          <div className="card">
+          <div className={`research-detail-box research-demands-box ${demands.length === 0 ? "is-empty" : ""}`}>
             {demands.map((d, i) =>
             <div className="research-linked-row" key={d.id} onClick={() => setDetailTarget({ type: "demand", id: d.id })} style={{ display: "flex", gap: 12, padding: "12px 14px", borderTop: i ? "1px solid var(--border)" : "none", alignItems: "center" }}>
                 <div style={{ width: 44, height: 44, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
@@ -2011,7 +2044,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
               </div>
             )}
             {demands.length === 0 &&
-            <button style={{ display: "block", width: "100%", padding: "18px", border: "none", color: "var(--text-3)", cursor: "pointer", background: "transparent", textAlign: "center" }}
+            <button className="research-empty-add"
             onClick={() => setPicker("demand")}>
                 <Icon name="plus" size={12} /> 从 Spark 添加
               </button>
@@ -2502,16 +2535,6 @@ function SettingsScreen({ data, api, refreshData }) {
               <input className="input sm" style={{ width: 82 }} type="number" value={newSource.interval} onChange={(e) => setNewSource({ ...newSource, interval: Number(e.target.value) })} />
               <Btn size="sm" variant="primary" icon="plus" onClick={addSource}>添加</Btn>
             </div>
-          </div>
-        </div>
-
-        <div className="settings-section">
-          <div className="settings-section-head">
-            <Icon name="tag" size={14} style={{ color: "var(--accent)" }} />
-            <div><h3>标签体系</h3><div className="desc">AI 打标使用的预设标签库</div></div>
-          </div>
-          <div className="settings-section-body">
-            <TagSystemEditor settings={settings} setSettings={setSettings} saveSettings={saveSettings} />
           </div>
         </div>
 

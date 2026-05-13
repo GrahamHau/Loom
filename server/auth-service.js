@@ -12,8 +12,8 @@ function splitEnvList(value) {
 
 export function getPasswordAuthConfig() {
   return {
-    username: process.env.APP_USERNAME || "graham",
-    password: process.env.APP_PASSWORD || "pm-copilot",
+    username: process.env.APP_USERNAME || "visitor",
+    password: process.env.APP_PASSWORD || "password",
   };
 }
 

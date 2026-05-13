@@ -20,12 +20,12 @@ function nowIso() {
 function userSummaryFromState(state, fallback = {}) {
   const source = state?.user || {};
   return {
-    id: source.id || fallback.id || "",
-    name: source.name || fallback.name || "LOOM",
-    role: source.role || fallback.role || "成员",
-    initials: source.initials || fallback.initials || "L",
-    email: source.email || fallback.email || "",
-    auth_provider: source.auth_provider || fallback.auth_provider || "password",
+    id: fallback.id || source.id || "",
+    name: fallback.name || source.name || "LOOM",
+    role: fallback.role || source.role || "成员",
+    initials: fallback.initials || source.initials || "L",
+    email: fallback.email || source.email || "",
+    auth_provider: fallback.auth_provider || source.auth_provider || "password",
   };
 }
 
@@ -611,8 +611,8 @@ export function ensureLegacyWorkspace() {
   if (existing) return existing;
   return ensureLocalUser({
     id: getLegacyUserId(),
-    name: "Graham",
-    initials: "G",
+    name: "visitor",
+    initials: "VI",
     role: "产品经理",
     auth_provider: "password",
   });

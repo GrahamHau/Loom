@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LOOM Clipper States</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../styles/design-tokens.css">
+  <link rel="stylesheet" href="../sidepanel/sidepanel.css">
+  <style>
+    body.preview-board {
+      min-height: 100vh;
+      margin: 0;
+      padding: 28px;
+      background: oklch(0.95 0.006 80);
+      color: var(--text);
+    }
+
+    .board-head {
+      max-width: 1680px;
+      margin: 0 auto 18px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .board-title {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+
+    .board-sub {
+      margin-top: 6px;
+      color: var(--text-3);
+      font-size: 12px;
+    }
+
+    .board-legend {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+
+    .board-grid {
+      max-width: 1680px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, 390px);
+      gap: 18px;
+      align-items: start;
+      justify-content: start;
+    }
+
+    .state-card {
+      width: 390px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .state-card-head {
+      min-height: 34px;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border-soft);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .state-card-title {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .state-card-note {
+      font-size: 10.5px;
+      color: var(--text-4);
+      font-family: var(--font-mono);
+    }
+
+    .state-frame {
+      width: 390px;
+      height: 780px;
+      display: block;
+      border: 0;
+      background: var(--surface);
+    }
+
+    body.preview-frame {
+      margin: 0;
+      background: var(--surface);
+    }
+
+    body.preview-frame #app {
+      width: 100vw;
+      height: 780px;
+      min-height: 0;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      overflow: hidden;
+    }
+
+    body.preview-frame .shell {
+      min-height: 100%;
+      height: 100%;
+    }
+
+    @media (max-width: 760px) {
+      body.preview-board {
+        padding: 14px;
+      }
+
+      .board-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .board-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .state-card,
+      .state-frame {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <script>
+    const query = new URL(location.href).searchParams;
+    const isFrame = query.get("frame") === "1";
+    const stateKey = query.get("state") || "board";
+
+    const scenarios = {
+      login: {
+        label: "登录",
+        note: "auth",
+        group: "基础状态",
+        store: { pmcopilot_token: "", pmcopilot_user: null },
+      },
+      settings: {
+        label: "设置",
+        note: "options",
+        group: "基础状态",
+        type: "settings",
+      },
+      amazon: {
+        label: "Amazon 采集",
+        note: "product",
+        group: "核心采集",
+        page: {
+          ok: true,
+          platform: "amazon",
+          data: {
+            name: "Orbitkey Nest Portable Desk Organizer",
+            brand: "Orbitkey",
+            category: "Desk accessories",
+            price: "$109.90",
+            rating: "4.6",
+            review_count: "1,248",
+            monthly_sales: "3k+",
+            image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80",
+            url: "https://www.amazon.com/dp/B08PREVIEW",
+            selling_points: ["无线充电收纳层", "模块化隔板", "适合差旅办公"],
+            ai_summary: "一款面向移动办公人群的桌面收纳盒，把充电、线材、随身小物和临时工作台组织在一起。",
+            platforms: [{
+              platform: "amazon",
+              url: "https://www.amazon.com/dp/B08PREVIEW",
+              price: "$109.90",
+              cost: "¥218",
+              rating: "4.6",
+              reviews: "1,248",
+              sales: "3k+",
+            }],
+          },
+        },
+      },
+      taobao: {
+        label: "淘宝采集",
+        note: "product",
+        group: "核心采集",
+        page: {
+          ok: true,
+          platform: "taobao",
+          data: {
+            name: "Ulanzi MT-44 伸缩三脚架自拍杆",
+            brand: "Ulanzi",
+            category: "摄影配件",
+            price: "¥129",
+            monthly_sales: "2万+",
+            image: "https://images.unsplash.com/photo-1512790182412-b19e6d62bc39?auto=format&fit=crop&w=900&q=80",
+            url: "https://item.taobao.com/item.htm?id=PREVIEW",
+            selling_points: ["轻量便携", "冷靴扩展", "直播拍摄两用"],
+            ai_summary: "淘宝商品更偏交易转化信息，重点看价格带、月销、卖点表达和品类归属。",
+            platforms: [{
+              platform: "taobao",
+              url: "https://item.taobao.com/item.htm?id=PREVIEW",
+              price: "¥129",
+              cost: "¥42",
+              sales: "2万+",
+            }],
+          },
+        },
+      },
+      xiaohongshu: {
+        label: "小红书采集",
+        note: "demand",
+        group: "核心采集",
+        page: {
+          ok: true,
+          platform: "xiaohongshu",
+          data: {
+            title: "旅行拍摄支架太占包，想要一支能拍桌搭也能自拍的",
+            summary: "用户在旅行、咖啡店和户外轻拍摄场景中，希望减少支架数量，同时保留自拍、俯拍和桌面支撑能力。",
+            content: "每次出门带三脚架、自拍杆和手机夹太麻烦，最好一个东西就能解决，放进通勤包也不占地方。",
+            innovation: "一物多用",
+            scenarios: ["旅行拍摄", "桌面俯拍", "户外自拍"],
+            painpoints: ["设备太多", "收纳麻烦", "切换角度慢"],
+            thumbnail_url: "https://images.unsplash.com/photo-1522199755839-a2bacb67c546?auto=format&fit=crop&w=900&q=80",
+            url: "https://www.xiaohongshu.com/explore/PREVIEW",
+          },
+        },
+      },
+      kickstarter: {
+        label: "Kickstarter 采集",
+        note: "product",
+        group: "扩展采集",
+        page: {
+          ok: true,
+          platform: "kickstarter",
+          data: {
+            name: "Pocket Slider Pro",
+            brand: "IndieCam",
+            category: "Creator tools",
+            price: "$79 pledge",
+            monthly_sales: "3,420 backers",
+            image: "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=900&q=80",
+            url: "https://www.kickstarter.com/projects/preview/pocket-slider-pro",
+            selling_points: ["便携滑轨", "众筹验证", "创作者工具"],
+            ai_summary: "Kickstarter 更适合作为新品概念和早期需求验证入口，价格字段可理解为 pledge 档位。",
+            platforms: [{
+              platform: "kickstarter",
+              url: "https://www.kickstarter.com/projects/preview/pocket-slider-pro",
+              price: "$79",
+              cost: "",
+              rating: "",
+              reviews: "",
+              sales: "3,420 backers",
+            }],
+          },
+        },
+      },
+      youtube: {
+        label: "YouTube 采集",
+        note: "todo",
+        group: "待接入",
+        page: { ok: false, error: "YouTube 采集器尚未接入，当前 manifest 也未声明 YouTube host 权限。" },
+      },
+      bilibili: {
+        label: "哔哩哔哩采集",
+        note: "todo",
+        group: "待接入",
+        page: { ok: false, error: "哔哩哔哩采集器尚未接入，当前 manifest 也未声明 bilibili host 权限。" },
+      },
+    };
+
+    const boardOrder = ["login", "settings", "amazon", "taobao", "xiaohongshu", "kickstarter", "youtube", "bilibili"];
+
+    if (!isFrame) {
+      document.body.className = "preview-board";
+      document.body.innerHTML = `
+        <header class="board-head">
+          <div>
+            <div class="board-title">LOOM Clipper 状态画板</div>
+            <div class="board-sub">所有插件侧栏状态一次性铺开，方便直接在 Codex 内置浏览器里评论。</div>
+          </div>
+          <div class="board-legend">
+            <span class="tag outline">基础状态</span>
+            <span class="tag outline">核心采集</span>
+            <span class="tag dashed">待接入</span>
+          </div>
+        </header>
+        <main class="board-grid">
+          ${boardOrder.map((key) => `
+            <section class="state-card">
+              <div class="state-card-head">
+                <div>
+                  <div class="state-card-title">${scenarios[key].label}</div>
+                  <div class="state-card-note">${scenarios[key].group}</div>
+                </div>
+                <span class="tag ${scenarios[key].note === "todo" ? "dashed" : "outline"}">${scenarios[key].note}</span>
+              </div>
+              <iframe class="state-frame" title="${scenarios[key].label}" src="?frame=1&state=${key}"></iframe>
+            </section>
+          `).join("")}
+        </main>
+      `;
+    } else {
+      document.body.className = "preview-frame";
+      document.body.innerHTML = `<div id="app"></div>`;
+      const activeScenario = scenarios[stateKey] || scenarios.amazon;
+      const previewStore = {
+        pmcopilot_api_base: "https://ulanzi-copilot.my1panelsite.xyz",
+        pmcopilot_token: "preview-token",
+        pmcopilot_user: { username: "Graham" },
+        pmcopilot_default_mode: "auto",
+        pmcopilot_ai_before_save: false,
+        ...(activeScenario.store || {}),
+      };
+      let previewPageData = activeScenario.page || scenarios.amazon.page;
+
+      function renderSettingsPreview() {
+        document.getElementById("app").innerHTML = `
+          <div class="shell">
+            <div class="header">
+              <div class="brand">
+                <div class="logo">L</div>
+                <div>
+                  <div class="title">LOOM</div>
+                  <div class="sub">插件设置</div>
+                </div>
+              </div>
+            </div>
+            <div class="cl-body">
+              <div class="cl-section">
+                <div class="cl-section-label">连接</div>
+                <input class="ghost-input mono" value="${previewStore.pmcopilot_api_base}">
+                <div class="cl-hint">已保存登录 Token · Graham</div>
+              </div>
+              <div class="cl-section">
+                <div class="cl-section-label">采集策略</div>
+                <div class="platform-card">
+                  <div class="platform-card-grid">
+                    <div><div class="metric-label">默认模式</div><div class="metric-value">自动判断</div></div>
+                    <div><div class="metric-label">AI 整理</div><div class="metric-value">默认关闭</div></div>
+                  </div>
+                </div>
+                <div class="tag-row">
+                  <span class="tag outline">Amazon</span>
+                  <span class="tag outline">淘宝/天猫</span>
+                  <span class="tag outline">小红书</span>
+                  <span class="tag outline">Kickstarter</span>
+                  <span class="tag dashed">YouTube 待接入</span>
+                  <span class="tag dashed">哔哩哔哩 待接入</span>
+                </div>
+              </div>
+              <div class="cl-section">
+                <div class="cl-section-label">字段映射</div>
+                <div class="cl-grid-2">
+                  <input class="ghost-input" value="name">
+                  <input class="ghost-input" value="brand">
+                  <input class="ghost-input" value="category">
+                  <input class="ghost-input" value="summary">
+                </div>
+              </div>
+            </div>
+            <div class="cl-foot">
+              <button class="btn ghost grow" type="button">恢复默认</button>
+              <button class="btn grow" type="button">保存设置</button>
+            </div>
+          </div>
+        `;
+      }
+
+      window.chrome = {
+        runtime: {
+          openOptionsPage() {
+            location.href = "?frame=1&state=settings";
+          },
+        },
+        storage: {
+          local: {
+            async get(keys) {
+              if (!keys) return { ...previewStore };
+              if (Array.isArray(keys)) {
+                return keys.reduce((result, key) => {
+                  result[key] = previewStore[key];
+                  return result;
+                }, {});
+              }
+              if (typeof keys === "string") return { [keys]: previewStore[keys] };
+              return { ...keys, ...previewStore };
+            },
+            async set(values) {
+              Object.assign(previewStore, values);
+            },
+            async remove(keys) {
+              for (const key of Array.isArray(keys) ? keys : [keys]) delete previewStore[key];
+            },
+          },
+        },
+        tabs: {
+          async query() {
+            const data = previewPageData.data || {};
+            return [{ id: 1, url: data.url || "https://preview.local/unsupported", title: data.name || data.title || activeScenario.label }];
+          },
+          async sendMessage() {
+            return structuredClone(previewPageData);
+          },
+          create({ url }) {
+            window.open(url, "_blank");
+          },
+          onActivated: { addListener() {} },
+          onUpdated: { addListener() {} },
+        },
+        scripting: {
+          async executeScript() {},
+        },
+      };
+
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (url, options = {}) => {
+        const target = String(url);
+        if (target.includes("/api/health")) return Response.json({ ok: true });
+        if (target.includes("/api/products/parse-raw")) {
+          return Response.json({
+            tags: ["travel desk", "charging", "organizer"],
+            selling_points: ["磁吸收纳结构", "内置无线充电区", "适配移动办公场景"],
+            ai_summary: "AI 已将原始商品信息整理为更适合竞品库沉淀的卖点、标签和摘要。",
+          });
+        }
+        if (target.endsWith("/api/products")) return Response.json({ ok: true, id: "preview-product" });
+        if (target.includes("/api/demands/parse-raw")) {
+          return Response.json({
+            title: "移动办公桌面收纳需求",
+            summary: "用户希望在咖啡店、酒店和共享办公空间快速搭建整洁的临时工作台。",
+            scenarios: ["差旅办公", "小桌面", "线材整理"],
+            painpoints: ["设备太多", "线材凌乱", "临时工位缺少秩序"],
+            innovation: "场景整合",
+          });
+        }
+        if (target.endsWith("/api/demands")) return Response.json({ ok: true, id: "preview-demand" });
+        return originalFetch(url, options);
+      };
+
+      if (activeScenario.type === "settings") {
+        renderSettingsPreview();
+      } else {
+        const script = document.createElement("script");
+        script.src = "../sidepanel/sidepanel.js";
+        script.onload = () => {
+          if (typeof window.init === "function") void window.init();
+        };
+        document.body.appendChild(script);
+      }
+    }
+  </script>
+</body>
+</html>

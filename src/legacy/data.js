@@ -1,6 +1,6 @@
 // PM Copilot — seed data (photo/video gear domain)
 window.PMC_DATA = {
-  user: { name: "Graham", role: "管理员", initials: "GR" },
+  user: { name: "visitor", role: "产品经理", initials: "VI" },
 
   products: [
     {
@@ -133,7 +133,7 @@ window.PMC_DATA = {
       id: "d1", title: "磁吸快拆补光灯创意方案",
       thumbHue: 30,
       summary: "博主自制磁吸接口的 RGB 补光灯,可吸附在相机机顶或冰箱上,主打 Vlog 即拍即用。配文获得 8k+ 收藏。",
-      source: "xiaohongshu", date: "2026-05-08",
+      source: "xiaohongshu", source_url: "xiaohongshu.com/explore/magnetic-light-quick-release", date: "2026-05-08",
       innovation: "形态创新",
       scenarios: ["Vlog/自拍", "桌面俯拍"],
       painpoints: ["安装固定麻烦", "携带不便/太重"],
@@ -142,7 +142,7 @@ window.PMC_DATA = {
       id: "d2", title: "AI 跟拍三脚架(Pivo Tracker 概念升级)",
       thumbHue: 200,
       summary: "Kickstarter 项目,内置视觉算法的电动三脚架,识别人脸自动旋转跟随。早鸟价 $299,众筹完成度 642%。",
-      source: "kickstarter", date: "2026-05-07",
+      source: "kickstarter", source_url: "kickstarter.com/projects/pivo/ai-tracker-tripod", date: "2026-05-07",
       innovation: "技术创新",
       scenarios: ["户外旅拍", "运动/极限拍摄"],
       painpoints: ["防抖不足", "操作复杂/学习成本高"],
@@ -150,7 +150,7 @@ window.PMC_DATA = {
     {
       id: "d3", title: "便携直播灯+反光板套装", thumbHue: 320,
       summary: "Instagram 创作者展示自购搭配:Aputure mini 灯+折叠反光板+桌面臂,总价 $250 解决直播打光痛点。",
-      source: "instagram", date: "2026-05-06",
+      source: "instagram", source_url: "instagram.com/p/portable-light-reflector-kit", date: "2026-05-06",
       innovation: "性价比创新",
       scenarios: ["直播/带货", "桌面俯拍"],
       painpoints: ["价格过高/性价比低", "配件缺失/需另购"],
@@ -158,7 +158,7 @@ window.PMC_DATA = {
     {
       id: "d4", title: "运动相机磁吸胸戴方案", thumbHue: 110,
       summary: "GoPro 用户分享自制磁吸胸戴,登山场景下避免传统绑带摩擦。评论区高频提到希望厂商出官方版。",
-      source: "youtube", date: "2026-05-05",
+      source: "youtube", source_url: "youtube.com/watch?v=magnetic-chest-mount", date: "2026-05-05",
       innovation: "使用方式创新",
       scenarios: ["户外旅拍", "运动/极限拍摄"],
       painpoints: ["安装固定麻烦", "携带不便/太重"],
@@ -166,7 +166,7 @@ window.PMC_DATA = {
     {
       id: "d5", title: "USB-C 一拖三补光灯组", thumbHue: 250,
       summary: "小红书创作者将三盏 RGB 灯通过 USB-C 串联接入笔记本,免插座免遥控。1.2k 点赞。",
-      source: "xiaohongshu", date: "2026-05-05",
+      source: "xiaohongshu", source_url: "xiaohongshu.com/explore/usb-c-rgb-light-chain", date: "2026-05-05",
       innovation: "生态整合",
       scenarios: ["桌面俯拍", "教育/网课"],
       painpoints: ["配件缺失/需另购", "无线连接不稳定"],
@@ -174,7 +174,7 @@ window.PMC_DATA = {
     {
       id: "d6", title: "可拆解模块化云台概念", thumbHue: 60,
       summary: "Kickstarter:云台手柄/平衡环/电池可独立购买,旅行携带时拆分体积减半。",
-      source: "kickstarter", date: "2026-05-04",
+      source: "kickstarter", source_url: "kickstarter.com/projects/modular-gimbal/concept", date: "2026-05-04",
       innovation: "形态创新",
       scenarios: ["户外旅拍"],
       painpoints: ["携带不便/太重", "收纳困难"],
@@ -182,7 +182,7 @@ window.PMC_DATA = {
     {
       id: "d7", title: "美食桌面俯拍小臂套装", thumbHue: 15,
       summary: "Vlogger 介绍自己的美食拍摄装备,重点是 60cm 小臂+磁吸顶补光,桌面适用。",
-      source: "youtube", date: "2026-05-03",
+      source: "youtube", source_url: "youtube.com/watch?v=food-overhead-arm-light", date: "2026-05-03",
       innovation: "场景拓展",
       scenarios: ["桌面俯拍", "短视频创作"],
       painpoints: ["安装固定麻烦"],
@@ -190,7 +190,7 @@ window.PMC_DATA = {
     {
       id: "d8", title: "演唱会便携稳定补光夹", thumbHue: 290,
       summary: "Instagram 用户夜场拍摄技巧分享:夹在手机上的补光+便携三脚架,演唱会环境下出片率提升明显。",
-      source: "instagram", date: "2026-05-02",
+      source: "instagram", source_url: "instagram.com/p/concert-phone-light-tripod", date: "2026-05-02",
       innovation: "场景拓展",
       scenarios: ["运动/极限拍摄", "短视频创作"],
       painpoints: ["画质不够(暗光/噪点)", "防抖不足"],
@@ -198,7 +198,7 @@ window.PMC_DATA = {
     {
       id: "d9", title: "RGB 棒灯创意拍摄技巧合集", thumbHue: 340,
       summary: "PetaPixel 整理 12 种 RGB 棒灯使用场景,人像、产品、慢门。流量爆款。",
-      source: "youtube", date: "2026-05-01",
+      source: "youtube", source_url: "youtube.com/watch?v=rgb-tube-light-ideas", date: "2026-05-01",
       innovation: "使用方式创新",
       scenarios: ["室内棚拍", "产品摄影"],
       painpoints: ["调光/调色不精准"],

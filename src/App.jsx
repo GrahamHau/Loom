@@ -166,9 +166,9 @@ function normalizeData(input = {}) {
   input ||= {};
   return {
     user: {
-      name: "Graham",
+      name: "visitor",
       role: "产品经理",
-      initials: "G",
+      initials: "VI",
       ...(input.user || {}),
     },
     products: Array.isArray(input.products) ? input.products : [],
@@ -211,10 +211,9 @@ function Sidebar({ active, onNav, data, onLogout }) {
   return (
     <aside className="sidebar" data-screen-label="sidebar">
       <div className="sb-brand">
-        <div className="sb-brand-mark">L</div>
         <div>
           <div className="sb-brand-name">LOOM</div>
-          <div className="sb-brand-sub">个人情报工作台</div>
+          <div className="sb-brand-tagline">Link · Observe · Organize · Make</div>
         </div>
       </div>
 

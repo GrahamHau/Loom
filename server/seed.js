@@ -63,9 +63,9 @@ export function buildEmptyState(user = {}) {
 
 export function loadEmptyData() {
   return buildEmptyState({
-    name: "Graham",
+    name: "visitor",
     role: "产品经理",
-    initials: "G",
+    initials: "VI",
   });
 }
 

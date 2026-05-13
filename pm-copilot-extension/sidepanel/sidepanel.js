@@ -465,15 +465,13 @@ function renderMain() {
     <div class="shell">
       ${headerHtml()}
       <div class="cl-top-actions">
-        <button class="btn primary top-action action-4" id="save-top" ${state.busy ? "disabled" : ""}>保存</button>
-        <button class="btn primary top-action action-4" id="process-top" ${state.busy ? "disabled" : ""}>${state.busy ? "处理中..." : "AI 整理"}</button>
-        <button class="btn primary top-action action-2 icon-only" id="refresh-page-top" type="button" aria-label="刷新页面">${refreshIcon()}</button>
+        <button class="btn top-action" id="save-top" ${state.busy ? "disabled" : ""}>保存</button>
+        <button class="btn top-action" id="process-top" ${state.busy ? "disabled" : ""}>${state.busy ? "处理中..." : "AI 整理"}</button>
       </div>
       <div class="cl-banner ${bannerClass(platform)}">
         ${state.reloading ? `<div class="cl-banner-ico">${spinIcon()}</div>` : bannerIcon(platform)}
       <div class="cl-banner-body">
         <div class="cl-banner-title">${escapeHtml(PLATFORM_LABELS[platform] || platform)} · ${state.mode === "product" ? "竞品采集" : "需求采集"}</div>
-        <div class="cl-banner-sub mono">${escapeHtml(state.page?.data?.url || "")}</div>
       </div>
       </div>
 
@@ -502,7 +500,6 @@ function renderMain() {
   };
   document.getElementById("process-top").onclick = handleProcess;
   document.getElementById("save-top").onclick = saveCurrent;
-  document.getElementById("refresh-page-top").onclick = () => reloadCurrentPage();
   document.getElementById("refresh-bottom").onclick = () => reloadCurrentPage();
 }
 
@@ -601,24 +598,22 @@ function setArrayField(key, value) {
 
 function productView(item) {
   return `
-    <div class="product-capture-card">
-      <div class="product-capture-top">
-        <div class="cl-preview-cover">
-          ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<div class="ph">PRODUCT<br>IMG</div>`}
-        </div>
-        <div class="cl-preview-meta">
-          <div class="cl-preview-platform">
-            <span class="platform-pill ${platformClass(state.page.platform)}">${PLATFORM_LABELS[state.page.platform] || state.page.platform}</span>
-            ${showMarketplaceRating(state.page.platform) ? `<span class="rating-mini">${item.rating ? `<span class="rating-star">★</span>${escapeHtml(item.rating)}` : ""}${item.review_count ? ` <span class="muted">· ${escapeHtml(item.review_count)}</span>` : ""}</span>` : ""}
-          </div>
-          <div class="cl-preview-price">${escapeHtml(item.price || "—")} <span class="muted">/ 月销 ${escapeHtml(item.monthly_sales || "—")}</span></div>
+    <div class="cl-detail-head-card">
+      <div class="cl-preview-cover">
+        ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<div class="ph">PRODUCT<br>IMG</div>`}
+      </div>
+      <div class="cl-detail-head-main">
+        <input class="ghost-input cl-detail-title-input" data-key="name" value="${escapeAttr(item.name || "")}" placeholder="填入商品名">
+        <div class="cl-detail-meta">${escapeHtml(item.category || "未分类")} · 跟踪中</div>
+        <div class="cl-preview-platform">
+          <span class="platform-pill ${platformClass(state.page.platform)}">${PLATFORM_LABELS[state.page.platform] || state.page.platform}</span>
+          ${showMarketplaceRating(state.page.platform) ? `<span class="rating-mini">${item.rating ? `<span class="rating-star">★</span>${escapeHtml(item.rating)}` : ""}${item.review_count ? ` <span class="muted">· ${escapeHtml(item.review_count)}</span>` : ""}</span>` : ""}
         </div>
       </div>
-      ${platformCardsHtml(item)}
     </div>
     <div class="cl-section">
-      <div class="cl-section-label">名称</div>
-      <input class="ghost-input full" data-key="name" value="${escapeAttr(item.name || "")}" placeholder="填入商品名">
+      <div class="cl-section-label">平台信息 · 1 个</div>
+      ${platformCardsHtml(item)}
     </div>
     <div class="cl-grid-2">
       <div class="cl-section">
@@ -636,7 +631,7 @@ function productView(item) {
     </div>
     <div class="cl-section">
       <div class="cl-section-label">AI 摘要</div>
-      <textarea class="ghost-input full" data-key="ai_summary" placeholder="可补充或修改摘要">${escapeHtml(item.ai_summary || "")}</textarea>
+      <textarea class="ghost-input ai-summary-input" data-key="ai_summary" placeholder="可补充或修改摘要">${escapeHtml(item.ai_summary || "")}</textarea>
     </div>
   `;
 }
@@ -708,7 +703,7 @@ function platformCardsHtml(item) {
     <div class="platform-card compact">
       <div class="platform-card-head">
         <span class="platform-pill ${platformClass(pl.platform)}">${PLATFORM_LABELS[pl.platform] || pl.platform || "平台"}</span>
-        <span class="platform-card-link mono">${escapeHtml(pl.url || "")}</span>
+        <input class="platform-card-link mono" data-key="platforms.${index}.url" value="${escapeAttr(pl.url || "")}" aria-label="平台链接">
       </div>
       <div class="platform-card-grid">
         ${metric("售价", `platforms.${index}.price`, pl.price || "", "$")}
@@ -850,6 +845,12 @@ document.addEventListener("input", (event) => {
     current[field] = el.value;
     platforms[index] = current;
     state.form = { ...(state.form || {}), platforms };
+    if (index === 0 && (field === "price" || field === "sales" || field === "url")) {
+      const linkedKey = field === "sales" ? "monthly_sales" : field;
+      state.form = { ...state.form, [linkedKey]: el.value };
+      const summary = document.querySelector(field === "sales" ? "[data-sales-summary]" : "[data-price-summary]");
+      if (summary && field !== "url") summary.textContent = el.value || "—";
+    }
     return;
   }
   if (key === "scenarios" || key === "painpoints") return;
@@ -956,7 +957,6 @@ function headerHtml() {
   return `
     <div class="cl-top">
       <div class="cl-brand">
-        <div class="cl-mark">L</div>
         <div>
           <div class="cl-name">LOOM</div>
           <div class="cl-conn"><span class="dot dot-ok"></span>已连接 · ${escapeHtml(name)}</div>
