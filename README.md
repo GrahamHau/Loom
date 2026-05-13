@@ -65,7 +65,7 @@ Notes:
 
 - `FEISHU_OAUTH_ALLOWED_TENANT_KEYS` is the recommended company boundary for online deployment.
 - You can also narrow access with `FEISHU_OAUTH_ALLOWED_EMAIL_DOMAINS`, `FEISHU_OAUTH_ALLOWED_EMAILS`, `FEISHU_OAUTH_ALLOWED_OPEN_IDS`, or `FEISHU_OAUTH_ALLOWED_UNION_IDS`.
-- In production, auto-provisioned Feishu login requires at least one company boundary setting so outside Feishu users cannot self-register.
+- For stricter production access control, set at least one company boundary such as `FEISHU_OAUTH_ALLOWED_TENANT_KEYS` or `FEISHU_OAUTH_ALLOWED_EMAIL_DOMAINS`.
 - When a company member passes validation for the first time, the server will create their local account and initialize an isolated workspace automatically.
 
 ## Checks

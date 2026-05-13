@@ -38,8 +38,10 @@ beforeEach(() => {
 describe("repository", () => {
   it("creates products", () => {
     const legacyUserId = dbModule.getLegacyUserId();
-    const product = repo.createProduct(legacyUserId, { name: "Test Product" });
+    const product = repo.createProduct(legacyUserId, { name: "Test Product", related_product_id: "p-1", related_product_name: "Linked Product" });
     expect(product.name).toBe("Test Product");
+    expect(product.related_product_id).toBe("p-1");
+    expect(product.related_product_name).toBe("Linked Product");
     expect(repo.rawState(legacyUserId).products).toHaveLength(1);
   });
 
@@ -113,5 +115,13 @@ describe("repository", () => {
 
     expect(repo.rawState(legacyUserId).products.map((item) => item.name)).toEqual(["Legacy Product"]);
     expect(repo.rawState(secondUser.id).products.map((item) => item.name)).toEqual(["Feishu Product"]);
+  });
+
+  it("updates product relation fields", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const product = repo.createProduct(legacyUserId, { name: "Source Product" });
+    const updated = repo.updateProduct(legacyUserId, product.id, { related_product_id: "p-2", related_product_name: "Target Product" });
+    expect(updated.related_product_id).toBe("p-2");
+    expect(updated.related_product_name).toBe("Target Product");
   });
 });

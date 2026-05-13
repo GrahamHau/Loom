@@ -430,6 +430,26 @@
             ai_summary: "AI 已将原始商品信息整理为更适合竞品库沉淀的卖点、标签和摘要。",
           });
         }
+        if (target.endsWith("/api/products") && (!options.method || String(options.method).toUpperCase() === "GET")) {
+          return Response.json([
+            {
+              id: "preview-product-1",
+              name: "Orbitkey Nest Portable Desk Organizer",
+              brand: "Orbitkey",
+              category: "Desk accessories",
+              tags: ["travel", "organizer"],
+              platforms: [{ platform: "amazon", url: "https://www.amazon.com/dp/B08PREVIEW", price: "$109.90" }],
+            },
+            {
+              id: "preview-product-2",
+              name: "Ulanzi MT-44 伸缩三脚架自拍杆",
+              brand: "Ulanzi",
+              category: "摄影配件",
+              tags: ["tripod", "creator"],
+              platforms: [{ platform: "taobao", url: "https://item.taobao.com/item.htm?id=PREVIEW", price: "¥129" }],
+            },
+          ]);
+        }
         if (target.endsWith("/api/products")) return Response.json({ ok: true, id: "preview-product" });
         if (target.includes("/api/demands/parse-raw")) {
           return Response.json({

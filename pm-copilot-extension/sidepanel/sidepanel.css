@@ -818,6 +818,7 @@ textarea.ghost-input{line-height:1.6;min-height:64px;resize:vertical;font-size:1
   background:var(--surface);
   box-shadow:0 -4px 12px -8px rgba(15,17,22,.05);
 }
+.cl-foot.with-relation .btn.grow{flex:1 1 0}
 
 /* ============================================================
    Buttons
@@ -844,6 +845,140 @@ textarea.ghost-input{line-height:1.6;min-height:64px;resize:vertical;font-size:1
 .btn.ghost:hover{background:var(--hover);color:var(--text)}
 .btn.sm{height:26px;padding:0 9px;font-size:12px}
 .btn.grow{flex:1}
+
+.relation-modal{
+  width:min(440px, calc(100vw - 24px));
+}
+.relation-layer{
+  position:fixed;
+  inset:0;
+  z-index:80;
+  padding:12px;
+}
+.relation-layer .modal-backdrop{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(20,22,28,.34);
+  backdrop-filter:blur(2px);
+}
+.relation-layer .modal{
+  width:min(460px, calc(100vw - 24px));
+  max-height:calc(100vh - 24px);
+  display:flex;
+  flex-direction:column;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:12px;
+  box-shadow:var(--shadow-lg);
+  overflow:hidden;
+}
+.relation-layer .relation-modal{
+  position:relative;
+  z-index:1;
+}
+.modal-title-wrap{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:0;
+}
+.modal-title{
+  font-size:14px;
+  font-weight:700;
+  line-height:1.2;
+}
+.modal-sub{
+  font-size:11px;
+  color:var(--text-3);
+}
+.relation-layer .modal-head{
+  padding:14px 18px;
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+}
+.relation-layer .modal-body{
+  padding:16px 18px;
+  overflow:auto;
+}
+.relation-layer .modal-foot{
+  padding:12px 18px;
+  border-top:1px solid var(--border);
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+}
+.relation-search{
+  width:100%;
+  margin-bottom:12px;
+}
+.relation-list{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  max-height:300px;
+  overflow:auto;
+}
+.relation-item{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  width:100%;
+  padding:10px 11px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--surface);
+  text-align:left;
+}
+.relation-item:hover{
+  background:var(--hover);
+  border-color:var(--border-strong);
+}
+.relation-item.is-selected{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent-soft) inset;
+}
+.relation-item-main{
+  min-width:0;
+  flex:1;
+}
+.relation-item-title{
+  font-size:13px;
+  font-weight:600;
+  line-height:1.35;
+}
+.relation-item-meta{
+  font-size:11px;
+  color:var(--text-3);
+  margin-top:2px;
+}
+.relation-item-side{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+  gap:4px;
+}
+.relation-chip{
+  display:inline-flex;
+  align-items:center;
+  height:20px;
+  padding:0 6px;
+  border-radius:999px;
+  background:var(--surface-2);
+  border:1px solid var(--border-soft);
+  font-size:10px;
+  color:var(--text-3);
+}
+.relation-empty{
+  padding:18px 10px;
+  text-align:center;
+  color:var(--text-3);
+  font-size:12px;
+}
 
 /* ============================================================
    Source link box

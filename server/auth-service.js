@@ -69,13 +69,6 @@ export function requireFeishuOauthConfig() {
   if (!config.enabled) {
     throw new AppError(400, "feishu_oauth_not_configured", "飞书登录尚未配置，请先补充 App ID、App Secret 和回调地址。");
   }
-  if (process.env.NODE_ENV === "production" && config.autoProvision && !hasConfiguredAllowList(config)) {
-    throw new AppError(
-      500,
-      "feishu_oauth_allowlist_required",
-      "飞书登录已开启自动注册，但线上环境尚未配置公司范围校验。请配置 Tenant Key、邮箱域名或允许名单。"
-    );
-  }
   return config;
 }
 

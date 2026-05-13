@@ -32,6 +32,11 @@ const state = {
   busy: false,
   reloading: false,
   message: "",
+  relationPickerOpen: false,
+  relationPickerLoading: false,
+  relationPickerItems: [],
+  relationPickerQuery: "",
+  relationPickerError: "",
 };
 
 let autoSyncTimer = null;
@@ -486,9 +491,11 @@ function renderMain() {
         <div class="cl-spacer"></div>
       </div>
 
-      <div class="cl-foot">
+      <div class="cl-foot${state.mode === "product" && isCommercePlatform(platform) ? " with-relation" : ""}">
         <button class="btn ghost grow" id="refresh-bottom" type="button">重新抓取</button>
+        ${state.mode === "product" && isCommercePlatform(platform) ? `<button class="btn primary grow" id="open-relation" type="button">${item.related_product_name ? "重新关联" : "关联"}</button>` : ""}
       </div>
+      ${state.relationPickerOpen ? `<div class="relation-layer">${relationPickerView()}</div>` : ""}
     </div>`;
   bindHeader();
   document.getElementById("mode-product").onclick = () => switchMode("product", canProduct, "此页面建议使用需求模式");
@@ -501,13 +508,39 @@ function renderMain() {
   document.getElementById("process-top").onclick = handleProcess;
   document.getElementById("save-top").onclick = saveCurrent;
   document.getElementById("refresh-bottom").onclick = () => reloadCurrentPage();
+  const relationButton = document.getElementById("open-relation");
+  if (relationButton) relationButton.onclick = openRelationPicker;
+  const relationBackdrop = document.querySelector("[data-relation-backdrop]");
+  if (relationBackdrop) {
+    relationBackdrop.addEventListener("click", (event) => {
+      if (event.target === relationBackdrop) closeRelationPicker();
+    });
+  }
+  document.querySelectorAll("[data-relation-close]").forEach((button) => {
+    button.addEventListener("click", closeRelationPicker);
+  });
+  document.querySelectorAll("[data-relation-pick]").forEach((button) => {
+    button.addEventListener("click", () => pickRelation(button.getAttribute("data-relation-pick")));
+  });
+  const relationQuery = document.querySelector("[data-relation-query]");
+  if (relationQuery) {
+    relationQuery.addEventListener("input", (event) => {
+      state.relationPickerQuery = event.target.value;
+      renderMain();
+    });
+  }
 }
 
 async function switchMode(mode, supported, message) {
   if (!supported && !confirm(`${message}，仍然切换吗？`)) return;
   state.mode = mode;
   state.processed = state.page.data;
-  state.form = buildDraft(state.mode, state.processed);
+  const previous = state.form || {};
+  state.form = {
+    ...buildDraft(state.mode, state.processed),
+    related_product_id: previous.related_product_id || "",
+    related_product_name: previous.related_product_name || "",
+  };
   state.message = "模式已切换，可直接保存；如需摘要和标签，再点 AI 整理。";
   renderMain();
 }
@@ -567,6 +600,8 @@ function buildDraft(mode, item) {
       url: cleanText(item?.url || state.page?.data?.url, ""),
       sku_id: cleanText(item?.sku_id, ""),
       platforms: safeArray(item?.platforms),
+      related_product_id: cleanText(item?.related_product_id, ""),
+      related_product_name: cleanText(item?.related_product_name, ""),
     };
   }
   return {
@@ -594,6 +629,47 @@ function setArrayField(key, value) {
     .map((item) => item.trim())
     .filter(Boolean);
   state.form = { ...(state.form || {}), [key]: list };
+}
+
+async function openRelationPicker() {
+  const currentName = String(state.form?.name || "").trim();
+  state.relationPickerOpen = true;
+  state.relationPickerLoading = true;
+  state.relationPickerItems = [];
+  state.relationPickerQuery = currentName || "";
+  state.relationPickerError = "";
+  renderMain();
+  try {
+    const result = await api("/api/products");
+    state.relationPickerItems = Array.isArray(result) ? result : [];
+  } catch (error) {
+    state.relationPickerError = error.message || "加载失败";
+  } finally {
+    state.relationPickerLoading = false;
+    renderMain();
+  }
+}
+
+function closeRelationPicker() {
+  if (!state.relationPickerOpen) return;
+  state.relationPickerOpen = false;
+  state.relationPickerLoading = false;
+  state.relationPickerItems = [];
+  state.relationPickerQuery = "";
+  state.relationPickerError = "";
+  renderMain();
+}
+
+function pickRelation(productId) {
+  const product = safeArray(state.relationPickerItems).find((item) => item.id === productId);
+  if (!product) return;
+  state.form = {
+    ...(state.form || {}),
+    related_product_id: product.id,
+    related_product_name: product.name || "",
+  };
+  state.message = `已关联同一产品：${product.name || "未命名竞品"}`;
+  closeRelationPicker();
 }
 
 function productView(item) {
@@ -632,6 +708,64 @@ function productView(item) {
     <div class="cl-section">
       <div class="cl-section-label">AI 摘要</div>
       <textarea class="ghost-input ai-summary-input" data-key="ai_summary" placeholder="可补充或修改摘要">${escapeHtml(item.ai_summary || "")}</textarea>
+    </div>
+  `;
+}
+
+function relationPickerView() {
+  const query = String(state.relationPickerQuery || "").trim().toLowerCase();
+  const items = safeArray(state.relationPickerItems);
+  const currentId = String(state.form?.related_product_id || "");
+  const filtered = query
+    ? items.filter((product) => {
+        const haystack = [
+          product.name,
+          product.brand,
+          product.category,
+          safeArray(product.tags).join(" "),
+          safeArray(product.platforms).map((platform) => `${platform.platform} ${platform.url} ${platform.price}`).join(" "),
+        ].join(" ").toLowerCase();
+        return haystack.includes(query);
+      })
+    : items;
+  return `
+    <div class="modal-backdrop" data-relation-backdrop="1">
+      <div class="modal relation-modal">
+        <div class="modal-head">
+          <div class="modal-title-wrap">
+            <div class="modal-title">关联产品</div>
+            <div class="modal-sub">搜索并关联同一产品</div>
+          </div>
+          <button class="icon-btn" data-relation-close="1" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <input class="ghost-input relation-search" data-relation-query="1" value="${escapeAttr(state.relationPickerQuery || "")}" placeholder="输入商品名、品牌或品类搜索">
+          ${state.relationPickerLoading ? `
+            <div class="relation-empty">正在加载候选产品…</div>
+          ` : state.relationPickerError ? `
+            <div class="relation-empty">${escapeHtml(state.relationPickerError)}</div>
+          ` : filtered.length === 0 ? `
+            <div class="relation-empty">没有匹配的产品</div>
+          ` : `
+            <div class="relation-list">
+              ${filtered.map((product) => `
+                <button class="relation-item ${currentId && currentId === product.id ? "is-selected" : ""}" type="button" data-relation-pick="${escapeAttr(product.id)}">
+                  <div class="relation-item-main">
+                    <div class="relation-item-title">${escapeHtml(product.name || "未命名竞品")}</div>
+                    <div class="relation-item-meta">${escapeHtml(product.brand || "无品牌")} · ${escapeHtml(product.category || "未分类")}</div>
+                  </div>
+                  <div class="relation-item-side">
+                    ${safeArray(product.platforms).slice(0, 2).map((platform) => `<span class="relation-chip">${escapeHtml(PLATFORM_LABELS[platform.platform] || platform.platform || "平台")}</span>`).join("")}
+                  </div>
+                </button>
+              `).join("")}
+            </div>
+          `}
+        </div>
+        <div class="modal-foot">
+          <button class="btn ghost" type="button" data-relation-close="1">取消</button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -714,6 +848,10 @@ function platformCardsHtml(item) {
       </div>
     </div>
   `).join("");
+}
+
+function isCommercePlatform(platform) {
+  return ["amazon", "taobao", "kickstarter"].includes(platform);
 }
 
 function showMarketplaceRating(platform) {
@@ -892,6 +1030,8 @@ function productPayload(item) {
       sales: item.monthly_sales || "",
       fetched_at: new Date().toISOString(),
     }],
+    related_product_id: item.related_product_id || "",
+    related_product_name: item.related_product_name || "",
   };
 }
 

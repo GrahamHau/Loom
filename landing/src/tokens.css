@@ -1,0 +1,87 @@
+/* ============================================================
+ * Loom Landing — Design Tokens
+ * Subset extracted from src/legacy/styles.css to keep landing
+ * visually aligned with the main app. If the main app retunes
+ * its palette, sync the :root block here by hand.
+ * ============================================================ */
+
+:root {
+  --font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-display: 'Cinzel', 'Manrope', serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+  /* warm neutral palette */
+  --bg: oklch(0.985 0.003 80);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.975 0.004 80);
+  --surface-3: oklch(0.955 0.005 80);
+  --hover: oklch(0.96 0.005 80);
+  --border: oklch(0.92 0.005 80);
+  --border-strong: oklch(0.86 0.006 80);
+  --text: oklch(0.22 0.008 80);
+  --text-2: oklch(0.42 0.008 80);
+  --text-3: oklch(0.6 0.008 80);
+  --text-4: oklch(0.72 0.006 80);
+
+  /* accent — soft indigo, matching main app default */
+  --accent: oklch(0.55 0.13 258);
+  --accent-soft: oklch(0.95 0.03 258);
+  --accent-text: oklch(0.4 0.13 258);
+  --accent-ink: oklch(0.36 0.13 258);
+
+  /* semantic */
+  --success: oklch(0.62 0.13 155);
+  --success-soft: oklch(0.95 0.04 155);
+  --warn: oklch(0.7 0.13 75);
+  --warn-soft: oklch(0.96 0.05 75);
+  --danger: oklch(0.6 0.18 25);
+  --danger-soft: oklch(0.96 0.04 25);
+
+  /* shape */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 18px;
+
+  /* shadow */
+  --shadow-sm: 0 1px 2px rgba(15, 17, 22, 0.04);
+  --shadow: 0 1px 3px rgba(15, 17, 22, 0.06),
+    0 4px 12px rgba(15, 17, 22, 0.04);
+  --shadow-lg: 0 8px 24px rgba(15, 17, 22, 0.08),
+    0 2px 6px rgba(15, 17, 22, 0.04);
+
+  /* landing-specific */
+  --max-width: 1080px;
+  --section-py: clamp(64px, 9vw, 128px);
+  --section-px: clamp(20px, 5vw, 56px);
+  --thread: rgba(15, 17, 22, 0.05);
+  --thread-strong: rgba(15, 17, 22, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(0.16 0.005 260);
+    --surface: oklch(0.2 0.006 260);
+    --surface-2: oklch(0.22 0.006 260);
+    --surface-3: oklch(0.25 0.007 260);
+    --hover: oklch(0.24 0.007 260);
+    --border: oklch(0.28 0.008 260);
+    --border-strong: oklch(0.36 0.01 260);
+    --text: oklch(0.96 0.005 260);
+    --text-2: oklch(0.78 0.006 260);
+    --text-3: oklch(0.62 0.008 260);
+    --text-4: oklch(0.5 0.008 260);
+    --accent: oklch(0.78 0.14 258);
+    --accent-soft: oklch(0.3 0.07 258);
+    --accent-text: oklch(0.86 0.13 258);
+    --accent-ink: oklch(0.92 0.06 258);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.35),
+      0 4px 12px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5),
+      0 2px 6px rgba(0, 0, 0, 0.3);
+    --thread: rgba(255, 255, 255, 0.06);
+    --thread-strong: rgba(255, 255, 255, 0.1);
+  }
+}

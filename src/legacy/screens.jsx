@@ -1537,7 +1537,7 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
 
           <div className="detail-section">
             <div className="detail-section-label">备注</div>
-            <textarea className="ghost-input" placeholder="补充想法、相关资料链接..."
+            <textarea className="ghost-input" placeholder="补充备注、相关资料链接..."
             style={{ width: "100%", minHeight: 60, resize: "vertical", fontSize: 12.5 }} />
           </div>
 
@@ -1769,7 +1769,7 @@ function AddDemandModal({ onClose, api, refreshData }) {
 
               <div className="detail-section">
                 <div className="detail-section-label">备注</div>
-                <textarea className="ghost-input" placeholder="补充想法、相关资料链接..."
+                <textarea className="ghost-input" placeholder="补充备注、相关资料链接..."
                   style={{ width: "100%", minHeight: 50, fontSize: 12.5, resize: "vertical" }} />
               </div>
             </div>
@@ -2173,8 +2173,8 @@ function CreateResearchModal({ api, refreshData, onClose }) {
               <input className="input lg" style={{ width: "100%" }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：便携双色温补光灯 Pro" />
             </div>
             <div>
-              <label className="field-label">产品想法描述</label>
-              <textarea className="input" style={{ width: "100%", minHeight: 120, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="描述目标用户、场景、价格段、差异化设想..." />
+              <label className="field-label">备注</label>
+              <textarea className="input" style={{ width: "100%", minHeight: 120, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="补充想法、相关资料链接..." />
             </div>
             {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
           </div>

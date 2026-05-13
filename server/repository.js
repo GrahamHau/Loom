@@ -305,6 +305,8 @@ export function createProduct(userId, input) {
       ai_summary: cleanSummary(input.ai_summary),
       selling_points: cleanArray(input.selling_points),
       negative_keywords: cleanArray(input.negative_keywords),
+      related_product_id: cleanText(input.related_product_id, ""),
+      related_product_name: cleanText(input.related_product_name, ""),
       synced_at: null,
       feishu_record_id: null,
       created_at: input.created_at || nowIso(),
@@ -330,6 +332,8 @@ export function updateProduct(userId, id, patch) {
       ...(patch.tags !== undefined ? { tags: cleanArray(patch.tags) } : {}),
       ...(patch.selling_points !== undefined ? { selling_points: cleanArray(patch.selling_points) } : {}),
       ...(patch.negative_keywords !== undefined ? { negative_keywords: cleanArray(patch.negative_keywords) } : {}),
+      ...(patch.related_product_id !== undefined ? { related_product_id: cleanText(patch.related_product_id, item.related_product_id || "") } : {}),
+      ...(patch.related_product_name !== undefined ? { related_product_name: cleanText(patch.related_product_name, item.related_product_name || "") } : {}),
       ...(patch.platforms !== undefined ? { platforms: cleanPlatformArray(patch.platforms) } : {}),
       updated_at: nowIso(),
     };
