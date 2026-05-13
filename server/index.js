@@ -173,6 +173,22 @@ function visibleNewsItems(userId) {
   return listNews(userId).filter((item) => !isSampleWorkspace(state) || isRecentSampleNews(item));
 }
 
+async function processCollectedNewsWithLlm(userId, collected) {
+  const changed = Number(collected?.inserted || 0) + Number(collected?.updated || 0);
+  try {
+    return await processNewsWithLlm(userId, Math.min(100, Math.max(20, changed)));
+  } catch (error) {
+    console.error("News LLM translation failed", error);
+    return {
+      processed: 0,
+      kept: 0,
+      filtered: 0,
+      failed: 1,
+      errors: [{ message: error.message || "LLM 处理失败" }],
+    };
+  }
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "loom", time: new Date().toISOString() });
 });
@@ -406,7 +422,9 @@ app.delete("/api/news/:id", requireAuth, (req, res) => {
 });
 app.post("/api/news/collect", requireAuth, asyncHandler(async (req, res) => {
   const userId = currentUserId(req);
-  res.json(await collectSources(userId, listNewsSources(userId)));
+  const collected = await collectSources(userId, listNewsSources(userId));
+  const translated = await processCollectedNewsWithLlm(userId, collected);
+  res.json({ ...collected, translated });
 }));
 
 app.post("/api/onboarding/finish-sample", requireAuth, (req, res) => {
@@ -419,7 +437,8 @@ app.post("/api/news/refresh", requireAuth, asyncHandler(async (req, res) => {
   res.json({ message: "采集已触发，后台处理中" });
   setImmediate(async () => {
     try {
-      await collectSources(userId, listNewsSources(userId));
+      const collected = await collectSources(userId, listNewsSources(userId));
+      await processCollectedNewsWithLlm(userId, collected);
     } catch (error) {
       console.error("Manual news refresh failed", error);
     }
@@ -485,7 +504,8 @@ function startRssScheduler() {
         const state = rawState(user.id);
         const settings = state?.settings || {};
         if (settings.rss_collect_enabled === false || process.env.RSS_COLLECT_ENABLED === "false") continue;
-        await collectDueSources(user.id, listNewsSources(user.id));
+        const collected = await collectDueSources(user.id, listNewsSources(user.id));
+        await processCollectedNewsWithLlm(user.id, collected);
       }
     } catch (error) {
       console.error("RSS collect failed", error);

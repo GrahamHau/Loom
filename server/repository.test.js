@@ -83,6 +83,25 @@ describe("repository", () => {
     expect(repo.listNews(legacyUserId).find((item) => item.original_url === "https://a.test/with-image")?.thumbnail_url).toBe("https://cdn.test/a.jpg");
   });
 
+  it("includes translated-but-unprocessed news in the LLM queue", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [{
+      source_id: "rss-official",
+      source: "Official Feed",
+      source_authority: "official",
+      original_url: "https://a.test/needs-zh",
+      original_title: "Brand launches a new camera light",
+      titleZh: "Brand launches a new camera light",
+      type: "新品发布",
+      needsTranslation: true,
+      llmProcessed: true,
+      date: "2026-05-10",
+    }]);
+
+    const pending = repo.listPendingNewsForLlm(legacyUserId, 10);
+    expect(pending.map((item) => item.original_url)).toContain("https://a.test/needs-zh");
+  });
+
   it("dedupes by original url per user", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     const secondUser = repo.ensureLocalUser({ id: "user-b", name: "User B", auth_provider: "feishu" });

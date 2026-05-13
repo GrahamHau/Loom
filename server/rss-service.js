@@ -22,7 +22,7 @@ const RSS_HEADERS = {
 
 const NEWS_LLM_SYSTEM_PROMPT = `你是一个信息筛选助手，服务于摄影/影像器材行业（灯光、稳定器、三脚架、相机配件、收音设备、手机配件）的产品经理。
 
-判断输入内容是否属于以下两类之一：
+先把输入内容翻译/整理成中文，再判断是否属于以下两类之一：
 
 【保留 - new_product】：某品牌正式发布了新产品、新型号、新SKU，或产品重大功能更新。必须是具体产品发布，不是泛泛评论。
 
@@ -42,11 +42,12 @@ const NEWS_LLM_SYSTEM_PROMPT = `你是一个信息筛选助手，服务于摄影
   "keep": true | false,
   "type": "new_product" | "trend" | null,
   "title_zh": "中文标题，15字以内，直接说是什么（例：神牛发布ML100Bi II双色温灯）",
-  "summary_zh": "50字以内中文摘要，提炼核心信息。不是翻译，是提炼。"
+  "summary_zh": "80字以内中文摘要，提炼核心信息。",
+  "content_zh": "中文正文，保留原文关键信息，120-300字。"
 }`;
 
-const NEWS_LLM_INPUT_LIMIT = 700;
-const NEWS_LLM_MAX_TOKENS = 120;
+const NEWS_LLM_INPUT_LIMIT = 1600;
+const NEWS_LLM_MAX_TOKENS = 520;
 const FETCH_TIMEOUT_MS = 30000;
 const OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE = Number(process.env.OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE || 12);
 
@@ -175,7 +176,14 @@ export function heuristicClassifyNews({ item }) {
 
 async function classifyNews({ source, item }) {
   const heuristic = heuristicClassifyNews({ source, item: { ...item, sourceName: source.name } });
-  if (heuristic && heuristic.type !== "待判定") return { ...heuristic, llmProcessed: true };
+  if (heuristic && heuristic.type !== "待判定") {
+    const requiresOfficialTranslation = isOfficialManagedSource(source);
+    return {
+      ...heuristic,
+      llmProcessed: !requiresOfficialTranslation,
+      needsTranslation: requiresOfficialTranslation || heuristic.needsTranslation,
+    };
+  }
   return {
     type: null,
     titleZh: stripHtml(item.title || "") || "未命名资讯",
@@ -336,7 +344,7 @@ export async function processNewsWithLlm(userId, limit = 20) {
           type: mapType(result.type) || "行业趋势",
           titleZh: result.title_zh || item.titleZh,
           summary: result.summary_zh || item.summary,
-          contentZh: "",
+          contentZh: result.content_zh || item.contentZh || "",
           is_kept: 1,
           llm_processed: 1,
           needsTranslation: false,

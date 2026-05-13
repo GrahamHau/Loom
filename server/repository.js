@@ -394,7 +394,17 @@ export function createDemand(userId, input) {
       title: cleanTitle(input.title, "未命名需求"),
       thumbHue: input.thumbHue ?? 200,
       summary: cleanSummary(input.summary),
+      original_content: cleanSummary(input.original_content || input.content),
       source: cleanText(input.source, "manual"),
+      source_url: cleanText(input.source_url || input.url),
+      url: cleanText(input.url || input.source_url),
+      author: cleanText(input.author || input.username),
+      likes: Number(input.likes || 0),
+      collects: Number(input.collects || 0),
+      shares: Number(input.shares || 0),
+      comments: Number(input.comments || 0),
+      thumbnail_url: cleanText(input.thumbnail_url || input.image),
+      image: cleanText(input.image || input.thumbnail_url),
       date: input.date || new Date().toISOString().slice(0, 10),
       innovation: cleanTitle(input.innovation, "待分类"),
       scenarios: cleanArray(input.scenarios),
@@ -419,7 +429,17 @@ export function updateDemand(userId, id, patch) {
       ...patch,
       ...(patch.title !== undefined ? { title: cleanTitle(patch.title, item.title) } : {}),
       ...(patch.summary !== undefined ? { summary: cleanSummary(patch.summary, item.summary) } : {}),
+      ...(patch.original_content !== undefined ? { original_content: cleanSummary(patch.original_content, item.original_content || "") } : {}),
       ...(patch.source !== undefined ? { source: cleanText(patch.source, item.source) } : {}),
+      ...(patch.source_url !== undefined ? { source_url: cleanText(patch.source_url, item.source_url || "") } : {}),
+      ...(patch.url !== undefined ? { url: cleanText(patch.url, item.url || "") } : {}),
+      ...(patch.author !== undefined ? { author: cleanText(patch.author, item.author || "") } : {}),
+      ...(patch.likes !== undefined ? { likes: Number(patch.likes || 0) } : {}),
+      ...(patch.collects !== undefined ? { collects: Number(patch.collects || 0) } : {}),
+      ...(patch.shares !== undefined ? { shares: Number(patch.shares || 0) } : {}),
+      ...(patch.comments !== undefined ? { comments: Number(patch.comments || 0) } : {}),
+      ...(patch.thumbnail_url !== undefined ? { thumbnail_url: cleanText(patch.thumbnail_url, item.thumbnail_url || "") } : {}),
+      ...(patch.image !== undefined ? { image: cleanText(patch.image, item.image || "") } : {}),
       ...(patch.innovation !== undefined ? { innovation: cleanTitle(patch.innovation, item.innovation) } : {}),
       ...(patch.scenarios !== undefined ? { scenarios: cleanArray(patch.scenarios) } : {}),
       ...(patch.painpoints !== undefined ? { painpoints: cleanArray(patch.painpoints) } : {}),
@@ -567,7 +587,7 @@ export function listPendingNewsForLlm(userId, limit = 20) {
   return db.prepare(`
     SELECT *
     FROM news_items
-    WHERE user_id = ? AND llm_processed = 0
+    WHERE user_id = ? AND (llm_processed = 0 OR needs_translation = 1)
     ORDER BY published_at DESC, created_at DESC
     LIMIT ?
   `).all(userId, limit).map(mapNewsRow);
