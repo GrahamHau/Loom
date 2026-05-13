@@ -31,22 +31,20 @@ function demandSummary(demand) {
 function normalizeAnalysis(result) {
   if (Array.isArray(result.analysis)) return result.analysis;
   if (Array.isArray(result.sections)) return result.sections;
-  return [
-    {
-      icon: "📊",
-      title: "AI 分析",
-      confidence: Number(result.confidence || 0.7),
-      text: result.report || result.text || "未生成有效分析。",
-      source: result.source || "PM Copilot 数据库",
-    },
-  ];
+  return [{
+    icon: "📊",
+    title: "AI 分析",
+    confidence: Number(result.confidence || 0.7),
+    text: result.report || result.text || "未生成有效分析。",
+    source: result.source || "LOOM 数据库",
+  }];
 }
 
-export async function analyzeResearch(id) {
-  const state = rawState();
-  const research = (state.research || []).find((item) => item.id === id);
+export async function analyzeResearch(userId, id) {
+  const state = rawState(userId);
+  const research = (state?.research || []).find((item) => item.id === id);
   if (!research) return null;
-  updateResearch(id, { status: "分析中" });
+  updateResearch(userId, id, { status: "分析中" });
 
   const products = (research.products || [])
     .map((pid) => state.products.find((product) => product.id === pid))
@@ -56,9 +54,10 @@ export async function analyzeResearch(id) {
     .map((did) => state.demands.find((demand) => demand.id === did))
     .filter(Boolean)
     .map(demandSummary);
-  const searchContext = await buildSearchContext(`${research.title} ${research.desc || research.description || ""} camera gear market trend`, { limit: 5 });
+  const searchContext = await buildSearchContext(userId, `${research.title} ${research.desc || research.description || ""} camera gear market trend`, { limit: 5 });
 
   const result = await callLLM({
+    userId,
     system: "你是产品经理的市场调研分析助手。只返回 JSON。",
     user: `基于产品想法、关联竞品和关联需求，生成市场调研报告。返回 JSON：
 {
@@ -82,7 +81,7 @@ ${searchContext}`,
     maxTokens: 700,
   });
 
-  return updateResearch(id, {
+  return updateResearch(userId, id, {
     status: "已完成",
     analysis: normalizeAnalysis(result),
     ai_confidence: Number(result.ai_confidence || 0.75),

@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "PM Copilot Clipper",
+  "name": "LOOM Web Clipper",
   "version": "1.0.0",
-  "description": "一键采集竞品和需求到 PM Copilot 情报中台",
+  "description": "一键采集竞品和灵感到 LOOM 个人情报工作台",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "PM Copilot"
+    "default_title": "LOOM Web Clipper"
   },
   "side_panel": {
     "default_path": "sidepanel/sidepanel.html"

@@ -50,7 +50,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function shouldCollectSource(source, now = new Date()) {
+export function shouldCollectSource(source, now = new Date()) {
   if (source.active === false || !source.url) return false;
   const intervalMinutes = Number(source.fetch_interval || source.interval || 60);
   const intervalMs = Math.max(30, intervalMinutes) * 60 * 1000;
@@ -92,28 +92,25 @@ export function heuristicClassifyNews({ item }) {
   const title = stripHtml(item.title);
   const content = stripHtml([item.contentSnippet, item.summary, item.content].filter(Boolean).join(" "));
   const lower = `${title}\n${content}`.toLowerCase();
-  const sourceName = String(item.sourceName || item.source || "").toLowerCase();
+  const sourceName = String(item.sourceName || "").toLowerCase();
   const launchPattern = /\b(launch(?:ed|es|ing)?|announce[sd]?|announcing|release[sd]?|releasing|introduce[sd]?|introducing|unveil(?:ed|s|ing)?|debut(?:ed|s|ing)?|正式发布|正式推出|新品发布|发售|上市)\b/i;
   const productPattern = /\b(camera|lens|drone|gimbal|light|tripod|rig|cage|mount|microphone|monitor|stabilizer|battery|charger|accessory|iphone|ipad|macbook)\b|相机|镜头|无人机|云台|补光灯|三脚架|麦克风|监视器|稳定器|电池|充电器|配件/i;
   const trendPattern = /\b(trend|market|report|survey|forecast|analysis)\b|趋势|报告|预测|分析/i;
   const rejectPattern = /\b(giveaway|discount|coupon|hiring|career|sponsor|sponsored|travel|tutorial|how to|used market|auction)\b|赠品|抽奖|折扣|招聘|赞助|游记|教程|二手|拍卖/i;
-  const prelaunchPattern = /\b(teaser|expected|coming soon|next week|rumou?r|leak)\b|预热|即将发布|传闻|曝光/i;
-  const ambiguousPattern = /\b(update|updated|version|series|lineup|creator|shooting|workflow|event|award|festival|feature)\b|升级|系列|生态|创作|活动|奖项|功能/i;
-  const financePattern = /\b(stock|shares|earnings|investor|fund|capital|ipo|quarter|q1|q2|q3|q4|price target|analyst)\b|股价|涨停|跌停|投资者|融资|财报|资金|市值|概念股/i;
-  const corporatePattern = /\b(partnership|agreement|lawsuit|acquisition|merger|executive|ceo|board|subsidiary)\b|合作协议|诉讼|收购|并购|高管|董事会|子公司/i;
-  const hardEvidencePattern = /\b(camera|lens|drone|gimbal|light|tripod|rig|cage|mount|microphone|monitor|stabilizer|battery|charger|accessory|flash|monolight|led|rgb|wireless mic)\b|相机|镜头|无人机|云台|补光灯|三脚架|兔笼|支架|麦克风|监视器|稳定器|电池|充电器|闪光灯|配件/i;
-  const mediaLikeSource = /\b(petapixel|dpreview|imaging resource|newsshooter|ym cinema|no film school|36kr|ifanr|moviemeter|rumors)\b/i.test(sourceName);
-  const weakLaunchContextPattern = /\b(conversation|workflow|lineup|market fit|without official|discussion|coverage)\b|讨论|动向|观察|解读/i;
+  const teaserPattern = /\b(teaser|rumou?r|expected|coming soon|next week|preview|first look|set to debut)\b|预告|爆料|传闻|即将/i;
+  const weakEvidencePattern = /\b(without official|discussion|conversation|discusses|reportedly|may|could|fits the market)\b/i;
+  const collectionPattern = /\b(collection|wallpaper|watch band|band)\b|系列|壁纸|表带/i;
+  const ambiguousPattern = /\b(update|workflow|feature|series|lineup)\b|更新|功能|系列/i;
+  const mediaSourcePattern = /\b(petapixel|dpreview|fstoppers|youtube|creator)\b/i;
 
   if (rejectPattern.test(lower)) return null;
-  if (prelaunchPattern.test(lower)) return null;
-  if (financePattern.test(lower) && !hardEvidencePattern.test(lower)) return null;
-  if (corporatePattern.test(lower) && !launchPattern.test(lower) && !trendPattern.test(lower)) return null;
-  if (ambiguousPattern.test(lower) && !trendPattern.test(lower) && !(launchPattern.test(lower) && productPattern.test(lower))) {
-    return { type: "待判定", needsTranslation: true, classification: { reason: "heuristic_ambiguous" } };
+  if (collectionPattern.test(lower) && !launchPattern.test(lower)) return null;
+  if (collectionPattern.test(lower) && !/\b(camera|lens|drone|gimbal|light|tripod|rig|cage|mount|microphone|monitor|stabilizer|battery|charger)\b|相机|镜头|无人机|云台|补光灯|三脚架|麦克风|监视器|稳定器|电池|充电器/i.test(lower)) {
+    return null;
   }
+  if (teaserPattern.test(lower) && launchPattern.test(lower)) return null;
   if (launchPattern.test(lower) && productPattern.test(lower)) {
-    if (mediaLikeSource && (weakLaunchContextPattern.test(lower) || !/\b(announced by|released by|available now|ships now)\b/i.test(lower))) {
+    if (weakEvidencePattern.test(lower) && mediaSourcePattern.test(sourceName || lower)) {
       return {
         type: "行业趋势",
         titleZh: title || "未命名资讯",
@@ -139,14 +136,21 @@ export function heuristicClassifyNews({ item }) {
       classification: { reason: "heuristic_trend" },
     };
   }
+  if (ambiguousPattern.test(lower)) {
+    return {
+      type: "待判定",
+      titleZh: title || "未命名资讯",
+      summary: content.slice(0, 80),
+      needsTranslation: true,
+      classification: { reason: "heuristic_ambiguous" },
+    };
+  }
   return null;
 }
 
 async function classifyNews({ source, item }) {
   const heuristic = heuristicClassifyNews({ source, item: { ...item, sourceName: source.name } });
-  if (heuristic && heuristic.type !== "待判定") {
-    return { ...heuristic, llmProcessed: true };
-  }
+  if (heuristic && heuristic.type !== "待判定") return { ...heuristic, llmProcessed: true };
   return {
     type: null,
     titleZh: stripHtml(item.title || "") || "未命名资讯",
@@ -163,14 +167,11 @@ async function fetchFeed(source) {
     headers: RSS_HEADERS,
     redirect: "follow",
   });
-  if (response.status >= 400) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  const xml = await response.text();
-  return parser.parseString(xml);
+  if (response.status >= 400) throw new Error(`HTTP ${response.status}`);
+  return parser.parseString(await response.text());
 }
 
-export async function collectSource(source) {
+export async function collectSource(userId, source) {
   const feed = await fetchFeed(source);
   const items = [...(feed.items || [])]
     .sort((a, b) => new Date(publishedAtOf(b)).getTime() - new Date(publishedAtOf(a)).getTime())
@@ -199,8 +200,8 @@ export async function collectSource(source) {
     });
   }
 
-  const result = upsertNews(newsItems);
-  updateNewsSource(source.id, {
+  const result = upsertNews(userId, newsItems);
+  updateNewsSource(userId, source.id, {
     last_fetched_at: new Date().toISOString(),
     last_item_count: items.length,
     last_error: null,
@@ -208,17 +209,16 @@ export async function collectSource(source) {
   return { source_id: source.id, source: source.name, fetched: items.length, kept: newsItems.length, ...result };
 }
 
-export async function collectSources(sources) {
+export async function collectSources(userId, sources) {
   const active = sources.filter((source) => source.active !== false && source.url);
   const results = [];
   for (const source of active) {
     try {
-      const result = await collectSource(source);
-      results.push(result);
+      results.push(await collectSource(userId, source));
     } catch (error) {
       const message = error.message || "采集失败";
       console.error(`[News Fetch] ${source.name}: ${message}`);
-      updateNewsSource(source.id, {
+      updateNewsSource(userId, source.id, {
         last_fetched_at: new Date().toISOString(),
         last_item_count: 0,
         last_error: message,
@@ -235,15 +235,13 @@ export async function collectSources(sources) {
   };
 }
 
-export async function collectDueSources(sources, now = new Date()) {
+export async function collectDueSources(userId, sources, now = new Date()) {
   const dueSources = sources.filter((source) => shouldCollectSource(source, now));
-  return collectSources(dueSources);
+  return collectSources(userId, dueSources);
 }
 
-export { shouldCollectSource };
-
-export async function processNewsWithLlm(limit = 20) {
-  const pending = listPendingNewsForLlm(limit);
+export async function processNewsWithLlm(userId, limit = 20) {
+  const pending = listPendingNewsForLlm(userId, limit);
   let processed = 0;
   let kept = 0;
   let filtered = 0;
@@ -259,12 +257,13 @@ export async function processNewsWithLlm(limit = 20) {
 
     try {
       const result = await callLLM({
+        userId,
         system: NEWS_LLM_SYSTEM_PROMPT,
         user: content,
         maxTokens: NEWS_LLM_MAX_TOKENS,
       });
       if (result?.keep) {
-        updateNews(item.id, {
+        updateNews(userId, item.id, {
           type: mapType(result.type) || "行业趋势",
           titleZh: result.title_zh || item.titleZh,
           summary: result.summary_zh || item.summary,
@@ -276,7 +275,7 @@ export async function processNewsWithLlm(limit = 20) {
         });
         kept += 1;
       } else {
-        updateNews(item.id, {
+        updateNews(userId, item.id, {
           is_kept: 0,
           llm_processed: 1,
           classification: { reason: "manual_llm_filtered" },
@@ -286,11 +285,7 @@ export async function processNewsWithLlm(limit = 20) {
       processed += 1;
     } catch (error) {
       failed += 1;
-      errors.push({
-        id: item.id,
-        title: item.original_title || item.titleZh,
-        message: error.message || "LLM 处理失败",
-      });
+      errors.push({ id: item.id, title: item.original_title || item.titleZh, message: error.message || "LLM 处理失败" });
     }
   }
 
@@ -300,6 +295,6 @@ export async function processNewsWithLlm(limit = 20) {
     filtered,
     failed,
     errors: errors.slice(0, 5),
-    remaining: listPendingNewsForLlm(1000).length,
+    remaining: listPendingNewsForLlm(userId, 1000).length,
   };
 }

@@ -3,12 +3,12 @@ import { listNews, markSynced, rawState, updateSettings } from "./repository.js"
 
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
 
-function settings() {
-  return rawState().settings || {};
+function settings(userId) {
+  return rawState(userId)?.settings || {};
 }
 
-function requireFeishuSettings() {
-  const s = settings();
+function requireFeishuSettings(userId) {
+  const s = settings(userId);
   const baseToken = s.feishu_base_token || s.feishu_table_token;
   if (!s.feishu_app_id || !s.feishu_app_secret || !baseToken) {
     throw new AppError(400, "feishu_not_configured", "飞书未配置完整，请填写 App ID、App Secret 和 Base Token。");
@@ -25,8 +25,8 @@ async function feishuFetch(path, options = {}) {
   return body;
 }
 
-export async function getTenantAccessToken() {
-  const s = requireFeishuSettings();
+export async function getTenantAccessTokenForUser(userId) {
+  const s = requireFeishuSettings(userId);
   const body = await feishuFetch("/auth/v3/tenant_access_token/internal", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -38,13 +38,13 @@ export async function getTenantAccessToken() {
   return body.tenant_access_token;
 }
 
-export async function testFeishu() {
-  const s = requireFeishuSettings();
-  const token = await getTenantAccessToken();
+export async function testFeishuForUser(userId) {
+  const s = requireFeishuSettings(userId);
+  const token = await getTenantAccessTokenForUser(userId);
   const body = await feishuFetch(`/bitable/v1/apps/${s.feishu_base_token}/tables`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  updateSettings({ last_feishu_test_at: new Date().toISOString() });
+  updateSettings(userId, { last_feishu_test_at: new Date().toISOString() });
   return { ok: true, tables: body.data?.items || [] };
 }
 
@@ -129,10 +129,10 @@ async function updateRecord({ token, baseToken, tableId, recordId, fields }) {
   return recordId;
 }
 
-export async function syncFeishu({ kinds = ["products", "demands", "news"] } = {}) {
-  const s = requireFeishuSettings();
-  const token = await getTenantAccessToken();
-  const state = rawState();
+export async function syncFeishuForUser(userId, { kinds = ["products", "demands", "news"] } = {}) {
+  const s = requireFeishuSettings(userId);
+  const token = await getTenantAccessTokenForUser(userId);
+  const state = rawState(userId);
   const summary = {};
 
   for (const kind of kinds) {
@@ -146,7 +146,7 @@ export async function syncFeishu({ kinds = ["products", "demands", "news"] } = {
 
     const synced = [];
     const result = { created: 0, updated: 0, failed: 0, errors: [] };
-    const records = kind === "news" ? listNews().filter((item) => item.type) : (state[kind] || []);
+    const records = kind === "news" ? listNews(userId).filter((item) => item.type) : (state[kind] || []);
     for (const item of records) {
       try {
         const fields = config.fields(item);
@@ -160,7 +160,7 @@ export async function syncFeishu({ kinds = ["products", "demands", "news"] } = {
         result.errors.push({ id: item.id, message: error.message });
       }
     }
-    if (synced.length) markSynced(kind, synced);
+    if (synced.length) markSynced(userId, kind, synced);
     summary[kind] = result;
   }
 

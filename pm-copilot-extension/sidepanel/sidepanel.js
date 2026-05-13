@@ -267,10 +267,10 @@ function renderLogin() {
     <div class="shell">
       <div class="header">
         <div class="brand">
-          <div class="logo">P</div>
+          <div class="logo">L</div>
           <div>
-            <div class="title">PM Copilot</div>
-            <div class="sub">连接情报中台</div>
+            <div class="title">LOOM</div>
+            <div class="sub">连接情报工作台</div>
           </div>
         </div>
         <button class="icon-btn" id="open-options" title="设置">⚙</button>
@@ -282,7 +282,7 @@ function renderLogin() {
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             </div>
             <div>
-              <div class="cl-login-title">登录 PM Copilot</div>
+              <div class="cl-login-title">登录 LOOM</div>
               <div class="cl-login-sub">连接后端后才能保存采集到的竞品与需求</div>
             </div>
           </div>
@@ -433,7 +433,7 @@ function renderUnsupported(reason) {
       <div class="cl-body cl-unsupported-body">
         <div class="cl-unsupported">
           <div class="cl-unsupported-title">未识别为支持的平台</div>
-          <div class="cl-unsupported-text">PM Copilot 目前只在以下平台自动采集，可以在设置中调整白名单。</div>
+          <div class="cl-unsupported-text">LOOM 目前只在以下平台自动采集，可以在设置中调整白名单。</div>
           <div class="platform-list">
             <div class="platform-list-row"><span class="platform-pill amz">Amazon</span><span class="platform-list-url mono">amazon.com/dp/*</span><span class="tag outline">竞品</span></div>
             <div class="platform-list-row"><span class="platform-pill tb">淘宝/天猫</span><span class="platform-list-url mono">item.taobao.com · detail.tmall.com</span><span class="tag outline">竞品</span></div>
@@ -442,7 +442,7 @@ function renderUnsupported(reason) {
           </div>
           <div class="cl-hint">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
-            <span>也可以在 PM Copilot Web 端手动新建竞品 / 需求</span>
+            <span>也可以在 LOOM Web 端手动新建竞品 / 需求</span>
           </div>
         </div>
       </div>
@@ -956,9 +956,9 @@ function headerHtml() {
   return `
     <div class="cl-top">
       <div class="cl-brand">
-        <div class="cl-mark">P</div>
+        <div class="cl-mark">L</div>
         <div>
-          <div class="cl-name">PM Copilot</div>
+          <div class="cl-name">LOOM</div>
           <div class="cl-conn"><span class="dot dot-ok"></span>已连接 · ${escapeHtml(name)}</div>
         </div>
       </div>

@@ -43,12 +43,14 @@ export function defaultSettings() {
   };
 }
 
-export function loadEmptyData() {
+export function buildEmptyState(user = {}) {
   return {
     user: {
-      name: "Graham",
-      role: "产品经理",
-      initials: "G",
+      id: user.id || "",
+      name: user.name || "LOOM",
+      role: user.role || "成员",
+      initials: user.initials || "L",
+      auth_provider: user.auth_provider || "password",
     },
     products: [],
     demands: [],
@@ -57,6 +59,14 @@ export function loadEmptyData() {
     rssSources: [],
     settings: defaultSettings(),
   };
+}
+
+export function loadEmptyData() {
+  return buildEmptyState({
+    name: "Graham",
+    role: "产品经理",
+    initials: "G",
+  });
 }
 
 export function loadSeedData() {
