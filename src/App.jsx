@@ -356,19 +356,27 @@ function App() {
 
   const login = async ({ username, password }) => {
     setError("");
-    const result = await api("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    });
-    setMe(result.user);
-    await refreshData();
+    try {
+      const result = await api("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+      setMe(result.user);
+      await refreshData();
+    } catch (err) {
+      setError(err.message || "登录失败，请稍后重试");
+    }
   };
 
   const loginAsVisitor = async () => {
     setError("");
-    const result = await api("/api/auth/visitor", { method: "POST" });
-    setMe(result.user);
-    await refreshData();
+    try {
+      const result = await api("/api/auth/visitor", { method: "POST" });
+      setMe(result.user);
+      await refreshData();
+    } catch (err) {
+      setError(err.message || "访客模式暂时不可用，请稍后重试");
+    }
   };
 
   const loginWithFeishu = () => {
