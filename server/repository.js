@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import {
   acquireLock,
   db,
+  ensureSampleUserState,
   ensureUserState,
   getLegacyUserId,
   getUserState,
@@ -14,6 +15,7 @@ import {
 } from "./db.js";
 import { normalizeTagGroups } from "./tag-config.js";
 import { buildEmptyState } from "./seed.js";
+import { isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -42,6 +44,33 @@ function newsCountsFrom(items) {
     new_product: typed.filter((item) => item.type === "新品发布").length,
     trend: typed.filter((item) => item.type === "行业趋势").length,
     starred: typed.filter((item) => item.starred).length,
+  };
+}
+
+function onboardingMeta(state, news = []) {
+  if (!isSampleWorkspace(state)) return state.onboarding || {};
+  const userId = state?.user?.id || "";
+  const sampleNews = news.filter((item) => isRecentSampleNews(item));
+  const latestFetchedAt = (state.rssSources || [])
+    .map((source) => source.last_fetched_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || null;
+  const latestNewsAt = sampleNews
+    .map((item) => item.published_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || null;
+  return {
+    ...(state.onboarding || {}),
+    sampleWorkspace: true,
+    liveNews: true,
+    visitorOnly: userId === getLegacyUserId(),
+    canExitSample: userId !== getLegacyUserId(),
+    newsMaxAgeHours: SAMPLE_NEWS_MAX_AGE_HOURS,
+    latestFetchedAt,
+    latestNewsAt,
+    liveNewsReady: sampleNews.length > 0,
   };
 }
 
@@ -234,7 +263,12 @@ export function ensureLocalUser(input = {}) {
     user.created_at, user.updated_at, user.last_login_at
   );
   const saved = findUserById(user.id);
-  ensureUserState(saved);
+  if (input.withSampleWorkspace) {
+    ensureSampleUserState(saved);
+    ensureSampleNewsSources(saved.id);
+  } else {
+    ensureUserState(saved);
+  }
   return saved;
 }
 
@@ -271,10 +305,12 @@ export function listAllUsers() {
 export function bootstrap(userId) {
   const state = requireState(userId);
   if (!state) return null;
-  const news = listNews(userId);
+  const allNews = listNews(userId);
+  const news = isSampleWorkspace(state) ? allNews.filter((item) => isRecentSampleNews(item)) : allNews;
   state.news = news.slice(0, 30);
   state.newsCounts = newsCountsFrom(news);
   state.rssSources = listNewsSources(userId);
+  state.onboarding = onboardingMeta(state, news);
   state.user = userSummaryFromState(state, findUserById(userId) || { id: userId });
   if (state.settings) {
     state.settings = { ...state.settings, tag_groups: normalizeTagGroups(state.settings.tag_groups) };
@@ -307,6 +343,7 @@ export function createProduct(userId, input) {
       negative_keywords: cleanArray(input.negative_keywords),
       related_product_id: cleanText(input.related_product_id, ""),
       related_product_name: cleanText(input.related_product_name, ""),
+      sample: Boolean(input.sample),
       synced_at: null,
       feishu_record_id: null,
       created_at: input.created_at || nowIso(),
@@ -362,6 +399,7 @@ export function createDemand(userId, input) {
       innovation: cleanTitle(input.innovation, "待分类"),
       scenarios: cleanArray(input.scenarios),
       painpoints: cleanArray(input.painpoints),
+      sample: Boolean(input.sample),
       synced_at: null,
       feishu_record_id: null,
       created_at: input.created_at || nowIso(),
@@ -412,6 +450,7 @@ export function createResearch(userId, input) {
       products: cleanRecordList(input.products || input.matched_products || []),
       demands: cleanRecordList(input.demands || input.matched_demands || []),
       analysis: Array.isArray(input.analysis) ? input.analysis.slice(0, 20) : input.analysis || null,
+      sample: Boolean(input.sample),
       created_at: nowIso(),
       updated_at: nowIso(),
     };
@@ -491,6 +530,27 @@ export function updateSettings(userId, patch) {
     state.settings = { ...(state.settings || {}), ...next };
     state.settings.tag_groups = normalizeTagGroups(state.settings.tag_groups);
     return maskSettings(state.settings);
+  });
+}
+
+export function finishSampleWorkspace(userId) {
+  if (userId === getLegacyUserId()) {
+    const state = requireState(userId);
+    if (!state) return null;
+    state.onboarding = onboardingMeta(state, listNews(userId));
+    return state;
+  }
+  return mutateUserState(userId, (state) => {
+    state.onboarding = {
+      ...(state.onboarding || {}),
+      sampleWorkspace: false,
+      sampleDismissed: true,
+      dismissed_at: nowIso(),
+    };
+    state.products = (state.products || []).filter((item) => !item.sample);
+    state.demands = (state.demands || []).filter((item) => !item.sample);
+    state.research = (state.research || []).filter((item) => !item.sample);
+    return state;
   });
 }
 
@@ -649,6 +709,23 @@ export function createNewsSource(userId, input) {
   return listNewsSources(userId).find((item) => item.id === source.id) || null;
 }
 
+export function ensureSampleNewsSources(userId) {
+  const existing = new Set(listNewsSources(userId).map((source) => source.id));
+  const created = [];
+  for (const source of SAMPLE_NEWS_SOURCES) {
+    const id = sampleSourceId(userId, source.id);
+    if (existing.has(id)) continue;
+    created.push(createNewsSource(userId, {
+      ...source,
+      id,
+      type: "rss",
+      active: true,
+      is_active: true,
+    }));
+  }
+  return created;
+}
+
 export function updateNewsSource(userId, id, patch) {
   const current = db.prepare("SELECT * FROM news_sources WHERE id = ? AND user_id = ?").get(id, userId);
   if (!current) return null;
@@ -718,14 +795,16 @@ export function markSynced(userId, kind, records) {
 
 export function ensureLegacyWorkspace() {
   const existing = findUserById(getLegacyUserId());
-  if (existing) return existing;
-  return ensureLocalUser({
+  const user = existing || ensureLocalUser({
     id: getLegacyUserId(),
     name: "visitor",
     initials: "VI",
     role: "产品经理",
     auth_provider: "password",
   });
+  ensureSampleUserState(user, { force: true });
+  ensureSampleNewsSources(user.id);
+  return user;
 }
 
 export {

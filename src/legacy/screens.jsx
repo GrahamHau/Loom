@@ -449,6 +449,9 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   }, [selectMode]);
 
   const selectedItems = items.filter((item) => selectedIds.includes(item.id));
+  const sampleWorkspace = Boolean(data.onboarding?.sampleWorkspace);
+  const liveNewsReady = Boolean(data.onboarding?.liveNewsReady);
+  const newsMaxAgeHours = data.onboarding?.newsMaxAgeHours || 72;
   const toggleSelect = (id) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
@@ -510,12 +513,25 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
       <div className="viewport">
         <div className="page" style={{ paddingTop: 8 }}>
           {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
+          {sampleWorkspace && (
+            <div className="live-sample-note">
+              <div className="live-sample-note-main">
+                <Icon name="rss" size={15} />
+                <span>
+                  {liveNewsReady
+                    ? `News 只展示最近 ${newsMaxAgeHours} 小时内采集到的实时内容，示例数据不会进入同步或导出。`
+                    : "News 正在抓取最新公开信息，完成后会自动出现在这里。"}
+                </span>
+              </div>
+              <Btn size="sm" variant="ghost" icon="sync" onClick={collect} disabled={busy}>{busy ? "更新中..." : "刷新实时信息流"}</Btn>
+            </div>
+          )}
           {dates.length === 0 &&
             <EmptyState
               icon="newspaper"
-              title="还没有真实 News"
+              title={sampleWorkspace ? "正在更新实时信息流" : "还没有真实 News"}
               action={<Btn size="sm" variant="primary" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>}>
-              先到系统设置添加 RSS 源，或点击立即采集导入真实资讯。
+              {sampleWorkspace ? "系统正在从预置公开数据源获取最新内容，不会使用旧的静态新闻。" : "先到系统设置添加 RSS 源，或点击立即采集导入真实资讯。"}
             </EmptyState>
           }
           {dates.map((d) =>

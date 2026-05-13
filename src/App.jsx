@@ -178,6 +178,7 @@ function normalizeData(input = {}) {
     research: Array.isArray(input.research) ? input.research : [],
     rssSources: Array.isArray(input.rssSources) ? input.rssSources : [],
     settings: input.settings || {},
+    onboarding: input.onboarding || {},
   };
 }
 
@@ -294,7 +295,7 @@ function PMCTweaks({ t, setTweak }) {
 }
 
 function App() {
-  const [active, setActive] = useState("products");
+  const [active, setActive] = useState("news");
   const [me, setMe] = useState(null);
   const [data, setData] = useState(null);
   const [providers, setProviders] = useState({ password: true, feishu: false });
@@ -347,6 +348,12 @@ function App() {
     setData(normalizeData(next));
   };
 
+  const finishSampleWorkspace = async () => {
+    const next = await api("/api/onboarding/finish-sample", { method: "POST" });
+    setData(normalizeData(next));
+    setActive("news");
+  };
+
   const login = async ({ username, password }) => {
     setError("");
     const result = await api("/api/auth/login", {
@@ -391,6 +398,10 @@ function App() {
   }
 
   const screenProps = { data, api, refreshData, navTarget };
+  const sampleWorkspace = Boolean(data.onboarding?.sampleWorkspace);
+  const canExitSample = Boolean(data.onboarding?.canExitSample);
+  const liveNewsReady = Boolean(data.onboarding?.liveNewsReady);
+  const latestNewsAt = data.onboarding?.latestNewsAt || data.onboarding?.latestFetchedAt || "";
   const screen = {
     news: <NewsScreen {...screenProps} />,
     products: <ProductsScreen {...screenProps} detailCollapsed={detailCollapsed} setDetailCollapsed={setDetailCollapsed} />,
@@ -407,6 +418,20 @@ function App() {
     <div className="app">
       <Sidebar active={active} onNav={setActive} data={data} onLogout={logout} />
       <main className="main" data-screen-label={TITLES[active]?.label || active}>
+        {sampleWorkspace && (
+          <div className="sample-workspace-banner">
+            <div className="sample-workspace-copy">
+              <Tag tone="accent">示例工作区</Tag>
+              <span>
+                这里预置了一组竞品、灵感和调研结构，News 只展示最新抓取的信息流
+                {liveNewsReady && latestNewsAt ? `，最新更新 ${formatSampleDate(latestNewsAt)}` : "，正在更新中"}。
+              </span>
+            </div>
+            {canExitSample ? (
+              <Btn size="sm" variant="primary" icon="check" onClick={finishSampleWorkspace}>开始处理真实数据</Btn>
+            ) : null}
+          </div>
+        )}
         <div className="topbar">
           <div className="topbar-title">
             {TITLES[active]?.label || active}
@@ -480,3 +505,14 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+function formatSampleDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

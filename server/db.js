@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildEmptyState } from "./seed.js";
+import { isStateEmptyForSample, sampleWorkspaceState } from "./sample-workspace.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -436,6 +437,32 @@ export function ensureUserState(user) {
         },
       }
     : buildEmptyState(user);
+  saveUserState(user.id, next);
+  return next;
+}
+
+export function ensureSampleUserState(user, { force = false } = {}) {
+  const current = getUserState(user.id);
+  if (current?.onboarding?.sampleDismissed && !force) return current;
+  if (current && !force && !isStateEmptyForSample(current)) return current;
+  const next = sampleWorkspaceState(user);
+  if (current?.settings) {
+    next.settings = { ...next.settings, ...current.settings };
+  }
+  if (current && force) {
+    for (const key of ["products", "demands", "research"]) {
+      const preserved = (current[key] || []).map((item) => ({ ...item, sample: true }));
+      const preservedIds = new Set(preserved.map((item) => item.id));
+      next[key] = [
+        ...preserved,
+        ...(next[key] || []).filter((item) => !preservedIds.has(item.id)),
+      ];
+    }
+    next.rssSources = [
+      ...(current.rssSources || []),
+      ...(next.rssSources || []).filter((source) => !(current.rssSources || []).some((entry) => entry.id === source.id)),
+    ];
+  }
   saveUserState(user.id, next);
   return next;
 }

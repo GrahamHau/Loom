@@ -866,6 +866,120 @@ a.platform-card-link:hover {
   color: var(--accent-text);
 }
 
+.sample-workspace-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.sample-workspace-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.sample-workspace-copy .tag {
+  flex-shrink: 0;
+}
+
+.live-sample-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.live-sample-note-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.live-sample-note-main svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+@media (max-width: 760px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 8px;
+  }
+
+  .sb-brand,
+  .sb-group-label,
+  .sb-spacer,
+  .sb-footer {
+    display: none;
+  }
+
+  .sidebar > div {
+    display: flex;
+    gap: 6px;
+  }
+
+  .sb-item {
+    flex: 0 0 auto;
+    min-height: 34px;
+    white-space: nowrap;
+  }
+
+  .main {
+    min-width: 0;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    height: auto;
+    padding: 10px 12px;
+  }
+
+  .topbar-actions {
+    margin-left: 0;
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  .page {
+    padding: 14px 12px 48px;
+  }
+
+  .sample-workspace-banner,
+  .live-sample-note {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sample-workspace-banner .btn,
+  .live-sample-note .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 /* News */
 .news-tabs {
   display: flex; gap: 4px;

@@ -42,7 +42,7 @@ describe("repository", () => {
     expect(product.name).toBe("Test Product");
     expect(product.related_product_id).toBe("p-1");
     expect(product.related_product_name).toBe("Linked Product");
-    expect(repo.rawState(legacyUserId).products).toHaveLength(1);
+    expect(repo.rawState(legacyUserId).products.filter((item) => !item.sample)).toHaveLength(1);
   });
 
   it("masks settings in bootstrap", () => {
@@ -113,8 +113,83 @@ describe("repository", () => {
     repo.createProduct(legacyUserId, { name: "Legacy Product" });
     repo.createProduct(secondUser.id, { name: "Feishu Product" });
 
-    expect(repo.rawState(legacyUserId).products.map((item) => item.name)).toEqual(["Legacy Product"]);
+    expect(repo.rawState(legacyUserId).products.filter((item) => !item.sample).map((item) => item.name)).toEqual(["Legacy Product"]);
     expect(repo.rawState(secondUser.id).products.map((item) => item.name)).toEqual(["Feishu Product"]);
+  });
+
+  it("initializes visitor with a sample workspace and live news sources", () => {
+    const visitor = repo.ensureLegacyWorkspace();
+    const state = repo.bootstrap(visitor.id);
+
+    expect(state.onboarding.sampleWorkspace).toBe(true);
+    expect(state.products.some((item) => item.sample)).toBe(true);
+    expect(state.demands.some((item) => item.sample)).toBe(true);
+    expect(state.research.some((item) => item.sample)).toBe(true);
+    expect(state.rssSources.length).toBeGreaterThan(0);
+    expect(state.rssSources.some((source) => source.source_group === "sample-live")).toBe(true);
+  });
+
+  it("filters stale news in sample workspaces", () => {
+    const visitor = repo.ensureLegacyWorkspace();
+    repo.upsertNews(visitor.id, [
+      {
+        source_id: "sample-news-google-accessory-launches",
+        source: "配件竞品新品 - Google News",
+        original_url: "https://sample.test/recent",
+        original_title: "Recent camera accessory launch",
+        titleZh: "Recent camera accessory launch",
+        type: "新品发布",
+        published_at: new Date().toISOString(),
+      },
+      {
+        source_id: "sample-news-google-accessory-launches",
+        source: "配件竞品新品 - Google News",
+        original_url: "https://sample.test/stale",
+        original_title: "Old camera accessory launch",
+        titleZh: "Old camera accessory launch",
+        type: "新品发布",
+        published_at: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    const state = repo.bootstrap(visitor.id);
+    expect(state.news.map((item) => item.original_url)).toContain("https://sample.test/recent");
+    expect(state.news.map((item) => item.original_url)).not.toContain("https://sample.test/stale");
+    expect(state.onboarding.liveNewsReady).toBe(true);
+  });
+
+  it("keeps visitor permanently in sample workspace", () => {
+    const visitor = repo.ensureLegacyWorkspace();
+    repo.finishSampleWorkspace(visitor.id);
+    const state = repo.bootstrap(visitor.id);
+
+    expect(state.onboarding.sampleWorkspace).toBe(true);
+    expect(state.onboarding.visitorOnly).toBe(true);
+    expect(state.onboarding.canExitSample).toBe(false);
+    expect(state.products.some((item) => item.sample)).toBe(true);
+  });
+
+  it("keeps old visitor seed data inside the sample workspace", () => {
+    const visitor = repo.ensureLegacyWorkspace();
+    repo.createProduct(visitor.id, { name: "Old Visitor Product" });
+
+    const nextVisitor = repo.ensureLegacyWorkspace();
+    const state = repo.bootstrap(nextVisitor.id);
+
+    expect(state.onboarding.sampleWorkspace).toBe(true);
+    expect(state.products.map((item) => item.name)).toContain("Old Visitor Product");
+    expect(state.products.every((item) => item.sample)).toBe(true);
+  });
+
+  it("lets real first-login users exit the sample workspace", () => {
+    const user = repo.ensureLocalUser({ id: "real-sample-user", name: "Real User", auth_provider: "feishu", withSampleWorkspace: true });
+    repo.finishSampleWorkspace(user.id);
+    const state = repo.bootstrap(user.id);
+
+    expect(state.onboarding.sampleWorkspace).toBe(false);
+    expect(state.products).toEqual([]);
+    expect(state.demands).toEqual([]);
+    expect(state.research).toEqual([]);
   });
 
   it("updates product relation fields", () => {

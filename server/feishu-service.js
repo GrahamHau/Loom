@@ -59,6 +59,11 @@ export async function testFeishuForUser(userId) {
   return { ok: true, tables: body.data?.items || [] };
 }
 
+export function syncableRecordsFor(kind, state, userId) {
+  return (kind === "news" ? listNews(userId).filter((item) => item.type) : (state[kind] || []))
+    .filter((item) => !item.sample);
+}
+
 function fieldValue(value) {
   if (Array.isArray(value)) return value.join(", ");
   if (value === null || value === undefined) return "";
@@ -157,7 +162,7 @@ export async function syncFeishuForUser(userId, { kinds = ["products", "demands"
 
     const synced = [];
     const result = { created: 0, updated: 0, failed: 0, errors: [] };
-    const records = kind === "news" ? listNews(userId).filter((item) => item.type) : (state[kind] || []);
+    const records = syncableRecordsFor(kind, state, userId);
     for (const item of records) {
       try {
         const fields = config.fields(item);

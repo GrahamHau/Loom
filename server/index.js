@@ -23,6 +23,7 @@ import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-ser
 import { analyzeResearch } from "./research-service.js";
 import { syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
 import { loadInitialData } from "./seed.js";
+import { isRecentSampleNews, isSampleWorkspace } from "./sample-workspace.js";
 import {
   bootstrap,
   acquireLock,
@@ -40,6 +41,7 @@ import {
   getUserIdByApiToken,
   findUserByFeishuProfile,
   findUserById,
+  finishSampleWorkspace,
   listAllUsers,
   listNews,
   listNewsSources,
@@ -71,6 +73,7 @@ const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE === "true"
 validateAuthConfig();
 ensureSeed(loadInitialData());
 const legacyUser = ensureLegacyWorkspace();
+const sampleRefreshInFlight = new Set();
 
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "2mb" }));
@@ -142,6 +145,34 @@ function sessionUserResponse(user) {
   };
 }
 
+function sampleNewsReady(userId) {
+  const state = rawState(userId);
+  if (!isSampleWorkspace(state)) return true;
+  return listNews(userId).some((item) => isRecentSampleNews(item));
+}
+
+function refreshSampleWorkspaceNews(userId, { force = false } = {}) {
+  const state = rawState(userId);
+  if (!isSampleWorkspace(state)) return;
+  if (!force && sampleNewsReady(userId)) return;
+  if (sampleRefreshInFlight.has(userId)) return;
+  sampleRefreshInFlight.add(userId);
+  setImmediate(async () => {
+    try {
+      await collectSources(userId, listNewsSources(userId));
+    } catch (error) {
+      console.error("Sample workspace news refresh failed", error);
+    } finally {
+      sampleRefreshInFlight.delete(userId);
+    }
+  });
+}
+
+function visibleNewsItems(userId) {
+  const state = rawState(userId);
+  return listNews(userId).filter((item) => !isSampleWorkspace(state) || isRecentSampleNews(item));
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "pm-copilot", time: new Date().toISOString() });
 });
@@ -158,6 +189,7 @@ app.post("/api/auth/login", (req, res) => {
   if (req.body?.username !== username || req.body?.password !== password) {
     return res.status(401).json({ error: "用户名或密码不正确" });
   }
+  refreshSampleWorkspaceNews(legacyUser.id);
   const state = bootstrap(legacyUser.id);
   const token = apiToken();
   revokeUserApiTokens(legacyUser.id);
@@ -214,6 +246,7 @@ app.get("/api/auth/feishu/callback", asyncHandler(async (req, res) => {
       feishu_tenant_key: profile.tenant_key || null,
       avatar_url: profile.avatar_url || "",
       last_login_at: new Date().toISOString(),
+      withSampleWorkspace: true,
     });
   } else {
     localUser = ensureLocalUser({
@@ -232,6 +265,7 @@ app.get("/api/auth/feishu/callback", asyncHandler(async (req, res) => {
   req.session.userId = localUser.id;
   req.session.user = buildSessionUser(sessionUserResponse(localUser), profile);
   touchUserLogin(localUser.id);
+  refreshSampleWorkspaceNews(localUser.id);
   res.redirect(safeReturnTo(returnTo));
 }));
 
@@ -248,7 +282,9 @@ app.get("/api/me", (req, res) => {
 });
 
 app.get("/api/bootstrap", requireAuth, (req, res) => {
-  res.json(bootstrap(currentUserId(req)));
+  const userId = currentUserId(req);
+  refreshSampleWorkspaceNews(userId);
+  res.json(bootstrap(userId));
 });
 
 app.get("/api/products", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).products));
@@ -331,7 +367,7 @@ app.get("/api/news", requireAuth, (req, res) => {
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
   const offset = (page - 1) * limit;
   const typeMap = { new_product: "新品发布", trend: "行业趋势" };
-  const allItems = listNews(userId).filter((item) => item.type);
+  const allItems = visibleNewsItems(userId).filter((item) => item.type);
   let items = allItems;
   if (req.query.type) items = items.filter((item) => item.type === (typeMap[req.query.type] || req.query.type));
   if (req.query.starred === "1" || req.query.starred === "true") items = items.filter((item) => item.starred);
@@ -351,7 +387,7 @@ app.get("/api/news", requireAuth, (req, res) => {
 });
 
 app.get("/api/news/:id", requireAuth, (req, res) => {
-  const item = listNews(currentUserId(req)).find((entry) => entry.id === req.params.id);
+  const item = visibleNewsItems(currentUserId(req)).find((entry) => entry.id === req.params.id);
   if (!item) return res.status(404).json({ error: "news_not_found" });
   res.json(item);
 });
@@ -372,6 +408,12 @@ app.post("/api/news/collect", requireAuth, asyncHandler(async (req, res) => {
   const userId = currentUserId(req);
   res.json(await collectSources(userId, listNewsSources(userId)));
 }));
+
+app.post("/api/onboarding/finish-sample", requireAuth, (req, res) => {
+  const userId = currentUserId(req);
+  finishSampleWorkspace(userId);
+  res.json(bootstrap(userId));
+});
 app.post("/api/news/refresh", requireAuth, asyncHandler(async (req, res) => {
   const userId = currentUserId(req);
   res.json({ message: "采集已触发，后台处理中" });
