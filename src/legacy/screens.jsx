@@ -62,6 +62,42 @@ function DemandImage({ demand, label, className = "", style }) {
   return <DemandThumb hue={demand?.thumbHue} label={label} />;
 }
 
+function demandMetricValue(value) {
+  if (value === 0 || value) return value;
+  return "—";
+}
+
+function DemandSourceCard({ demand }) {
+  const title = demand?.title || "未命名需求";
+  const author = demand?.author || demand?.username || "未知用户";
+  const stats = [
+    ["点赞", demand?.likes],
+    ["收藏", demand?.collects],
+    ["转发", demand?.shares],
+    ["评论", demand?.comments],
+  ];
+  return (
+    <div className="demand-source-card">
+      <div className="demand-source-media">
+        <DemandImage demand={demand} label={`${(demand?.source || "XHS").toUpperCase()} · SOURCE`} className="demand-thumb-media" />
+      </div>
+      <div className="demand-source-main">
+        <div className="demand-source-state">{PLATFORM_LABEL[demand?.source] || demand?.source || "来源"} · 原文采集</div>
+        <div className="demand-source-title">{title}</div>
+        <div className="demand-source-author">{author}</div>
+      </div>
+      <div className="demand-source-stats">
+        {stats.map(([label, value]) =>
+          <div className="demand-source-stat" key={label}>
+            <span>{label}</span>
+            <strong>{demandMetricValue(value)}</strong>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DeleteDemandConfirmModal({ demand, busy, onClose, onConfirm }) {
   if (!demand) return null;
   return (
@@ -1498,19 +1534,12 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
           </div>
         </div>
         <div className="drawer-body">
-          <div className="drawer-hero">
-            <DemandImage demand={demand} label={(demand.source || "").toUpperCase() + " · INSPIRATION"} className="demand-thumb-media" />
-          </div>
+          <DemandSourceCard demand={demand} />
 
           <div className="detail-section">
-            <div className="detail-section-label">标题</div>
-            <input className="ghost-input" defaultValue={demand.title} onBlur={(e) => save({ title: e.target.value })} style={{ width: "100%", fontSize: 14, fontWeight: 600 }} />
-          </div>
-
-          <div className="detail-section">
-            <div className="detail-section-label"><Icon name="sparkles" size={11} /> AI 摘要 / 原文</div>
-            <textarea className="ghost-input" defaultValue={demand.summary}
-            onBlur={(e) => save({ summary: e.target.value })}
+            <div className="detail-section-label">原文正文</div>
+            <textarea className="ghost-input" defaultValue={demand.original_content || demand.summary}
+            onBlur={(e) => save({ original_content: e.target.value, summary: e.target.value })}
             style={{ width: "100%", minHeight: 70, lineHeight: 1.6, resize: "vertical", fontSize: 12.5 }} />
           </div>
 
@@ -1742,20 +1771,12 @@ function AddDemandModal({ onClose, api, refreshData }) {
                 <Tag tone="outline">已采集 · {PLATFORM_LABEL[preview?.source] || preview?.source || "网页"}</Tag>
               </div>
 
-              <div className="drawer-hero" style={{ aspectRatio: "16/9", margin: 0 }}>
-                <DemandImage demand={preview} label={`${(preview?.source || "web").toUpperCase()} · INSPIRATION`} className="demand-thumb-media" />
-              </div>
+              <DemandSourceCard demand={preview} />
 
               <div className="detail-section">
-                <div className="detail-section-label">标题</div>
-                <input className="ghost-input" defaultValue={preview?.title || "未命名需求"}
-                  style={{ width: "100%", fontSize: 14, fontWeight: 600 }} />
-              </div>
-
-              <div className="detail-section">
-                <div className="detail-section-label"><Icon name="sparkles" size={11} /> AI 摘要 / 原文</div>
+                <div className="detail-section-label">原文正文</div>
                 <textarea className="ghost-input"
-                  defaultValue={preview?.summary || ""}
+                  defaultValue={preview?.original_content || preview?.summary || ""}
                   style={{ width: "100%", minHeight: 70, lineHeight: 1.6, fontSize: 12.5, resize: "vertical" }} />
               </div>
 

@@ -796,6 +796,26 @@
       if (cleaned.includes("万")) return Math.round((Number.parseFloat(cleaned) || 0) * 10000);
       return Number.parseInt(cleaned.replace(/[^0-9]/g, ""), 10) || 0;
     };
+    const pickShareCount = () => {
+      const selectors = [
+        ".share-count",
+        "[class*='share-wrapper'] [class*='count']",
+        "[class*='forward-wrapper'] [class*='count']",
+        "[class*='repost-wrapper'] [class*='count']",
+      ];
+      for (const selector of selectors) {
+        const value = scopedText([selector], detailRoot) || text(selector);
+        const count = parseCount(value);
+        if (count) return count;
+      }
+      const candidateNodes = Array.from((detailRoot || scopedRoot || document).querySelectorAll("span, div, button"))
+        .filter((node) => /转发|分享|分享给朋友|转发给|分享至/.test(node.textContent || ""));
+      for (const node of candidateNodes) {
+        const count = parseCount(node.textContent || "");
+        if (count) return count;
+      }
+      return 0;
+    };
     const scopedText = (selectors, root = scopedRoot) => {
       if (!root) return "";
       for (const selector of selectors) {
@@ -839,6 +859,7 @@
       content,
       likes: parseCount(scopedText(["[class*='like-wrapper'] [class*='count']", ".like-count"], detailRoot) || text("[class*='like-wrapper'] [class*='count']") || text(".like-count")),
       collects: parseCount(scopedText(["[class*='collect-wrapper'] [class*='count']", ".collect-count"], detailRoot) || text("[class*='collect-wrapper'] [class*='count']") || text(".collect-count")),
+      shares: pickShareCount(),
       comments: parseCount(scopedText(["[class*='chat-wrapper'] [class*='count']", ".comment-count"], detailRoot) || text("[class*='chat-wrapper'] [class*='count']") || text(".comment-count")),
       thumbnail_url: thumbnail,
       author: scopedText(["[class*='username']", ".author-name", "a[href*='/user/profile/']"], detailRoot) || text("[class*='username']") || text(".author-name"),

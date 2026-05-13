@@ -603,10 +603,16 @@ function buildDraft(mode, item) {
       note: cleanText(item?.note, ""),
     };
   }
+  const originalText = cleanText(item?.content || item?.original_content || item?.description || item?.summary || item?.ai_summary, "");
   return {
     title: cleanText(item?.title || item?.name, ""),
-    summary: cleanText(item?.summary || item?.ai_summary || item?.content || item?.description, ""),
-    content: cleanText(item?.content || item?.original_content || item?.description, ""),
+    summary: originalText,
+    content: originalText,
+    author: cleanText(item?.author || item?.username || item?.creator, ""),
+    likes: Number(item?.likes || 0),
+    collects: Number(item?.collects || item?.favorites || 0),
+    shares: Number(item?.shares || item?.reposts || item?.forwards || 0),
+    comments: Number(item?.comments || 0),
     innovation: cleanText(item?.innovation || item?.tags_innovation, "待分类"),
     scenarios: safeArray(item?.scenarios),
     painpoints: safeArray(item?.painpoints),
@@ -772,19 +778,27 @@ function relationPickerView() {
 }
 
 function demandView(item) {
+  const originalText = item.content || item.original_content || item.summary || "";
   return `
-    <div class="cl-detail-head-card">
-      <div class="cl-detail-head-main">
-        <input class="ghost-input cl-detail-title-input" data-key="title" value="${escapeAttr(item.title || "")}" placeholder="填入标题">
-        <div class="cl-state"><span class="dot"></span>小红书 · 需求采集</div>
+    <div class="source-capture-card">
+      <div class="source-card-media">
+        ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="">` : `<div class="ph">XHS<br>IMG</div>`}
       </div>
-      <div class="cl-preview-cover">
-        ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<div class="ph">INSPIRATION<br>IMG</div>`}
+      <div class="source-capture-main">
+        <div class="source-card-state"><span class="dot"></span>小红书 · 原文采集</div>
+        <div class="source-title-text">${escapeHtml(item.title || "未命名笔记")}</div>
+        <div class="source-author">${escapeHtml(item.author || "未知用户")}</div>
+      </div>
+      <div class="source-metrics">
+        ${sourceMetric("点赞", item.likes)}
+        ${sourceMetric("收藏", item.collects)}
+        ${sourceMetric("转发", item.shares)}
+        ${sourceMetric("评论", item.comments)}
       </div>
     </div>
     <div class="cl-section">
-      <div class="cl-section-label">AI 摘要 / 原文</div>
-      <textarea class="ghost-input full" data-key="summary" placeholder="补充摘要或原文">${escapeHtml(item.summary || "")}</textarea>
+      <div class="cl-section-label">原文正文</div>
+      <textarea class="ghost-input full source-content-input" data-key="content" placeholder="采集到的原文正文">${escapeHtml(originalText)}</textarea>
     </div>
     <div class="cl-section">
       <div class="cl-section-label">创新类型 · 多选</div>
@@ -814,6 +828,16 @@ function demandView(item) {
     <div class="cl-section">
       <div class="cl-section-label">来源链接</div>
       <div class="source-link mono">${escapeHtml(item.url || state.page?.data?.url || "")}</div>
+    </div>
+  `;
+}
+
+function sourceMetric(label, value) {
+  const display = value === 0 || value ? value : "—";
+  return `
+    <div class="source-metric">
+      <span class="source-metric-label">${escapeHtml(label)}</span>
+      <span class="source-metric-value">${escapeHtml(display)}</span>
     </div>
   `;
 }
@@ -1038,8 +1062,13 @@ function demandPayload(item) {
     url: item.url || state.page.data.url,
     source: state.page.platform,
     source_platform: state.page.platform,
-    summary: item.summary || "",
-    original_content: item.content || item.original_content || item.description || state.page?.data?.content || "",
+    summary: item.summary || item.content || item.original_content || "",
+    original_content: item.content || item.original_content || item.summary || item.description || state.page?.data?.content || "",
+    author: item.author || "",
+    likes: Number(item.likes || 0),
+    collects: Number(item.collects || 0),
+    shares: Number(item.shares || 0),
+    comments: Number(item.comments || 0),
     scenarios: safeArray(item.scenarios),
     painpoints: safeArray(item.painpoints),
     innovation: item.innovation || "待分类",

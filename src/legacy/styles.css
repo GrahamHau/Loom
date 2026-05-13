@@ -1175,6 +1175,81 @@ a.platform-card-link:hover {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;}
 .demand-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .demand-foot { display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; color: var(--text-4); margin-top: auto; padding-top: 4px; border-top: 1px dashed var(--border);}
+.demand-source-card {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.demand-source-media {
+  width: 88px;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--surface-3);
+  grid-row: 1 / span 2;
+}
+.demand-source-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.demand-source-state {
+  font-size: 10.5px;
+  color: var(--text-4);
+}
+.demand-source-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.demand-source-author {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.demand-source-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  grid-column: 1 / -1;
+  align-self: end;
+}
+.demand-source-stat {
+  min-width: 0;
+  padding: 7px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+}
+.demand-source-stat span {
+  display: block;
+  font-size: 10px;
+  color: var(--text-4);
+  line-height: 1.1;
+}
+.demand-source-stat strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .demand-list-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius);

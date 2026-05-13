@@ -201,7 +201,7 @@ ${searchContext}`,
     source_platform: page.platform,
     thumbnail_url: page.image || "",
     title: result.title || page.title || "未命名需求",
-    summary: result.summary || page.description || "",
+    summary: page.content || page.description || result.summary || "",
     original_content: page.content.slice(0, 2000),
     innovation: result.tags_innovation || "待分类",
     scenarios: compactArray(result.tags_scenario),
@@ -248,7 +248,7 @@ export async function parseDemandRaw(userId, { platform, data }) {
 URL：${source.url || ""}
 标题：${source.title || source.name || ""}
 作者：${source.author || source.brand || ""}
-互动：点赞 ${source.likes || 0}，收藏 ${source.collects || 0}，评论 ${source.comments || 0}
+互动：点赞 ${source.likes || 0}，收藏 ${source.collects || 0}，转发 ${source.shares || 0}，评论 ${source.comments || 0}
 内容：${source.content || source.description || ""}`,
     maxTokens: 240,
   });
@@ -257,7 +257,8 @@ URL：${source.url || ""}
     ...source,
     platform,
     title: source.title || source.name || result.title || "未命名需求",
-    summary: result.summary || source.content || source.description || "",
+    summary: source.content || source.description || result.summary || "",
+    original_content: source.content || source.description || source.summary || "",
     tags_scenario: compactArray(result.tags_scenario),
     tags_painpoint: compactArray(result.tags_painpoint),
     tags_innovation: result.tags_innovation || "待分类",
@@ -266,6 +267,11 @@ URL：${source.url || ""}
     thumbnail_url: source.thumbnail_url || "",
     source: source.source || platform,
     source_platform: source.source_platform || platform,
+    author: source.author || "",
+    likes: safeNumber(source.likes) || 0,
+    collects: safeNumber(source.collects) || 0,
+    shares: safeNumber(source.shares) || 0,
+    comments: safeNumber(source.comments) || 0,
     date: source.date || new Date().toISOString().slice(0, 10),
     thumbHue: source.thumbHue ?? 180,
   };
