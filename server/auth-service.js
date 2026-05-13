@@ -48,6 +48,8 @@ export function getFeishuOauthConfig() {
   const appId = String(process.env.FEISHU_OAUTH_APP_ID || "").trim();
   const appSecret = String(process.env.FEISHU_OAUTH_APP_SECRET || "").trim();
   const redirectUri = String(process.env.FEISHU_OAUTH_REDIRECT_URI || "").trim();
+  const allowedEmailDomains = splitEnvList(process.env.FEISHU_OAUTH_ALLOWED_EMAIL_DOMAINS)
+    .map((item) => item.toLowerCase().replace(/^@/, ""));
   return {
     appId,
     appSecret,
@@ -57,6 +59,7 @@ export function getFeishuOauthConfig() {
     allowedOpenIds: splitEnvList(process.env.FEISHU_OAUTH_ALLOWED_OPEN_IDS),
     allowedUnionIds: splitEnvList(process.env.FEISHU_OAUTH_ALLOWED_UNION_IDS),
     allowedEmails: splitEnvList(process.env.FEISHU_OAUTH_ALLOWED_EMAILS).map((item) => item.toLowerCase()),
+    allowedEmailDomains,
     allowedTenantKeys: splitEnvList(process.env.FEISHU_OAUTH_ALLOWED_TENANT_KEYS),
   };
 }
@@ -65,6 +68,13 @@ export function requireFeishuOauthConfig() {
   const config = getFeishuOauthConfig();
   if (!config.enabled) {
     throw new AppError(400, "feishu_oauth_not_configured", "飞书登录尚未配置，请先补充 App ID、App Secret 和回调地址。");
+  }
+  if (process.env.NODE_ENV === "production" && config.autoProvision && !hasConfiguredAllowList(config)) {
+    throw new AppError(
+      500,
+      "feishu_oauth_allowlist_required",
+      "飞书登录已开启自动注册，但线上环境尚未配置公司范围校验。请配置 Tenant Key、邮箱域名或允许名单。"
+    );
   }
   return config;
 }
@@ -92,18 +102,54 @@ async function feishuOauthFetch(path, options = {}) {
   return body;
 }
 
-export async function exchangeFeishuCode(code) {
+export async function getFeishuAppAccessToken() {
   const config = requireFeishuOauthConfig();
-  const body = await feishuOauthFetch("/authen/v1/access_token", {
+  const body = await feishuOauthFetch("/auth/v3/app_access_token/internal", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      grant_type: "authorization_code",
-      code,
       app_id: config.appId,
       app_secret: config.appSecret,
     }),
   });
+  return body.app_access_token || body.data?.app_access_token || "";
+}
+
+export async function exchangeFeishuCode(code) {
+  const config = requireFeishuOauthConfig();
+  const appAccessToken = await getFeishuAppAccessToken();
+  if (!appAccessToken) {
+    throw new AppError(502, "feishu_app_access_token_missing", "飞书应用凭证换取失败，请检查 App ID 和 App Secret。");
+  }
+  let body;
+  try {
+    body = await feishuOauthFetch("/authen/v1/access_token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${appAccessToken}`,
+      },
+      body: JSON.stringify({
+        grant_type: "authorization_code",
+        code,
+      }),
+    });
+  } catch (error) {
+    if (error instanceof AppError && error.status < 500) {
+      body = await feishuOauthFetch("/authen/v1/access_token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code,
+          app_id: config.appId,
+          app_secret: config.appSecret,
+        }),
+      });
+    } else {
+      throw error;
+    }
+  }
   return body.data || body;
 }
 
@@ -118,6 +164,7 @@ function hasConfiguredAllowList(config) {
   return config.allowedOpenIds.length > 0 ||
     config.allowedUnionIds.length > 0 ||
     config.allowedEmails.length > 0 ||
+    config.allowedEmailDomains.length > 0 ||
     config.allowedTenantKeys.length > 0;
 }
 
@@ -129,6 +176,13 @@ export function isFeishuUserAllowed(profile) {
   if (config.allowedEmails.length > 0) {
     const emails = [profile.email, profile.enterprise_email].map((item) => String(item || "").toLowerCase()).filter(Boolean);
     if (!emails.some((item) => config.allowedEmails.includes(item))) return false;
+  }
+  if (config.allowedEmailDomains.length > 0) {
+    const emails = [profile.email, profile.enterprise_email].map((item) => String(item || "").toLowerCase()).filter(Boolean);
+    if (!emails.some((item) => {
+      const domain = item.split("@")[1] || "";
+      return config.allowedEmailDomains.includes(domain);
+    })) return false;
   }
   if (config.allowedTenantKeys.length > 0 && !config.allowedTenantKeys.includes(String(profile.tenant_key || ""))) return false;
   return true;

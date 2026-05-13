@@ -58,12 +58,14 @@ FEISHU_OAUTH_APP_SECRET=
 FEISHU_OAUTH_REDIRECT_URI=https://your-domain.com/api/auth/feishu/callback
 FEISHU_OAUTH_AUTO_PROVISION=true
 FEISHU_OAUTH_ALLOWED_TENANT_KEYS=cli_xxx
+FEISHU_OAUTH_ALLOWED_EMAIL_DOMAINS=your-company.com
 ```
 
 Notes:
 
 - `FEISHU_OAUTH_ALLOWED_TENANT_KEYS` is the recommended company boundary for online deployment.
-- You can also narrow access with `FEISHU_OAUTH_ALLOWED_EMAILS`, `FEISHU_OAUTH_ALLOWED_OPEN_IDS`, or `FEISHU_OAUTH_ALLOWED_UNION_IDS`.
+- You can also narrow access with `FEISHU_OAUTH_ALLOWED_EMAIL_DOMAINS`, `FEISHU_OAUTH_ALLOWED_EMAILS`, `FEISHU_OAUTH_ALLOWED_OPEN_IDS`, or `FEISHU_OAUTH_ALLOWED_UNION_IDS`.
+- In production, auto-provisioned Feishu login requires at least one company boundary setting so outside Feishu users cannot self-register.
 - When a company member passes validation for the first time, the server will create their local account and initialize an isolated workspace automatically.
 
 ## Checks
