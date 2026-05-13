@@ -84,7 +84,7 @@ async function fetchPageResponse(url) {
     const response = await fetch(parsed.toString(), {
       signal: controller.signal,
       headers: {
-        "User-Agent": "Mozilla/5.0 PM-Copilot/0.1 (+https://github.com/GrahamHau/PM-Copilot)",
+        "User-Agent": "Mozilla/5.0 Loom/0.1 (+https://github.com/GrahamHau/Loom)",
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
       redirect: "follow",
@@ -113,6 +113,29 @@ export async function fetchPageHtml(url) {
   };
 }
 
+function extractImageFromHtml(html, pageUrl) {
+  return resolveAssetUrl(firstMatch(html, [
+    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+name=["']twitter:image:src["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+itemprop=["']image["'][^>]+content=["']([^"']+)["']/i,
+    /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i,
+    /"og:image"[^>]*content=["']([^"']+)["']/i,
+    /"image"\s*:\s*"([^"]+)"/i,
+    /"images"\s*:\s*\[\s*"([^"]+)"/i,
+    /"imageList"\s*:\s*\[\s*"([^"]+)"/i,
+  ]), pageUrl);
+}
+
+export async function fetchPageImage(url) {
+  const { parsed, response, html } = await fetchPageResponse(url);
+  const pageUrl = response.url || parsed.toString();
+  return {
+    url: pageUrl,
+    image: extractImageFromHtml(html, pageUrl),
+  };
+}
+
 export async function fetchPageContent(url) {
   try {
     const { parsed, response, html } = await fetchPageResponse(url);
@@ -126,17 +149,7 @@ export async function fetchPageContent(url) {
       /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
       /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i,
     ]);
-    const image = resolveAssetUrl(firstMatch(html, [
-      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+name=["']twitter:image:src["'][^>]+content=["']([^"']+)["']/i,
-      /<meta[^>]+itemprop=["']image["'][^>]+content=["']([^"']+)["']/i,
-      /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i,
-      /"og:image"[^>]*content=["']([^"']+)["']/i,
-      /"image"\s*:\s*"([^"]+)"/i,
-      /"images"\s*:\s*\[\s*"([^"]+)"/i,
-      /"imageList"\s*:\s*\[\s*"([^"]+)"/i,
-    ]), pageUrl);
+    const image = extractImageFromHtml(html, pageUrl);
     const text = cleanHtml(html);
     return {
       url: pageUrl,

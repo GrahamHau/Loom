@@ -65,6 +65,24 @@ describe("repository", () => {
     expect(repo.listNews(legacyUserId).find((item) => item.original_url === "https://a.test/1")?.titleZh).toBe("A");
   });
 
+  it("updates missing thumbnail on existing news during upsert", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/with-image", titleZh: "A", type: "行业趋势", date: "2026-05-10" }]);
+    const result = repo.upsertNews(legacyUserId, [{
+      source_id: "s1",
+      source: "S",
+      original_url: "https://a.test/with-image",
+      titleZh: "A",
+      type: "行业趋势",
+      thumbnail_url: "https://cdn.test/a.jpg",
+      classification: { image_enriched: true },
+      date: "2026-05-10",
+    }]);
+
+    expect(result.updated).toHaveLength(1);
+    expect(repo.listNews(legacyUserId).find((item) => item.original_url === "https://a.test/with-image")?.thumbnail_url).toBe("https://cdn.test/a.jpg");
+  });
+
   it("dedupes by original url per user", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     const secondUser = repo.ensureLocalUser({ id: "user-b", name: "User B", auth_provider: "feishu" });

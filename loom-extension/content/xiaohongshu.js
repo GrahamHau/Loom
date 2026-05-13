@@ -1,6 +1,6 @@
 (function registerXhsExtractor() {
-  window.__pmcopilot_extractors = window.__pmcopilot_extractors || {};
-  window.__pmcopilot_extractors.xiaohongshu = function extractXhs() {
+  window.__loom_extractors = window.__loom_extractors || {};
+  window.__loom_extractors.xiaohongshu = function extractXhs() {
     const text = (selector) => document.querySelector(selector)?.textContent?.trim() || "";
     const first = (selectors, root = document) => {
       for (const selector of selectors) {
@@ -832,7 +832,7 @@
       thumbnail_source: thumbnailResult.source,
       ...thumbnailResult.debug,
     };
-    window.__pmcopilot_xhs_debug = debug;
+    window.__loom_xhs_debug = debug;
 
     return {
       title,

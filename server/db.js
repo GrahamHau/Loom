@@ -8,7 +8,9 @@ import { isStateEmptyForSample, sampleWorkspaceState } from "./sample-workspace.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const dataDir = process.env.DATA_DIR || path.join(projectRoot, "data");
-const dbPath = process.env.DATABASE_PATH || path.join(dataDir, "pm-copilot.sqlite");
+const defaultDbPath = path.join(dataDir, "loom.sqlite");
+const legacyDbPath = path.join(dataDir, "pm-copilot.sqlite");
+const dbPath = process.env.DATABASE_PATH || (fs.existsSync(legacyDbPath) ? legacyDbPath : defaultDbPath);
 
 export const LEGACY_USER_ID = "legacy-default";
 

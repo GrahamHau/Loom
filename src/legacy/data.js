@@ -1,4 +1,4 @@
-// PM Copilot — seed data (photo/video gear domain)
+// Loom — seed data (photo/video gear domain)
 window.PMC_DATA = {
   user: { name: "visitor", role: "产品经理", initials: "VI" },
 

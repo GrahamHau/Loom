@@ -20,7 +20,7 @@ export function getPasswordAuthConfig() {
 export function validateAuthConfig() {
   if (process.env.NODE_ENV !== "production") return;
   const missing = [];
-  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === "pm-copilot-dev-secret-change-me") {
+  if (!process.env.SESSION_SECRET || ["pm-copilot-dev-secret-change-me", "loom-dev-secret-change-me"].includes(process.env.SESSION_SECRET)) {
     missing.push("SESSION_SECRET");
   }
   if (!process.env.APP_USERNAME || process.env.APP_USERNAME === "visitor") {

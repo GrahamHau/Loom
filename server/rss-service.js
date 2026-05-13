@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 import { callLLM } from "./ai-service.js";
+import { fetchPageImage } from "./content-fetcher.js";
 import { listPendingNewsForLlm, updateNews, upsertNews, updateNewsSource } from "./repository.js";
 
 const parser = new Parser({
@@ -8,6 +9,7 @@ const parser = new Parser({
     item: [
       ["media:content", "mediaContent"],
       ["media:thumbnail", "mediaThumbnail"],
+      ["content:encoded", "contentEncoded"],
       ["enclosure", "enclosure"],
     ],
   },
@@ -46,6 +48,7 @@ const NEWS_LLM_SYSTEM_PROMPT = `你是一个信息筛选助手，服务于摄影
 const NEWS_LLM_INPUT_LIMIT = 700;
 const NEWS_LLM_MAX_TOKENS = 120;
 const FETCH_TIMEOUT_MS = 30000;
+const OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE = Number(process.env.OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE || 12);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -75,13 +78,24 @@ function stripHtml(value) {
   return String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function arrayFirst(value) {
+  return Array.isArray(value) ? value.find(Boolean) : value;
+}
+
 function extractThumbnail(item) {
-  const direct = item.enclosure?.url || item.mediaContent?.$?.url || item.mediaThumbnail?.$?.url;
+  const mediaContent = arrayFirst(item.mediaContent);
+  const mediaThumbnail = arrayFirst(item.mediaThumbnail);
+  const enclosure = arrayFirst(item.enclosure);
+  const direct = enclosure?.url || mediaContent?.$?.url || mediaContent?.url || mediaThumbnail?.$?.url || mediaThumbnail?.url;
   if (direct) return direct;
-  const html = String(item.content || item.summary || "");
+  const html = String(item.content || item.contentEncoded || item.summary || "");
   const meta = html.match(/<meta\s+[^>]*(?:property|name)=["'](?:og:image|twitter:image|twitter:image:src)["'][^>]*content=["']([^"']+)["']/i)?.[1];
   if (meta) return meta;
-  return html.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1] || "";
+  return html.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["']/i)?.[1] || "";
+}
+
+export function extractRssThumbnail(item) {
+  return extractThumbnail(item);
 }
 
 function publishedAtOf(item) {
@@ -182,6 +196,49 @@ async function fetchFeed(source) {
   return parser.parseString(await response.text());
 }
 
+function isOfficialManagedSource(source = {}) {
+  const authority = String(source.authority || "").toLowerCase();
+  const group = String(source.source_group || source.group || "").toLowerCase();
+  const id = String(source.id || "").toLowerCase();
+  return authority === "official" ||
+    authority === "aggregator" ||
+    group === "sample-live" ||
+    id.startsWith("rss-") ||
+    id.startsWith("sample-news-");
+}
+
+export function shouldEnrichSourceImages(source) {
+  return isOfficialManagedSource(source);
+}
+
+async function enrichOfficialImages(source, newsItems) {
+  if (!isOfficialManagedSource(source)) return newsItems;
+  let remaining = Math.max(0, OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE);
+  for (const item of newsItems) {
+    if (item.thumbnail_url || remaining <= 0) continue;
+    remaining -= 1;
+    try {
+      const page = await fetchPageImage(item.original_url);
+      if (page.image) {
+        item.thumbnail_url = page.image;
+        item.classification = {
+          ...(item.classification || {}),
+          image_enriched: true,
+          image_source: "page_meta",
+        };
+      }
+      await sleep(250);
+    } catch (error) {
+      item.classification = {
+        ...(item.classification || {}),
+        image_enriched: false,
+        image_error: error.message || "image_fetch_failed",
+      };
+    }
+  }
+  return newsItems;
+}
+
 export async function collectSource(userId, source) {
   const feed = await fetchFeed(source);
   const items = [...(feed.items || [])]
@@ -211,6 +268,7 @@ export async function collectSource(userId, source) {
     });
   }
 
+  await enrichOfficialImages(source, newsItems);
   const result = upsertNews(userId, newsItems);
   updateNewsSource(userId, source.id, {
     last_fetched_at: new Date().toISOString(),

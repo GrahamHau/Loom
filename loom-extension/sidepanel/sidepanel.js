@@ -1,8 +1,15 @@
-const API_BASE_KEY = "pmcopilot_api_base";
-const TOKEN_KEY = "pmcopilot_token";
-const USER_KEY = "pmcopilot_user";
-const DEFAULT_MODE_KEY = "pmcopilot_default_mode";
-const AI_BEFORE_SAVE_KEY = "pmcopilot_ai_before_save";
+const API_BASE_KEY = "loom_api_base";
+const TOKEN_KEY = "loom_token";
+const USER_KEY = "loom_user";
+const DEFAULT_MODE_KEY = "loom_default_mode";
+const AI_BEFORE_SAVE_KEY = "loom_ai_before_save";
+const LEGACY_KEY_MAP = {
+  pmcopilot_api_base: API_BASE_KEY,
+  pmcopilot_token: TOKEN_KEY,
+  pmcopilot_user: USER_KEY,
+  pmcopilot_default_mode: DEFAULT_MODE_KEY,
+  pmcopilot_ai_before_save: AI_BEFORE_SAVE_KEY,
+};
 
 const PRODUCT_PLATFORMS = new Set(["amazon", "taobao", "kickstarter"]);
 const DEMAND_PLATFORMS = new Set(["xiaohongshu"]);
@@ -57,7 +64,7 @@ document.addEventListener("DOMContentLoaded", init);
 document.addEventListener("click", handleGlobalClick);
 
 async function init() {
-  const stored = await chrome.storage.local.get([API_BASE_KEY, TOKEN_KEY, USER_KEY, DEFAULT_MODE_KEY, AI_BEFORE_SAVE_KEY]);
+  const stored = await getStoredSettings();
   state.apiBase = (stored[API_BASE_KEY] || "https://ulanzi-copilot.my1panelsite.xyz").replace(/\/$/, "");
   state.token = stored[TOKEN_KEY] || "";
   state.user = stored[USER_KEY] || null;
@@ -71,6 +78,17 @@ async function init() {
   renderLoading("正在读取当前页面");
   bindAutoSync();
   await loadCurrentPage(stored[DEFAULT_MODE_KEY] || "auto");
+}
+
+async function getStoredSettings() {
+  const keys = [API_BASE_KEY, TOKEN_KEY, USER_KEY, DEFAULT_MODE_KEY, AI_BEFORE_SAVE_KEY, ...Object.keys(LEGACY_KEY_MAP)];
+  const stored = await chrome.storage.local.get(keys);
+  const migrated = {};
+  for (const [legacyKey, loomKey] of Object.entries(LEGACY_KEY_MAP)) {
+    if (stored[loomKey] === undefined && stored[legacyKey] !== undefined) migrated[loomKey] = stored[legacyKey];
+  }
+  if (Object.keys(migrated).length) await chrome.storage.local.set(migrated);
+  return { ...stored, ...migrated };
 }
 
 async function loadCurrentPage(defaultMode = "auto") {
@@ -112,7 +130,7 @@ async function readPageData(tab) {
         files: ["content/detector.js", EXTRACTOR_FILES[platform]],
       });
     }
-    return await chrome.tabs.sendMessage(tab.id, { type: "PM_COPILOT_GET_PAGE_DATA" });
+    return await chrome.tabs.sendMessage(tab.id, { type: "LOOM_GET_PAGE_DATA" });
   } catch (error) {
     if (!String(error.message || "").includes("Receiving end does not exist")) throw error;
     if (!platform) throw new Error("当前页面不在插件支持范围内");
@@ -120,7 +138,7 @@ async function readPageData(tab) {
       target: { tabId: tab.id },
       files: ["content/detector.js", EXTRACTOR_FILES[platform]],
     });
-    return chrome.tabs.sendMessage(tab.id, { type: "PM_COPILOT_GET_PAGE_DATA" });
+    return chrome.tabs.sendMessage(tab.id, { type: "LOOM_GET_PAGE_DATA" });
   }
 }
 
@@ -379,14 +397,7 @@ function renderLogin() {
 function renderLoading(text) {
   document.getElementById("app").innerHTML = `
     <div class="shell">
-      ${headerHtml()}
-      <div class="cl-banner detecting">
-        <div class="cl-banner-ico">${spinIcon()}</div>
-        <div class="cl-banner-body">
-          <div class="cl-banner-title">${escapeHtml(text)}</div>
-          <div class="cl-banner-sub mono">${escapeHtml(state.tab?.url || state.page?.data?.url || "")}</div>
-        </div>
-      </div>
+      ${headerHtml({ title: text, loading: true })}
       <div class="cl-body">
         <div class="ai-parse">
           <div class="ai-parse-head">
@@ -427,14 +438,7 @@ function renderLoading(text) {
 function renderUnsupported(reason) {
   document.getElementById("app").innerHTML = `
     <div class="shell">
-      ${headerHtml()}
-      <div class="cl-banner banner-warn">
-        <div class="cl-banner-ico warn">${warnIcon()}</div>
-        <div class="cl-banner-body">
-          <div class="cl-banner-title">当前页面无法采集</div>
-          <div class="cl-banner-sub mono">${escapeHtml(reason)}</div>
-        </div>
-      </div>
+      ${headerHtml({ title: "当前页面无法采集", warning: true })}
       <div class="cl-body cl-unsupported-body">
         <div class="cl-unsupported">
           <div class="cl-unsupported-title">未识别为支持的平台</div>
@@ -468,16 +472,10 @@ function renderMain() {
   const canDemand = DEMAND_PLATFORMS.has(platform) || platform === "kickstarter";
   document.getElementById("app").innerHTML = `
     <div class="shell">
-      ${headerHtml()}
+      ${headerHtml({ platform, mode: state.mode, loading: state.reloading })}
       <div class="cl-top-actions">
         <button class="btn top-action" id="save-top" ${state.busy ? "disabled" : ""}>保存</button>
         <button class="btn top-action" id="process-top" ${state.busy ? "disabled" : ""}>${state.busy ? "处理中..." : "AI 整理"}</button>
-      </div>
-      <div class="cl-banner ${bannerClass(platform)}">
-        ${state.reloading ? `<div class="cl-banner-ico">${spinIcon()}</div>` : bannerIcon(platform)}
-      <div class="cl-banner-body">
-        <div class="cl-banner-title">${escapeHtml(PLATFORM_LABELS[platform] || platform)} · ${state.mode === "product" ? "竞品采集" : "需求采集"}</div>
-      </div>
       </div>
 
       <nav class="cl-tabs">
@@ -493,7 +491,7 @@ function renderMain() {
 
       <div class="cl-foot${state.mode === "product" && isCommercePlatform(platform) ? " with-relation" : ""}">
         <button class="btn ghost grow" id="refresh-bottom" type="button">重新抓取</button>
-        ${state.mode === "product" && isCommercePlatform(platform) ? `<button class="btn primary grow" id="open-relation" type="button">${item.related_product_name ? "重新关联" : "关联"}</button>` : ""}
+        ${state.mode === "product" && isCommercePlatform(platform) ? `<button class="btn primary grow" id="open-relation" type="button">${item.related_product_name ? "重新关联" : "关联同一产品"}</button>` : ""}
       </div>
       ${state.relationPickerOpen ? `<div class="relation-layer">${relationPickerView()}</div>` : ""}
     </div>`;
@@ -602,6 +600,7 @@ function buildDraft(mode, item) {
       platforms: safeArray(item?.platforms),
       related_product_id: cleanText(item?.related_product_id, ""),
       related_product_name: cleanText(item?.related_product_name, ""),
+      note: cleanText(item?.note, ""),
     };
   }
   return {
@@ -673,18 +672,16 @@ function pickRelation(productId) {
 }
 
 function productView(item) {
+  const listingBullets = safeArray(state.processed?.raw_bullets || state.processed?.listing_bullets || state.page?.data?.raw_bullets || state.page?.data?.listing_bullets);
+  const mergedSellingPoints = safeArray(item.selling_points).length ? safeArray(item.selling_points) : listingBullets;
   return `
     <div class="cl-detail-head-card">
-      <div class="cl-preview-cover">
-        ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<div class="ph">PRODUCT<br>IMG</div>`}
-      </div>
       <div class="cl-detail-head-main">
         <input class="ghost-input cl-detail-title-input" data-key="name" value="${escapeAttr(item.name || "")}" placeholder="填入商品名">
-        <div class="cl-detail-meta">${escapeHtml(item.category || "未分类")} · 跟踪中</div>
-        <div class="cl-preview-platform">
-          <span class="platform-pill ${platformClass(state.page.platform)}">${PLATFORM_LABELS[state.page.platform] || state.page.platform}</span>
-          ${showMarketplaceRating(state.page.platform) ? `<span class="rating-mini">${item.rating ? `<span class="rating-star">★</span>${escapeHtml(item.rating)}` : ""}${item.review_count ? ` <span class="muted">· ${escapeHtml(item.review_count)}</span>` : ""}</span>` : ""}
-        </div>
+        <div class="cl-state"><span class="dot"></span>${escapeHtml(PLATFORM_LABELS[state.page.platform] || state.page.platform)} · ${state.mode === "product" ? "竞品采集" : "需求采集"}</div>
+      </div>
+      <div class="cl-preview-cover">
+        ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<div class="ph">PRODUCT<br>IMG</div>`}
       </div>
     </div>
     <div class="cl-section">
@@ -703,11 +700,15 @@ function productView(item) {
     </div>
     <div class="cl-section">
       <div class="cl-section-label">核心卖点 · AI 总结</div>
-      ${listEditor("selling_points", safeArray(item.selling_points), "输入卖点，回车添加", "success")}
+      ${listEditor("selling_points", mergedSellingPoints, "输入卖点，回车添加", "success")}
     </div>
     <div class="cl-section">
       <div class="cl-section-label">AI 摘要</div>
       <textarea class="ghost-input ai-summary-input" data-key="ai_summary" placeholder="可补充或修改摘要">${escapeHtml(item.ai_summary || "")}</textarea>
+    </div>
+    <div class="cl-section">
+      <div class="cl-section-label">备注</div>
+      <textarea class="ghost-input full" data-key="note" placeholder="可选备注">${escapeHtml(item.note || "")}</textarea>
     </div>
   `;
 }
@@ -772,20 +773,18 @@ function relationPickerView() {
 
 function demandView(item) {
   return `
-    <div class="cl-hero hero-30">
-      ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : ""}
-    </div>
-    <div class="cl-section">
-      <div class="cl-section-label">标题</div>
-      <input class="ghost-input full title" data-key="title" value="${escapeAttr(item.title || "")}" placeholder="填入标题">
+    <div class="cl-detail-head-card">
+      <div class="cl-detail-head-main">
+        <input class="ghost-input cl-detail-title-input" data-key="title" value="${escapeAttr(item.title || "")}" placeholder="填入标题">
+        <div class="cl-state"><span class="dot"></span>小红书 · 需求采集</div>
+      </div>
+      <div class="cl-preview-cover">
+        ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<div class="ph">INSPIRATION<br>IMG</div>`}
+      </div>
     </div>
     <div class="cl-section">
       <div class="cl-section-label">AI 摘要 / 原文</div>
       <textarea class="ghost-input full" data-key="summary" placeholder="补充摘要或原文">${escapeHtml(item.summary || "")}</textarea>
-    </div>
-    <div class="cl-section">
-      <div class="cl-section-label">首图 URL</div>
-      <input class="ghost-input full mono" data-key="thumbnail_url" value="${escapeAttr(item.thumbnail_url || "")}" placeholder="未采到时可手动粘贴首图链接">
     </div>
     <div class="cl-section">
       <div class="cl-section-label">创新类型 · 多选</div>
@@ -809,17 +808,12 @@ function demandView(item) {
       </div>
     </div>
     <div class="cl-section">
-      <div class="cl-section-label">来源链接</div>
-      <div class="source-link mono">${escapeHtml(item.url || state.page?.data?.url || "")}</div>
-    </div>
-    ${item.debug ? `
-    <div class="cl-section">
-      <div class="cl-section-label">调试信息</div>
-      <div class="source-link mono">${escapeHtml(JSON.stringify(item.debug, null, 2))}</div>
-    </div>` : ""}
-    <div class="cl-section">
       <div class="cl-section-label">备注</div>
       <textarea class="ghost-input full" data-key="note" placeholder="可选备注">${escapeHtml(item.note || "")}</textarea>
+    </div>
+    <div class="cl-section">
+      <div class="cl-section-label">来源链接</div>
+      <div class="source-link mono">${escapeHtml(item.url || state.page?.data?.url || "")}</div>
     </div>
   `;
 }
@@ -1032,6 +1026,7 @@ function productPayload(item) {
     }],
     related_product_id: item.related_product_id || "",
     related_product_name: item.related_product_name || "",
+    note: item.note || "",
   };
 }
 
@@ -1049,6 +1044,7 @@ function demandPayload(item) {
     painpoints: safeArray(item.painpoints),
     innovation: item.innovation || "待分类",
     thumbnail_url: item.thumbnail_url || item.image || "",
+    note: item.note || "",
     import_method: "chrome_extension",
   };
 }
@@ -1092,16 +1088,24 @@ function renderSuccess(payload) {
   document.getElementById("open-web").onclick = () => chrome.tabs.create({ url: state.apiBase });
 }
 
-function headerHtml() {
-  const name = state.user?.username || state.user?.name || "Graham";
+function headerHtml(options = {}) {
+  const { platform, mode, title, loading = false, warning = false } = options;
+  const statusTitle = title || `${PLATFORM_LABELS[platform] || platform || "LOOM"} · ${mode === "demand" ? "需求采集" : "竞品采集"}`;
+  const hasCaptureStatus = Boolean(platform || title || loading || warning);
   return `
     <div class="cl-top">
-      <div class="cl-brand">
-        <div>
-          <div class="cl-name">LOOM</div>
-          <div class="cl-conn"><span class="dot dot-ok"></span>已连接 · ${escapeHtml(name)}</div>
+      ${hasCaptureStatus ? `
+        <div class="cl-capture-status">
+          ${loading ? `<span class="cl-top-status-ico">${spinIcon()}</span>` : warning ? `<span class="cl-top-status-ico warn">${warnIcon()}</span>` : bannerIcon(platform)}
+          <span class="cl-top-status-title">${escapeHtml(statusTitle)}</span>
         </div>
-      </div>
+      ` : `
+        <div class="cl-brand">
+          <div>
+            <div class="cl-name">LOOM</div>
+          </div>
+        </div>
+      `}
       ${state.page ? `<button class="ico-btn" id="header-reload" aria-label="刷新">${refreshIcon()}</button>` : ""}
       <button class="ico-btn" id="open-options" aria-label="设置">${settingsIcon()}</button>
     </div>`;

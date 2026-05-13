@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 process.env.DATABASE_PATH = ":memory:";
 
-const { heuristicClassifyNews, shouldCollectSource } = await import("./rss-service.js");
+const { extractRssThumbnail, heuristicClassifyNews, shouldCollectSource, shouldEnrichSourceImages } = await import("./rss-service.js");
 
 describe("rss-service classification", () => {
   it("keeps official product launches as product news", () => {
@@ -90,5 +90,16 @@ describe("rss-service classification", () => {
     const now = new Date("2026-05-11T12:00:00.000Z");
     expect(shouldCollectSource({ active: true, url: "https://a.test", fetch_interval: 60, last_fetched_at: "2026-05-11T10:30:00.000Z" }, now)).toBe(true);
     expect(shouldCollectSource({ active: true, url: "https://a.test", fetch_interval: 60, last_fetched_at: "2026-05-11T11:30:00.000Z" }, now)).toBe(false);
+  });
+
+  it("extracts thumbnails from encoded rss content", () => {
+    expect(extractRssThumbnail({
+      contentEncoded: '<p><img data-src="https://cdn.example.com/news.jpg" /></p>',
+    })).toBe("https://cdn.example.com/news.jpg");
+  });
+
+  it("only enriches managed official sources with page images", () => {
+    expect(shouldEnrichSourceImages({ id: "rss-google-camera-launches", authority: "aggregator" })).toBe(true);
+    expect(shouldEnrichSourceImages({ id: "custom-feed", source_group: "custom", authority: "watchlist" })).toBe(false);
   });
 });

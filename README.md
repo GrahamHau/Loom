@@ -4,7 +4,7 @@ LOOM is a single-user personal intelligence workspace. This repository turns the
 
 ## Naming
 
-The current product and project name is **Loom**. Some older files, package metadata, database names, deployment paths, and design-export artifacts may still contain the legacy name `PM Copilot` or `pm-copilot`; treat those as historical references unless a dedicated runtime rename/migration is being done.
+The current product and project name is **Loom**. Some older files, database names, browser storage keys, and archived design-export artifacts may still contain the legacy name `PM Copilot` or `pm-copilot`; treat those as compatibility/history references unless a dedicated data migration is being done.
 
 ## Claude Frontend Handoff
 

@@ -1,5 +1,5 @@
 (function registerTaobaoExtractor() {
-  window.__pmcopilot_extractors = window.__pmcopilot_extractors || {};
+  window.__loom_extractors = window.__loom_extractors || {};
 
   function text(selector, root = document) {
     return root.querySelector(selector)?.textContent?.trim() || "";
@@ -189,7 +189,7 @@
     return uniq(values).slice(0, 10);
   }
 
-  window.__pmcopilot_extractors.taobao = function extractTaobao() {
+  window.__loom_extractors.taobao = function extractTaobao() {
     const itemId = window.location.search.match(/id=(\d+)/)?.[1]
       || window.location.pathname.match(/\/item\/(\d+)/)?.[1]
       || "";

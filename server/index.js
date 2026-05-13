@@ -79,7 +79,7 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "2mb" }));
 app.use(session({
   store: new SQLiteStore({ dir: process.env.DATA_DIR || path.join(projectRoot, "data"), db: "sessions.sqlite" }),
-  secret: process.env.SESSION_SECRET || "pm-copilot-dev-secret-change-me",
+  secret: process.env.SESSION_SECRET || "loom-dev-secret-change-me",
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -174,7 +174,7 @@ function visibleNewsItems(userId) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "pm-copilot", time: new Date().toISOString() });
+  res.json({ ok: true, service: "loom", time: new Date().toISOString() });
 });
 
 app.get("/api/auth/providers", (_req, res) => {
@@ -510,7 +510,7 @@ app.use(handleError);
 
 if (process.env.NODE_ENV !== "test") {
   app.listen(port, () => {
-    console.log(`PM Copilot listening on http://0.0.0.0:${port}`);
+    console.log(`Loom listening on http://0.0.0.0:${port}`);
   });
   if (process.env.NODE_ENV === "production") startRssScheduler();
 }

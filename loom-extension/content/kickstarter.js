@@ -1,6 +1,6 @@
 (function registerKickstarterExtractor() {
-  window.__pmcopilot_extractors = window.__pmcopilot_extractors || {};
-  window.__pmcopilot_extractors.kickstarter = function extractKickstarter() {
+  window.__loom_extractors = window.__loom_extractors || {};
+  window.__loom_extractors.kickstarter = function extractKickstarter() {
     const text = (selector) => document.querySelector(selector)?.textContent?.trim() || "";
     const meta = (name) => document.querySelector(`meta[property='${name}'], meta[name='${name}']`)?.content || "";
     const title = text("h1") || meta("og:title") || document.title;

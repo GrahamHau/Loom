@@ -1,6 +1,6 @@
 (function registerAmazonExtractor() {
-  window.__pmcopilot_extractors = window.__pmcopilot_extractors || {};
-  window.__pmcopilot_extractors.amazon = function extractAmazon() {
+  window.__loom_extractors = window.__loom_extractors || {};
+  window.__loom_extractors.amazon = function extractAmazon() {
     const text = (selector) => document.querySelector(selector)?.textContent?.trim() || "";
     const attr = (selector, name) => document.querySelector(selector)?.getAttribute(name) || "";
     const name = text("#productTitle") || text("h1.a-size-large") || document.title;
@@ -39,6 +39,7 @@
       monthly_sales: monthlySales,
       thumbnail_url: attr("#landingImage", "src") || attr("#imgBlkFront", "src"),
       raw_bullets: rawBullets,
+      selling_points: rawBullets,
     };
   };
 })();

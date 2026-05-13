@@ -98,6 +98,12 @@ input,textarea,select{font-family:inherit;color:inherit}
   background:var(--surface);
 }
 .cl-brand{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+.cl-brand.compact{
+  align-items:flex-start;
+}
+.cl-brand.compact .cl-conn{
+  margin-top:2px;
+}
 .cl-mark{
   width:24px;height:24px;border-radius:6px;
   background:var(--accent);color:#fff;
@@ -113,10 +119,54 @@ input,textarea,select{font-family:inherit;color:inherit}
   letter-spacing:-.04em;
   line-height:1;
 }
+.cl-state{
+  margin-top:1px;
+  font-size:10.5px;
+  color:var(--text-3);
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.cl-state .dot{
+  background:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-soft);
+}
 .cl-brand > div:first-child{
   display:flex;
   flex-direction:column;
   gap:2px;
+}
+.cl-capture-status{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex:1;
+  min-width:0;
+}
+.cl-top-status-title{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:13px;
+  font-weight:600;
+  color:var(--text);
+}
+.cl-top-status-ico{
+  width:24px;
+  height:24px;
+  border-radius:6px;
+  border:1px solid var(--border);
+  background:var(--surface);
+  color:var(--accent);
+  display:grid;
+  place-items:center;
+  flex-shrink:0;
+}
+.cl-top-status-ico.warn{
+  color:var(--warn);
+  background:var(--warn-soft);
+  border-color:oklch(0.88 0.06 75);
 }
 .cl-conn{
   font-size:10.5px;color:var(--text-3);
@@ -296,6 +346,53 @@ input,textarea,select{font-family:inherit;color:inherit}
   background:var(--surface-2);
   border:1px solid var(--border);
   border-radius:var(--radius);
+}
+.cl-detail-head-card{
+  display:flex;
+  gap:10px;
+  padding:0 0 14px;
+  background:var(--surface);
+  border-bottom:1px solid var(--border-soft);
+}
+.cl-detail-head-main{
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+}
+.cl-detail-title-input{
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:-.01em;
+  padding:3px 5px;
+  margin:-3px -5px;
+  background:transparent;
+  border-color:transparent;
+}
+.cl-detail-title-input:hover,
+.cl-detail-title-input:focus{
+  background:var(--surface-2);
+}
+.cl-state{
+  font-size:11px;
+  color:var(--text-3);
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.cl-preview-cover{
+  width:56px;
+  height:56px;
+  border-radius:6px;
+  border:1px solid var(--border);
+  overflow:hidden;
+  flex-shrink:0;
+}
+.cl-grid-2{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
 }
 .product-capture-card,
 .cl-detail-head-card{
@@ -513,6 +610,75 @@ textarea.ghost-input{line-height:1.6;min-height:64px;resize:vertical;font-size:1
   color:var(--text);padding:0;
   font-variant-numeric:tabular-nums;
 }
+.detail-section{
+  margin-bottom:20px;
+}
+.detail-section-label{
+  font-size:11px;
+  font-weight:600;
+  color:var(--text-3);
+  margin-bottom:8px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.source-link{
+  font-size:12px;
+  color:var(--accent);
+  word-break:break-all;
+  text-decoration:underline;
+}
+.list-editor{
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  overflow:hidden;
+  background:var(--surface);
+}
+.list-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 10px;
+  border-bottom:1px solid var(--border-soft);
+}
+.list-row:last-child{border-bottom:none}
+.list-row:hover{background:var(--hover)}
+.list-idx{
+  color:var(--text-4);
+  font-size:10.5px;
+  font-variant-numeric:tabular-nums;
+  width:14px;
+  text-align:right;
+  flex-shrink:0;
+  font-family:var(--font-mono);
+}
+.list-row input{
+  flex:1;
+  border:none;
+  outline:none;
+  background:transparent;
+  color:var(--text);
+  font:inherit;
+  font-size:12.5px;
+  padding:1px 0;
+}
+.list-row.add{background:var(--surface-2)}
+.list-x{
+  width:18px;
+  height:18px;
+  border:none;
+  background:transparent;
+  color:var(--text-4);
+  border-radius:4px;
+  font-size:14px;
+  line-height:1;
+  padding:0;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+.list-row:hover .list-x{opacity:1}
+.list-x:hover{color:var(--danger);background:var(--danger-soft)}
 
 /* ============================================================
    List editor (后端录入页风格)
@@ -805,6 +971,28 @@ textarea.ghost-input{line-height:1.6;min-height:64px;resize:vertical;font-size:1
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
+}
+.settings-card{
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  background:var(--surface-2);
+}
+.settings-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:11px 12px;
+}
+.settings-title{
+  font-size:13px;
+  font-weight:600;
+  line-height:1.25;
+}
+.settings-sub{
+  margin-top:2px;
+  font-size:11px;
+  color:var(--text-3);
 }
 
 /* ============================================================

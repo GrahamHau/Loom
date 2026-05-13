@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-const { cleanHtml, fetchPageContent } = await import("./content-fetcher.js");
+const { cleanHtml, fetchPageContent, fetchPageImage } = await import("./content-fetcher.js");
 
 describe("content-fetcher", () => {
   it("keeps plain text cleanup bounded", () => {
@@ -53,6 +53,29 @@ describe("content-fetcher", () => {
     try {
       const result = await fetchPageContent("https://short.example/demo");
       expect(result.image).toBe("https://www.example.com/images/demo.png");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("fetches only page image metadata for rss enrichment", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      url: "https://www.example.com/articles/demo",
+      text: async () => `
+        <html>
+          <head>
+            <meta name="twitter:image" content="https://cdn.example.com/card.jpg" />
+          </head>
+          <body>demo</body>
+        </html>
+      `,
+    });
+
+    try {
+      const result = await fetchPageImage("https://www.example.com/articles/demo");
+      expect(result.image).toBe("https://cdn.example.com/card.jpg");
     } finally {
       globalThis.fetch = originalFetch;
     }

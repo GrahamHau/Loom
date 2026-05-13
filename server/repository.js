@@ -614,7 +614,15 @@ export function deleteNews(userId, id) {
 
 export function upsertNews(userId, items) {
   const inserted = [];
+  const updated = [];
   const selectStmt = db.prepare("SELECT * FROM news_items WHERE user_id = ? AND original_url = ?");
+  const updateImageStmt = db.prepare(`
+    UPDATE news_items
+    SET thumbnail_url = ?,
+        classification_json = COALESCE(?, classification_json),
+        updated_at = ?
+    WHERE id = ? AND user_id = ?
+  `);
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO news_items (
       id, user_id, source_id, source_name, source_authority, original_title, original_url,
@@ -627,7 +635,18 @@ export function upsertNews(userId, items) {
     for (const input of records) {
       if (!input.original_url) continue;
       const current = selectStmt.get(userId, input.original_url);
-      if (current) continue;
+      if (current) {
+        if (!current.thumbnail_url && input.thumbnail_url) {
+          const mappedCurrent = mapNewsRow(current);
+          const classificationJson = input.classification ? JSON.stringify({
+            ...(current.classification_json ? JSON.parse(current.classification_json) : {}),
+            ...input.classification,
+          }) : null;
+          updateImageStmt.run(input.thumbnail_url, classificationJson, nowIso(), current.id, userId);
+          updated.push({ ...mappedCurrent, thumbnail_url: input.thumbnail_url, classification: input.classification || mappedCurrent.classification });
+        }
+        continue;
+      }
       const payload = {
         id: input.id || nanoid(10),
         user_id: userId,
@@ -665,7 +684,7 @@ export function upsertNews(userId, items) {
       if (result.changes > 0) inserted.push(payload);
     }
   })(items);
-  return { inserted, updated: [] };
+  return { inserted, updated };
 }
 
 export function listNewsSources(userId) {

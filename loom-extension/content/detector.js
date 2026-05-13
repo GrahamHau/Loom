@@ -1,6 +1,6 @@
-(function initPmCopilotDetector() {
-  if (window.__pmcopilot_detector_loaded) return;
-  window.__pmcopilot_detector_loaded = true;
+(function initLoomDetector() {
+  if (window.__loom_detector_loaded) return;
+  window.__loom_detector_loaded = true;
 
   function detectPlatform(url) {
     const host = new URL(url).hostname;
@@ -13,7 +13,7 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg?.type !== "PM_COPILOT_GET_PAGE_DATA") return undefined;
+    if (msg?.type !== "LOOM_GET_PAGE_DATA") return undefined;
 
     const platform = detectPlatform(window.location.href);
     if (!platform) {
@@ -21,7 +21,7 @@
       return true;
     }
 
-    const extractor = window.__pmcopilot_extractors?.[platform];
+    const extractor = window.__loom_extractors?.[platform];
     if (typeof extractor !== "function") {
       sendResponse({ ok: false, platform, data: null, error: "extractor_missing" });
       return true;
