@@ -45,9 +45,20 @@ const NEWS_LLM_SYSTEM_PROMPT = `你是一个信息筛选助手，服务于摄影
 
 const NEWS_LLM_INPUT_LIMIT = 700;
 const NEWS_LLM_MAX_TOKENS = 120;
+const FETCH_TIMEOUT_MS = 30000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function shouldCollectSource(source, now = new Date()) {
@@ -163,7 +174,7 @@ async function classifyNews({ source, item }) {
 }
 
 async function fetchFeed(source) {
-  const response = await fetch(source.url, {
+  const response = await fetchWithTimeout(source.url, {
     headers: RSS_HEADERS,
     redirect: "follow",
   });

@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { AppError } from "./ai-service.js";
 
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
@@ -17,17 +17,31 @@ export function getPasswordAuthConfig() {
   };
 }
 
-export function apiToken() {
-  const secret = process.env.SESSION_SECRET || "pm-copilot-dev-secret-change-me";
-  const { username, password } = getPasswordAuthConfig();
-  return createHash("sha256").update(`${secret}:${username}:${password}`).digest("hex");
+export function validateAuthConfig() {
+  if (process.env.NODE_ENV !== "production") return;
+  const missing = [];
+  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === "pm-copilot-dev-secret-change-me") {
+    missing.push("SESSION_SECRET");
+  }
+  if (!process.env.APP_USERNAME || process.env.APP_USERNAME === "visitor") {
+    missing.push("APP_USERNAME");
+  }
+  if (!process.env.APP_PASSWORD || process.env.APP_PASSWORD === "password") {
+    missing.push("APP_PASSWORD");
+  }
+  if (missing.length) {
+    throw new Error(`Production auth config is unsafe. Set non-default values for: ${missing.join(", ")}`);
+  }
 }
 
-export function isValidApiToken(token) {
-  const expected = apiToken();
+export function apiToken() {
+  return randomBytes(24).toString("hex");
+}
+
+export function isValidApiToken(token, expectedToken) {
   const a = Buffer.from(String(token || ""));
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+  const b = Buffer.from(String(expectedToken || ""));
+  return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
 
 export function getFeishuOauthConfig() {

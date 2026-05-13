@@ -1,9 +1,15 @@
 import { nanoid } from "nanoid";
 import {
+  acquireLock,
   db,
   ensureUserState,
   getLegacyUserId,
   getUserState,
+  getUserIdByApiToken,
+  releaseLock,
+  revokeApiToken,
+  revokeUserApiTokens,
+  upsertApiToken,
   saveUserState,
 } from "./db.js";
 import { normalizeTagGroups } from "./tag-config.js";
@@ -137,6 +143,45 @@ function clampFetchInterval(value) {
   return Math.min(1440, Math.max(30, Number.isFinite(interval) ? interval : 60));
 }
 
+function cleanText(value, fallback = "") {
+  const text = String(value ?? "").trim();
+  if (!text || text === "null" || text === "undefined") return fallback;
+  return text;
+}
+
+function cleanTitle(value, fallback) {
+  return cleanText(value, fallback).slice(0, 120);
+}
+
+function cleanSummary(value, fallback = "") {
+  return cleanText(value, fallback).slice(0, 800);
+}
+
+function cleanArray(value, limit = 20) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => cleanText(item)).filter(Boolean).slice(0, limit);
+}
+
+function cleanPlatformArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 6).map((platform, index) => ({
+    id: cleanText(platform?.id, nanoid(8)),
+    platform: cleanText(platform?.platform, "unknown"),
+    url: cleanText(platform?.url || platform?.source_url),
+    price: cleanText(platform?.price),
+    cost: cleanText(platform?.cost),
+    rating: platform?.rating ?? null,
+    reviews: platform?.reviews ?? 0,
+    sales: cleanText(platform?.sales),
+    fetched_at: cleanText(platform?.fetched_at, nowIso()),
+    order: index,
+  }));
+}
+
+function cleanRecordList(value) {
+  return cleanArray(value, 20);
+}
+
 export function maskSettings(settings) {
   const masked = { ...settings };
   if (masked.llm_api_key) masked.llm_api_key = "********";
@@ -150,16 +195,16 @@ export function maskSettings(settings) {
 export function ensureLocalUser(input = {}) {
   const user = {
     id: input.id || nanoid(12),
-    email: input.email || "",
-    name: input.name || "LOOM",
-    initials: input.initials || String(input.name || "L").trim().replace(/\s+/g, "").slice(0, 2).toUpperCase() || "L",
-    role: input.role || "成员",
-    status: input.status || "active",
-    auth_provider: input.auth_provider || "password",
+    email: cleanText(input.email),
+    name: cleanTitle(input.name, "LOOM"),
+    initials: cleanText(input.initials || String(input.name || "L").trim().replace(/\s+/g, "").slice(0, 2).toUpperCase(), "L").slice(0, 2).toUpperCase(),
+    role: cleanTitle(input.role, "成员"),
+    status: cleanText(input.status, "active"),
+    auth_provider: cleanText(input.auth_provider, "password"),
     feishu_open_id: input.feishu_open_id || null,
     feishu_union_id: input.feishu_union_id || null,
     feishu_tenant_key: input.feishu_tenant_key || null,
-    avatar_url: input.avatar_url || "",
+    avatar_url: cleanText(input.avatar_url),
     created_at: input.created_at || nowIso(),
     updated_at: nowIso(),
     last_login_at: input.last_login_at || null,
@@ -252,20 +297,19 @@ export function createProduct(userId, input) {
   return mutateUserState(userId, (state) => {
     const product = {
       id: input.id || nanoid(10),
-      emoji: input.emoji || "📦",
-      name: input.name || "未命名竞品",
-      category: input.category || "未分类",
-      tags: input.tags || [],
-      status: input.status || "新录入",
-      ai_summary: input.ai_summary || "",
-      selling_points: input.selling_points || [],
-      negative_keywords: input.negative_keywords || [],
+      emoji: cleanText(input.emoji, "📦"),
+      name: cleanTitle(input.name, "未命名竞品"),
+      category: cleanTitle(input.category, "未分类"),
+      tags: cleanArray(input.tags),
+      status: cleanTitle(input.status, "新录入"),
+      ai_summary: cleanSummary(input.ai_summary),
+      selling_points: cleanArray(input.selling_points),
+      negative_keywords: cleanArray(input.negative_keywords),
       synced_at: null,
       feishu_record_id: null,
       created_at: input.created_at || nowIso(),
       updated_at: input.updated_at || nowIso(),
-      platforms: input.platforms || [],
-      ...input,
+      platforms: cleanPlatformArray(input.platforms),
     };
     state.products ||= [];
     state.products.unshift(product);
@@ -277,7 +321,19 @@ export function updateProduct(userId, id, patch) {
   return mutateUserState(userId, (state) => {
     const item = (state.products || []).find((product) => product.id === id);
     if (!item) return null;
-    Object.assign(item, patch, { updated_at: nowIso() });
+    const next = {
+      ...(patch.name !== undefined ? { name: cleanTitle(patch.name, item.name) } : {}),
+      ...(patch.category !== undefined ? { category: cleanTitle(patch.category, item.category) } : {}),
+      ...(patch.status !== undefined ? { status: cleanTitle(patch.status, item.status) } : {}),
+      ...(patch.emoji !== undefined ? { emoji: cleanText(patch.emoji, item.emoji) } : {}),
+      ...(patch.ai_summary !== undefined ? { ai_summary: cleanSummary(patch.ai_summary, item.ai_summary) } : {}),
+      ...(patch.tags !== undefined ? { tags: cleanArray(patch.tags) } : {}),
+      ...(patch.selling_points !== undefined ? { selling_points: cleanArray(patch.selling_points) } : {}),
+      ...(patch.negative_keywords !== undefined ? { negative_keywords: cleanArray(patch.negative_keywords) } : {}),
+      ...(patch.platforms !== undefined ? { platforms: cleanPlatformArray(patch.platforms) } : {}),
+      updated_at: nowIso(),
+    };
+    Object.assign(item, next);
     return item;
   });
 }
@@ -294,19 +350,18 @@ export function createDemand(userId, input) {
   return mutateUserState(userId, (state) => {
     const demand = {
       id: input.id || nanoid(10),
-      title: input.title || "未命名需求",
+      title: cleanTitle(input.title, "未命名需求"),
       thumbHue: input.thumbHue ?? 200,
-      summary: input.summary || "",
-      source: input.source || "manual",
+      summary: cleanSummary(input.summary),
+      source: cleanText(input.source, "manual"),
       date: input.date || new Date().toISOString().slice(0, 10),
-      innovation: input.innovation || "待分类",
-      scenarios: input.scenarios || [],
-      painpoints: input.painpoints || [],
+      innovation: cleanTitle(input.innovation, "待分类"),
+      scenarios: cleanArray(input.scenarios),
+      painpoints: cleanArray(input.painpoints),
       synced_at: null,
       feishu_record_id: null,
       created_at: input.created_at || nowIso(),
       updated_at: input.updated_at || nowIso(),
-      ...input,
     };
     state.demands ||= [];
     state.demands.unshift(demand);
@@ -318,7 +373,17 @@ export function updateDemand(userId, id, patch) {
   return mutateUserState(userId, (state) => {
     const item = (state.demands || []).find((demand) => demand.id === id);
     if (!item) return null;
-    Object.assign(item, patch, { updated_at: nowIso() });
+    const next = {
+      ...patch,
+      ...(patch.title !== undefined ? { title: cleanTitle(patch.title, item.title) } : {}),
+      ...(patch.summary !== undefined ? { summary: cleanSummary(patch.summary, item.summary) } : {}),
+      ...(patch.source !== undefined ? { source: cleanText(patch.source, item.source) } : {}),
+      ...(patch.innovation !== undefined ? { innovation: cleanTitle(patch.innovation, item.innovation) } : {}),
+      ...(patch.scenarios !== undefined ? { scenarios: cleanArray(patch.scenarios) } : {}),
+      ...(patch.painpoints !== undefined ? { painpoints: cleanArray(patch.painpoints) } : {}),
+      updated_at: nowIso(),
+    };
+    Object.assign(item, next);
     return item;
   });
 }
@@ -336,16 +401,15 @@ export function createResearch(userId, input) {
     state.research ||= [];
     const research = {
       id: input.id || nanoid(10),
-      title: input.title || "未命名调研项目",
-      desc: input.desc || input.description || "",
-      status: input.status || "草稿",
+      title: cleanTitle(input.title, "未命名调研项目"),
+      desc: cleanSummary(input.desc || input.description || ""),
+      status: cleanTitle(input.status, "草稿"),
       date: input.date || new Date().toISOString().slice(0, 10),
-      products: input.products || input.matched_products || [],
-      demands: input.demands || input.matched_demands || [],
-      analysis: input.analysis || null,
+      products: cleanRecordList(input.products || input.matched_products || []),
+      demands: cleanRecordList(input.demands || input.matched_demands || []),
+      analysis: Array.isArray(input.analysis) ? input.analysis.slice(0, 20) : input.analysis || null,
       created_at: nowIso(),
       updated_at: nowIso(),
-      ...input,
     };
     state.research.unshift(research);
     return research;
@@ -356,10 +420,19 @@ export function updateResearch(userId, id, patch) {
   return mutateUserState(userId, (state) => {
     const item = (state.research || []).find((research) => research.id === id);
     if (!item) return null;
-    Object.assign(item, patch, { updated_at: nowIso() });
-    if (patch.description && !patch.desc) item.desc = patch.description;
-    if (patch.matched_products && !patch.products) item.products = patch.matched_products;
-    if (patch.matched_demands && !patch.demands) item.demands = patch.matched_demands;
+    const next = {
+      ...(patch.title !== undefined ? { title: cleanTitle(patch.title, item.title) } : {}),
+      ...(patch.desc !== undefined ? { desc: cleanSummary(patch.desc, item.desc) } : {}),
+      ...(patch.description !== undefined && patch.desc === undefined ? { desc: cleanSummary(patch.description, item.desc) } : {}),
+      ...(patch.status !== undefined ? { status: cleanTitle(patch.status, item.status) } : {}),
+      ...(patch.products !== undefined ? { products: cleanRecordList(patch.products) } : {}),
+      ...(patch.demands !== undefined ? { demands: cleanRecordList(patch.demands) } : {}),
+      ...(patch.matched_products !== undefined && patch.products === undefined ? { products: cleanRecordList(patch.matched_products) } : {}),
+      ...(patch.matched_demands !== undefined && patch.demands === undefined ? { demands: cleanRecordList(patch.matched_demands) } : {}),
+      ...(patch.analysis !== undefined ? { analysis: Array.isArray(patch.analysis) ? patch.analysis.slice(0, 20) : patch.analysis } : {}),
+      updated_at: nowIso(),
+    };
+    Object.assign(item, next);
     return item;
   });
 }
@@ -374,7 +447,40 @@ export function deleteResearch(userId, id) {
 
 export function updateSettings(userId, patch) {
   return mutateUserState(userId, (state) => {
-    const next = { ...patch };
+    const allowed = [
+      "llm_api_type",
+      "llm_api_url",
+      "llm_model",
+      "llm_api_key",
+      "llm_timeout_ms",
+      "search_provider",
+      "search_enabled",
+      "search_api_url",
+      "search_api_key",
+      "search_model",
+      "search_tavily_enabled",
+      "search_tavily_api_key",
+      "search_tavily_api_url",
+      "search_tavily_mode",
+      "search_serpapi_enabled",
+      "search_serpapi_api_key",
+      "search_serpapi_api_url",
+      "search_serpapi_engine",
+      "tag_groups",
+      "feishu_app_id",
+      "feishu_app_secret",
+      "feishu_base_token",
+      "feishu_products_table_id",
+      "feishu_demands_table_id",
+      "feishu_news_table_id",
+      "feishu_table_token",
+      "rss_collect_enabled",
+      "rss_collect_interval_ms",
+    ];
+    const next = {};
+    for (const key of allowed) {
+      if (patch[key] !== undefined) next[key] = patch[key];
+    }
     for (const key of ["llm_api_key", "search_api_key", "search_tavily_api_key", "search_serpapi_api_key", "feishu_app_secret"]) {
       if (next[key] === "********" || next[key] === "") delete next[key];
     }
@@ -508,25 +614,25 @@ export function listNewsSources(userId) {
 }
 
 export function createNewsSource(userId, input) {
-  const source = {
-    id: input.id || nanoid(10),
-    user_id: userId,
-    name: input.name || "未命名数据源",
-    url: input.url || "",
-    type: input.type || "rss",
-    language: input.language || "",
-    authority: input.authority || "watchlist",
-    group_name: input.group || "custom",
-    source_group: input.source_group || input.group || "custom",
-    brand: input.brand || "",
-    fetch_interval: clampFetchInterval(input.interval || input.fetch_interval || 60),
-    is_active: input.active ?? input.is_active ?? true ? 1 : 0,
-    last_fetched_at: input.last_fetched_at || null,
-    last_item_count: Number(input.last_item_count || 0),
-    last_error: input.last_error || null,
-    created_at: nowIso(),
-    updated_at: nowIso(),
-  };
+    const source = {
+      id: input.id || nanoid(10),
+      user_id: userId,
+      name: cleanTitle(input.name, "未命名数据源"),
+      url: cleanText(input.url),
+      type: cleanText(input.type, "rss"),
+      language: cleanText(input.language),
+      authority: cleanText(input.authority, "watchlist"),
+      group_name: cleanText(input.group, "custom"),
+      source_group: cleanText(input.source_group || input.group, "custom"),
+      brand: cleanTitle(input.brand, ""),
+      fetch_interval: clampFetchInterval(input.interval || input.fetch_interval || 60),
+      is_active: input.active ?? input.is_active ?? true ? 1 : 0,
+      last_fetched_at: input.last_fetched_at || null,
+      last_item_count: Number(input.last_item_count || 0),
+      last_error: cleanText(input.last_error),
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    };
   db.prepare(`
     INSERT INTO news_sources (
       id, user_id, name, url, type, language, authority, group_name, source_group, brand,
@@ -548,19 +654,19 @@ export function updateNewsSource(userId, id, patch) {
         fetch_interval = ?, is_active = ?, last_fetched_at = ?, last_item_count = ?, last_error = ?, updated_at = ?
     WHERE id = ? AND user_id = ?
   `).run(
-    patch.name ?? current.name,
-    patch.url ?? current.url,
-    patch.type ?? current.type,
-    patch.language ?? current.language,
-    patch.authority ?? current.authority,
-    patch.group ?? current.group_name,
-    patch.source_group ?? patch.group ?? current.source_group ?? current.group_name,
-    patch.brand ?? current.brand,
+    patch.name !== undefined ? cleanTitle(patch.name, current.name) : current.name,
+    patch.url !== undefined ? cleanText(patch.url, current.url) : current.url,
+    patch.type !== undefined ? cleanText(patch.type, current.type) : current.type,
+    patch.language !== undefined ? cleanText(patch.language, current.language) : current.language,
+    patch.authority !== undefined ? cleanText(patch.authority, current.authority) : current.authority,
+    patch.group !== undefined ? cleanText(patch.group, current.group_name) : current.group_name,
+    patch.source_group !== undefined ? cleanText(patch.source_group, patch.group ?? current.source_group ?? current.group_name) : (patch.group !== undefined ? cleanText(patch.group, current.source_group || current.group_name) : current.source_group || current.group_name),
+    patch.brand !== undefined ? cleanTitle(patch.brand, current.brand) : current.brand,
     patch.fetch_interval !== undefined || patch.interval !== undefined ? clampFetchInterval(patch.fetch_interval ?? patch.interval) : current.fetch_interval,
     patch.is_active !== undefined ? (patch.is_active ? 1 : 0) : (patch.active !== undefined ? (patch.active ? 1 : 0) : current.is_active),
     patch.last_fetched_at ?? current.last_fetched_at,
     patch.last_item_count !== undefined ? Number(patch.last_item_count || 0) : Number(current.last_item_count || 0),
-    patch.last_error ?? current.last_error,
+    patch.last_error !== undefined ? cleanText(patch.last_error, current.last_error) : current.last_error,
     nowIso(),
     id,
     userId
@@ -617,3 +723,12 @@ export function ensureLegacyWorkspace() {
     auth_provider: "password",
   });
 }
+
+export {
+  acquireLock,
+  getUserIdByApiToken,
+  releaseLock,
+  revokeApiToken,
+  revokeUserApiTokens,
+  upsertApiToken,
+};

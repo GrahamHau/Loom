@@ -16,7 +16,7 @@ import {
   getFeishuOauthConfig,
   getPasswordAuthConfig,
   isFeishuUserAllowed,
-  isValidApiToken,
+  validateAuthConfig,
 } from "./auth-service.js";
 import { parseDemandRaw, parseDemandUrl, parseProductRaw, parseProductUrl } from "./parsers.js";
 import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-service.js";
@@ -25,6 +25,7 @@ import { syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
 import { loadInitialData } from "./seed.js";
 import {
   bootstrap,
+  acquireLock,
   createNewsSource,
   createDemand,
   createProduct,
@@ -36,12 +37,17 @@ import {
   deleteResearch,
   ensureLegacyWorkspace,
   ensureLocalUser,
+  getUserIdByApiToken,
   findUserByFeishuProfile,
   findUserById,
   listAllUsers,
   listNews,
   listNewsSources,
   rawState,
+  revokeApiToken,
+  revokeUserApiTokens,
+  upsertApiToken,
+  releaseLock,
   touchUserLogin,
   updateDemand,
   updateNews,
@@ -62,6 +68,7 @@ const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE === "true"
     ? false
     : "auto";
 
+validateAuthConfig();
 ensureSeed(loadInitialData());
 const legacyUser = ensureLegacyWorkspace();
 
@@ -92,10 +99,22 @@ function handleError(error, _req, res, _next) {
   res.status(500).json({ error: "internal_error", message: error.message || "服务器错误" });
 }
 
+function safeReturnTo(value) {
+  try {
+    const base = "https://loom.local";
+    const parsed = new URL(String(value || "/"), base);
+    if (parsed.origin !== base) return "/";
+    return `${parsed.pathname}${parsed.search}${parsed.hash}` || "/";
+  } catch {
+    return "/";
+  }
+}
+
 function currentUserId(req) {
   if (req.session.userId) return String(req.session.userId);
   const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  if (token && isValidApiToken(token)) return legacyUser.id;
+  const tokenUserId = token ? getUserIdByApiToken(token) : "";
+  if (token && tokenUserId) return tokenUserId;
   return "";
 }
 
@@ -139,17 +158,23 @@ app.post("/api/auth/login", (req, res) => {
   if (req.body?.username !== username || req.body?.password !== password) {
     return res.status(401).json({ error: "用户名或密码不正确" });
   }
-  touchUserLogin(legacyUser.id);
-  req.session.userId = legacyUser.id;
-  req.session.user = sessionUserResponse(legacyUser);
   const state = bootstrap(legacyUser.id);
-  res.json({ user: state.user, token: apiToken() });
+  const token = apiToken();
+  revokeUserApiTokens(legacyUser.id);
+  upsertApiToken(token, legacyUser.id);
+  req.session.regenerate((error) => {
+    if (error) return res.status(500).json({ error: "session_regenerate_failed" });
+    touchUserLogin(legacyUser.id);
+    req.session.userId = legacyUser.id;
+    req.session.user = sessionUserResponse(legacyUser);
+    res.json({ user: state.user, token });
+  });
 });
 
 app.get("/api/auth/feishu/start", (req, res) => {
   const state = createOauthState();
   req.session.oauthState = state;
-  req.session.oauthReturnTo = String(req.query.return_to || "/");
+  req.session.oauthReturnTo = safeReturnTo(req.query.return_to);
   res.redirect(buildFeishuAuthUrl(state));
 });
 
@@ -207,10 +232,12 @@ app.get("/api/auth/feishu/callback", asyncHandler(async (req, res) => {
   req.session.userId = localUser.id;
   req.session.user = buildSessionUser(sessionUserResponse(localUser), profile);
   touchUserLogin(localUser.id);
-  res.redirect(returnTo.startsWith("/") ? returnTo : "/");
+  res.redirect(safeReturnTo(returnTo));
 }));
 
 app.post("/api/auth/logout", (req, res) => {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (token) revokeApiToken(token);
   req.session.destroy(() => res.json({ ok: true }));
 });
 
@@ -409,6 +436,7 @@ function startRssScheduler() {
   const interval = Number(process.env.RSS_SCHEDULER_CHECK_INTERVAL_MS || process.env.RSS_COLLECT_INTERVAL_MS || 15 * 60 * 1000);
   setInterval(async () => {
     if (rssCollecting) return;
+    if (!acquireLock("rss-scheduler", Math.max(interval - 1000, 30000))) return;
     rssCollecting = true;
     try {
       for (const user of listAllUsers()) {
@@ -421,6 +449,7 @@ function startRssScheduler() {
       console.error("RSS collect failed", error);
     } finally {
       rssCollecting = false;
+      releaseLock("rss-scheduler");
     }
   }, interval).unref();
 }
@@ -431,13 +460,17 @@ if (process.env.NODE_ENV === "production") {
   app.get(/.*/, (_req, res) => res.sendFile(path.join(distDir, "index.html")));
 }
 
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "not_found" });
+});
+
+app.use(handleError);
+
 if (process.env.NODE_ENV !== "test") {
   app.listen(port, () => {
     console.log(`PM Copilot listening on http://0.0.0.0:${port}`);
   });
   if (process.env.NODE_ENV === "production") startRssScheduler();
 }
-
-app.use(handleError);
 
 export default app;

@@ -1,6 +1,7 @@
 import { rawState, updateSettings } from "./repository.js";
 
 const DEFAULT_TIMEOUT_MS = 30000;
+const FETCH_TIMEOUT_MS = 30000;
 
 export class AppError extends Error {
   constructor(status, code, message, details = undefined) {
@@ -27,6 +28,17 @@ function configuredSettings(userId) {
     throw new AppError(400, "llm_not_configured", "LLM 未配置完整，请先在系统设置填写 API URL、模型和 API Key。");
   }
   return settings;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function chatCompletionsUrl(url) {
@@ -62,12 +74,9 @@ export function parseJsonObject(text, fallback = {}) {
 export async function callLLM({ userId, system, user, responseFormat = "json", temperature = 0.2, maxTokens }) {
   const settings = configuredSettings(userId);
   const timeoutMs = Number(settings.llm_timeout_ms || process.env.LLM_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(chatCompletionsUrl(settings.llm_api_url), {
+    const response = await fetchWithTimeout(chatCompletionsUrl(settings.llm_api_url), {
       method: "POST",
-      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${settings.llm_api_key}`,
@@ -100,8 +109,6 @@ export async function callLLM({ userId, system, user, responseFormat = "json", t
     }
     if (error instanceof AppError) throw error;
     throw new AppError(502, "llm_unavailable", "LLM 服务不可用。", { message: error.message });
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

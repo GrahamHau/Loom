@@ -2,6 +2,17 @@ import { AppError } from "./ai-service.js";
 import { listNews, markSynced, rawState, updateSettings } from "./repository.js";
 
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
+const FETCH_TIMEOUT_MS = 30000;
+
+async function fetchWithTimeout(path, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(`${FEISHU_BASE}${path}`, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function settings(userId) {
   return rawState(userId)?.settings || {};
@@ -17,7 +28,7 @@ function requireFeishuSettings(userId) {
 }
 
 async function feishuFetch(path, options = {}) {
-  const response = await fetch(`${FEISHU_BASE}${path}`, options);
+  const response = await fetchWithTimeout(path, options);
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.code) {
     throw new AppError(response.status || 502, "feishu_request_failed", body.msg || "飞书请求失败。", body);

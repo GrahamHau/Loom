@@ -37,6 +37,12 @@ export function migrate() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS app_locks (
+      key TEXT PRIMARY KEY,
+      locked_until TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT,
@@ -53,6 +59,16 @@ export function migrate() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       last_login_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS api_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_used_at TEXT,
+      revoked_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS idx_api_tokens_revoked_at ON api_tokens(revoked_at);
 
     CREATE TABLE IF NOT EXISTS news_sources (
       id TEXT PRIMARY KEY,
@@ -211,6 +227,57 @@ export function getUserState(userId) {
 
 export function saveUserState(userId, state) {
   writeJson(userStateKey(userId), state);
+}
+
+export function upsertApiToken(token, userId) {
+  db.prepare(`
+    INSERT INTO api_tokens (token, user_id, created_at, last_used_at, revoked_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+    ON CONFLICT(token) DO UPDATE SET
+      user_id = excluded.user_id,
+      last_used_at = CURRENT_TIMESTAMP,
+      revoked_at = NULL
+  `).run(token, userId);
+}
+
+export function getUserIdByApiToken(token) {
+  const row = db.prepare(`
+    SELECT user_id
+    FROM api_tokens
+    WHERE token = ? AND revoked_at IS NULL
+  `).get(token);
+  if (!row) return "";
+  db.prepare("UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE token = ?").run(token);
+  return String(row.user_id || "");
+}
+
+export function revokeApiToken(token) {
+  db.prepare("UPDATE api_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE token = ?").run(token);
+}
+
+export function revokeUserApiTokens(userId) {
+  db.prepare("UPDATE api_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL").run(userId);
+}
+
+export function acquireLock(key, ttlMs) {
+  const now = Date.now();
+  const lockedUntil = new Date(now + ttlMs).toISOString();
+  const current = db.prepare("SELECT key, locked_until FROM app_locks WHERE key = ?").get(key);
+  if (current && new Date(current.locked_until).getTime() > now) {
+    return false;
+  }
+  db.prepare(`
+    INSERT INTO app_locks (key, locked_until, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET
+      locked_until = excluded.locked_until,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(key, lockedUntil);
+  return true;
+}
+
+export function releaseLock(key) {
+  db.prepare("DELETE FROM app_locks WHERE key = ?").run(key);
 }
 
 function ensureLegacyUser(seedState) {
