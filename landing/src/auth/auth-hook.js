@@ -46,6 +46,19 @@ export async function loginRequest({ username, password }) {
   window.location.href = "/app";
 }
 
+export async function visitorLoginRequest() {
+  const res = await fetch("/api/auth/visitor", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || `演示模式暂时不可用 (${res.status})`);
+  }
+  window.location.href = "/app";
+}
+
 export async function getAuthProviders() {
   const res = await fetch("/api/auth/providers", {
     credentials: "include",

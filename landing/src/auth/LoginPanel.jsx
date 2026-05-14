@@ -1,5 +1,10 @@
 import { useEffect, useId, useState } from "react";
-import { getAuthProviders, loginRequest, startFeishuLogin } from "./auth-hook.js";
+import {
+  getAuthProviders,
+  loginRequest,
+  startFeishuLogin,
+  visitorLoginRequest,
+} from "./auth-hook.js";
 
 /**
  * Embedded login panel for the landing page final CTA section.
@@ -64,6 +69,19 @@ export default function LoginPanel() {
     } catch (err) {
       setStatus("error");
       setErrorMessage(err?.message || "登录失败，请稍后再试");
+    }
+  };
+
+  const onDemoLogin = async () => {
+    if (status === "submitting") return;
+    setStatus("submitting");
+    setErrorMessage("");
+    try {
+      await visitorLoginRequest();
+      setStatus("success");
+    } catch (err) {
+      setStatus("error");
+      setErrorMessage(err?.message || "演示模式暂时不可用，请稍后再试");
     }
   };
 
@@ -171,15 +189,16 @@ export default function LoginPanel() {
         </div>
       </div>
 
-      <button className="login-demo-link" type="button" disabled>
+      <button
+        className="login-demo-link"
+        type="button"
+        disabled={submitting || succeeded}
+        onClick={onDemoLogin}
+      >
         进入演示模式
       </button>
 
-      <div className="login-inline-tip">
-        {providers.feishu
-          ? "演示模式可直接体验示例工作区；公司成员可使用飞书登录个人账号。"
-          : "演示模式可直接体验示例工作区；飞书登录完成 OAuth 配置后即可启用。"}
-      </div>
+      <div className="login-inline-tip">演示模式可体验示例工作区。</div>
 
       {status === "error" && (
         <div role="alert" className="login-error">

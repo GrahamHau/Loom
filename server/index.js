@@ -156,8 +156,16 @@ function sessionUserResponse(user) {
 function getSessionIdFromCookieValue(cookieValue) {
   const raw = String(cookieValue || "").trim();
   if (!raw) return "";
-  if (!raw.startsWith("s:")) return "";
-  const unsigned = signature.unsign(raw.slice(2), process.env.SESSION_SECRET || "loom-dev-secret-change-me");
+  let normalized = raw;
+  if (!normalized.startsWith("s:")) {
+    try {
+      normalized = decodeURIComponent(normalized);
+    } catch {
+      normalized = raw;
+    }
+  }
+  if (!normalized.startsWith("s:")) return "";
+  const unsigned = signature.unsign(normalized.slice(2), process.env.SESSION_SECRET || "loom-dev-secret-change-me");
   return unsigned || "";
 }
 
@@ -213,9 +221,36 @@ function signInLegacyUser(req, res) {
   });
 }
 
-function visibleNewsItems(userId) {
-  const state = rawState(userId);
-  return listNews(userId).filter((item) => !isSampleWorkspace(state) || isRecentSampleNews(item));
+function passwordUserId(username) {
+  const normalized = String(username || "").trim().toLowerCase();
+  if (!normalized) return "password-user";
+  const safe = normalized.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return safe ? `password-${safe}` : `password-user`;
+}
+
+function ensurePasswordUser() {
+  const { username } = getPasswordAuthConfig();
+  return ensureLocalUser({
+    id: passwordUserId(username),
+    name: username,
+    initials: String(username || "L").trim().replace(/\s+/g, "").slice(0, 2).toUpperCase() || "L",
+    role: "成员",
+    auth_provider: "password",
+  });
+}
+
+function signInPasswordUser(req, res) {
+  const user = ensurePasswordUser();
+  const token = apiToken();
+  revokeUserApiTokens(user.id);
+  upsertApiToken(token, user.id);
+  req.session.regenerate((error) => {
+    if (error) return res.status(500).json({ error: "session_regenerate_failed" });
+    touchUserLogin(user.id);
+    req.session.userId = user.id;
+    req.session.user = sessionUserResponse(user);
+    res.json({ user: sessionUserResponse(user), token });
+  });
 }
 
 async function processCollectedNewsWithLlm(userId, collected) {
@@ -282,7 +317,7 @@ app.post("/api/auth/login", (req, res) => {
   if (req.body?.username !== username || req.body?.password !== password) {
     return res.status(401).json({ error: "用户名或密码不正确" });
   }
-  signInLegacyUser(req, res);
+  signInPasswordUser(req, res);
 });
 
 app.post("/api/auth/visitor", (req, res) => {
