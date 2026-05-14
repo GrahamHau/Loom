@@ -18,7 +18,12 @@ beforeEach(() => {
     news: [],
     research: [],
     rssSources: [],
-    settings: { llm_api_key: "secret", feishu_app_secret: "secret2" },
+    settings: {
+      llm_api_url: "https://llm.test/v1",
+      llm_model: "gpt-test",
+      llm_api_key: "secret",
+      feishu_app_secret: "secret2",
+    },
   });
   const legacyUserId = dbModule.getLegacyUserId();
   repo.ensureLegacyWorkspace();
@@ -49,6 +54,7 @@ describe("repository", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     expect(repo.bootstrap(legacyUserId).settings.llm_api_key).toBe("********");
     expect(repo.bootstrap(legacyUserId).settings.feishu_app_secret).toBe("********");
+    expect(repo.bootstrap(legacyUserId).settings.llm_configured).toBe(true);
   });
 
   it("updates news flags", () => {
@@ -62,7 +68,7 @@ describe("repository", () => {
     repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/1", titleZh: "A", date: "2026-05-10" }]);
     repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/1", titleZh: "B", date: "2026-05-10" }]);
     expect(repo.listNews(legacyUserId)).toHaveLength(2);
-    expect(repo.listNews(legacyUserId).find((item) => item.original_url === "https://a.test/1")?.titleZh).toBe("A");
+    expect(repo.listNews(legacyUserId).find((item) => item.original_url === "https://a.test/1")?.titleZh).toBe("B");
   });
 
   it("updates missing thumbnail on existing news during upsert", () => {
@@ -81,6 +87,48 @@ describe("repository", () => {
 
     expect(result.updated).toHaveLength(1);
     expect(repo.listNews(legacyUserId).find((item) => item.original_url === "https://a.test/with-image")?.thumbnail_url).toBe("https://cdn.test/a.jpg");
+  });
+
+  it("refreshes published_at and metadata for existing news when source sends newer data", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [{
+      source_id: "wechat-source",
+      source: "索尼 影像圈",
+      original_url: "https://mp.weixin.qq.com/s/existing",
+      original_title: "旧标题",
+      titleZh: "旧标题",
+      summary: "旧摘要",
+      type: "行业趋势",
+      classification: { fakeid: "old", seen: "first" },
+      date: "2026-05-06T13:30:00.000Z",
+    }]);
+
+    const result = repo.upsertNews(legacyUserId, [{
+      source_id: "wechat-source",
+      source: "索尼 影像圈",
+      source_authority: "watchlist",
+      original_url: "https://mp.weixin.qq.com/s/existing",
+      original_title: "新标题",
+      titleZh: "新标题",
+      summary: "新摘要",
+      contentZh: "新正文",
+      original_content: "新原文摘要",
+      type: "新品发布",
+      thumbnail_url: "https://cdn.test/wechat.jpg",
+      classification: { fakeid: "new", article_aid: "aid-1" },
+      published_at: "2026-05-13T15:35:36.000Z",
+      llmProcessed: true,
+    }]);
+
+    const updated = repo.listNews(legacyUserId).find((item) => item.original_url === "https://mp.weixin.qq.com/s/existing");
+    expect(result.updated).toHaveLength(1);
+    expect(updated?.published_at).toBe("2026-05-13T15:35:36.000Z");
+    expect(updated?.titleZh).toBe("新标题");
+    expect(updated?.summary).toBe("新摘要");
+    expect(updated?.contentZh).toBe("新正文");
+    expect(updated?.thumbnail_url).toBe("https://cdn.test/wechat.jpg");
+    expect(updated?.type).toBe("新品发布");
+    expect(updated?.classification).toMatchObject({ fakeid: "new", article_aid: "aid-1", seen: "first" });
   });
 
   it("includes translated-but-unprocessed news in the LLM queue", () => {
@@ -140,6 +188,23 @@ describe("repository", () => {
     expect(sources[0].fetch_interval).toBe(120);
   });
 
+  it("imports wechat exporter accounts as news sources", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const result = repo.importWechatExporterAccounts(legacyUserId, {
+      usefor: "wechat-article-exporter",
+      accounts: [
+        { fakeid: "MzA3", nickname: "SmallRig斯莫格" },
+        { fakeid: "MzA4", nickname: "DJI大疆创新" },
+      ],
+    }, { interval: 1440 });
+
+    expect(result.created).toHaveLength(2);
+    const sources = repo.listNewsSources(legacyUserId).filter((source) => source.type === "wechat_exporter");
+    expect(sources).toHaveLength(2);
+    expect(sources[0].url).toContain("fakeid=");
+    expect(sources[0].fetch_interval).toBe(1440);
+  });
+
   it("does not overwrite masked secrets", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.updateSettings(legacyUserId, { llm_api_key: "********", feishu_app_secret: "********", llm_model: "m2" });
@@ -174,17 +239,132 @@ describe("repository", () => {
     expect(state.products.some((item) => item.sample)).toBe(true);
     expect(state.demands.some((item) => item.sample)).toBe(true);
     expect(state.research.some((item) => item.sample)).toBe(true);
-    expect(state.rssSources.length).toBeGreaterThan(0);
-    expect(state.rssSources.some((source) => source.source_group === "sample-live")).toBe(true);
+    expect(state.officialRssSources.length).toBeGreaterThan(0);
+    expect(state.officialRssSources.some((source) => source.source_group === "sample-live" || source.source_group === "official-default")).toBe(true);
   });
 
-  it("initializes regular users with default official news sources", () => {
+  it("initializes regular users with empty custom sources and shared official sources", () => {
     const user = repo.ensureLocalUser({ id: "regular-user", name: "Regular User", auth_provider: "feishu" });
     const state = repo.bootstrap(user.id);
 
     expect(state.onboarding.sampleWorkspace).toBeFalsy();
-    expect(state.rssSources.length).toBeGreaterThan(0);
-    expect(state.rssSources.some((source) => source.source_group === "official-default")).toBe(true);
+    expect(state.rssSources).toEqual([]);
+    expect(state.officialRssSources.length).toBeGreaterThan(0);
+    expect(state.officialRssSources.some((source) => source.source_group === "sample-live" || source.source_group === "official-default")).toBe(true);
+  });
+
+  it("hides untranslated news from bootstrap", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [{
+      source_id: "wechat-source",
+      source: "索尼中国",
+      original_url: "https://mp.weixin.qq.com/s/demo",
+      original_title: "Sony announces event",
+      titleZh: "Sony announces event",
+      summary: "",
+      contentZh: "",
+      type: "行业趋势",
+      needsTranslation: true,
+      llmProcessed: false,
+      date: "2026-05-14",
+    }]);
+
+    const state = repo.bootstrap(legacyUserId);
+    expect(state.news.find((item) => item.original_url === "https://mp.weixin.qq.com/s/demo")).toBeFalsy();
+  });
+
+  it("syncs shared official news from visitor to regular users", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const user = repo.ensureLocalUser({ id: "shared-news-user", name: "Shared User", auth_provider: "feishu" });
+    repo.upsertNews(legacyUserId, [{
+      source_id: "default-news-google-camera-launches",
+      source: "主机品牌新品 - Google News",
+      original_url: "https://shared.test/official-news",
+      original_title: "Official shared news",
+      titleZh: "官方共享资讯",
+      summary: "后端统一采集的一条新闻。",
+      contentZh: "后端统一采集的一条新闻。",
+      type: "新品发布",
+      published_at: "2026-05-14T10:00:00.000Z",
+      llmProcessed: true,
+      classification: { source_group: "official-default" },
+    }]);
+
+    const synced = repo.syncOfficialNewsToUser(user.id);
+    const state = repo.bootstrap(user.id);
+    expect(synced.inserted.length + synced.updated.length).toBeGreaterThan(0);
+    expect(state.news.map((item) => item.original_url)).toContain("https://shared.test/official-news");
+  });
+
+  it("does not sync stale official news to regular users", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const user = repo.ensureLocalUser({ id: "stale-shared-news-user", name: "Stale User", auth_provider: "feishu" });
+    repo.upsertNews(legacyUserId, [{
+      source_id: "default-news-google-camera-launches",
+      source: "主机品牌新品 - Google News",
+      original_url: "https://shared.test/stale-official-news",
+      original_title: "Old official shared news",
+      titleZh: "旧官方共享资讯",
+      summary: "超过缓存窗口的旧新闻。",
+      contentZh: "超过缓存窗口的旧新闻。",
+      type: "新品发布",
+      published_at: "2025-01-01T00:00:00.000Z",
+      llmProcessed: true,
+      classification: { source_group: "official-default" },
+    }]);
+
+    const synced = repo.syncOfficialNewsToUser(user.id);
+    const state = repo.bootstrap(user.id);
+    expect(synced.inserted).toHaveLength(0);
+    expect(state.news.map((item) => item.original_url)).not.toContain("https://shared.test/stale-official-news");
+  });
+
+  it("hides official news when the user disables official stream", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const user = repo.ensureLocalUser({ id: "official-off-user", name: "Official Off", auth_provider: "feishu" });
+    repo.upsertNews(legacyUserId, [{
+      source_id: "default-news-google-camera-launches",
+      source: "主机品牌新品 - Google News",
+      original_url: "https://shared.test/hidden-official",
+      original_title: "Official hidden news",
+      titleZh: "官方隐藏资讯",
+      summary: "关闭开关后不应显示。",
+      contentZh: "关闭开关后不应显示。",
+      type: "新品发布",
+      published_at: "2026-05-14T11:00:00.000Z",
+      llmProcessed: true,
+      classification: { source_group: "official-default" },
+    }]);
+    repo.syncOfficialNewsToUser(user.id);
+    repo.updateSettings(user.id, { official_news_enabled: false });
+
+    const state = repo.bootstrap(user.id);
+    expect(state.news.map((item) => item.original_url)).not.toContain("https://shared.test/hidden-official");
+  });
+
+  it("resets regular users back into sample workspace", () => {
+    const visitor = repo.ensureLegacyWorkspace();
+    repo.upsertNews(visitor.id, [{
+      source_id: "sample-news-google-accessory-launches",
+      source: "配件竞品新品 - Google News",
+      original_url: "https://sample.test/reset-seed",
+      original_title: "Reset sample news",
+      titleZh: "重置演示新闻",
+      summary: "用于验证重置后能看到演示新闻。",
+      contentZh: "用于验证重置后能看到演示新闻。",
+      type: "新品发布",
+      published_at: new Date().toISOString(),
+      llmProcessed: true,
+    }]);
+    const user = repo.ensureLocalUser({ id: "sample-reset-user", name: "Reset User", auth_provider: "feishu" });
+    repo.finishSampleWorkspace(user.id);
+    const result = repo.resetRegularUsersToSampleWorkspace();
+    const state = repo.bootstrap(user.id);
+
+    expect(result.reset).toContain(user.id);
+    expect(state.onboarding.sampleWorkspace).toBe(true);
+    expect(state.products.some((item) => item.sample)).toBe(true);
+    expect(state.news.map((item) => item.original_url)).toContain("https://sample.test/reset-seed");
   });
 
   it("filters stale news in sample workspaces", () => {
@@ -248,7 +428,8 @@ describe("repository", () => {
     expect(state.products).toEqual([]);
     expect(state.demands).toEqual([]);
     expect(state.research).toEqual([]);
-    expect(state.rssSources.some((source) => source.source_group === "official-default")).toBe(true);
+    expect(state.rssSources).toEqual([]);
+    expect(state.officialRssSources.length).toBeGreaterThan(0);
   });
 
   it("updates product relation fields", () => {

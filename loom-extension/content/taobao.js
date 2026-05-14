@@ -30,6 +30,63 @@
     return `¥${raw}`;
   }
 
+  function visibleText(selector, root = document) {
+    const nodes = root.querySelectorAll(selector);
+    for (const node of nodes) {
+      if (!(node instanceof Element)) continue;
+      const rect = node.getBoundingClientRect();
+      const value = node.textContent?.replace(/\s+/g, " ").trim() || "";
+      if (!value || rect.width <= 0 || rect.height <= 0) continue;
+      return value;
+    }
+    return "";
+  }
+
+  function parsePrimaryPrice(value) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    const couponMatch = text.match(/券后\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    if (couponMatch?.[1]) return couponMatch[1];
+    const arriveMatch = text.match(/到手(?:价)?\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    if (arriveMatch?.[1]) return arriveMatch[1];
+    const activityMatch = text.match(/活动价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    if (activityMatch?.[1]) return activityMatch[1];
+    const plainMatch = text.match(/[¥￥]\s*([0-9]+(?:\.[0-9]+)?)/);
+    if (plainMatch?.[1]) return plainMatch[1];
+    return "";
+  }
+
+  function findPrimaryTitle() {
+    const selectors = [
+      "[class*='mainTitle']",
+      ".mainTitle",
+      "h1",
+      "[data-title]",
+    ];
+    for (const selector of selectors) {
+      const value = visibleText(selector);
+      if (cleanTitle(value).length >= 8) return cleanTitle(value);
+    }
+    return "";
+  }
+
+  function findPrimaryPrice() {
+    const selectors = [
+      "[class*='priceWrap']",
+      "[class*='Price--priceText']",
+      "[class*='priceText']",
+      "[class*='price--']",
+      ".tb-rmb-num",
+      ".J_price .price",
+    ];
+    for (const selector of selectors) {
+      const value = visibleText(selector);
+      const parsed = parsePrimaryPrice(value);
+      if (parsed) return parsed;
+    }
+    return "";
+  }
+
   function findPriceFromText() {
     const bodyText = document.body?.innerText || "";
     const patterns = [
@@ -205,14 +262,6 @@
       ["data", "item", "title"],
     ]);
 
-    const brandFromScripts = pickFirstValue(scriptObjects, [
-      ["item", "brandName"],
-      ["itemDO", "brand"],
-      ["seller", "shopName"],
-      ["shop", "shopName"],
-      ["store", "storeName"],
-    ]);
-
     const priceFromScripts = pickFirstValue(scriptObjects, [
       ["price", "priceText"],
       ["price", "price"],
@@ -253,33 +302,23 @@
     const salesText = text("[class*='sellCount']") || text("[class*='saleCount']") || text("[class*='payCnt']") || text("[class*='dealCnt']");
 
     const name = cleanTitle(
-      jsonLd?.name
+      findPrimaryTitle()
+      || jsonLd?.name
       || titleFromScripts
+      || text("[class*='mainTitle']")
       || text(".mainTitle")
-      || text("[class*='title--']")
       || text("h1")
-      || text("[data-spm-anchor-id] h1")
       || document.title
     );
 
     const price = cleanPrice(
-      getByPath(jsonLd, [["offers", "price"]])
-      || priceFromScripts
-      || text(".tb-rmb-num")
-      || text(".J_price .price")
-      || text("[class*='price']")
-      || text("[class*='priceText']")
+      findPrimaryPrice()
+      || parsePrimaryPrice(getByPath(jsonLd, [["offers", "price"]]))
+      || parsePrimaryPrice(priceFromScripts)
+      || parsePrimaryPrice(text(".tb-rmb-num"))
+      || parsePrimaryPrice(text(".J_price .price"))
+      || parsePrimaryPrice(findPriceFromText())
       || attr("[data-price]", "data-price")
-      || findPriceFromText()
-    );
-
-    const brand = cleanTitle(
-      getByPath(jsonLd, [["brand", "name"]])
-      || brandFromScripts
-      || text(".shop-name-link")
-      || text("[class*='shopName']")
-      || text("[class*='brand']")
-      || text("[class*='sellerName']")
     );
 
     const monthlySales = cleanSales(
@@ -312,7 +351,7 @@
       name,
       price,
       sku_id: itemId,
-      brand,
+      brand: "",
       rating: Number.parseFloat(String(ratingText).replace(/[^\d.]/g, "")) || null,
       review_count: Number.parseInt(String(reviewText).replace(/[^\d]/g, ""), 10) || 0,
       monthly_sales: monthlySales,

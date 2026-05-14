@@ -6,7 +6,7 @@ const LEGACY_API_BASE_HOSTS = new Set([
 const DEFAULTS = {
   loom_api_base: DEFAULT_API_BASE,
   loom_default_mode: "auto",
-  loom_ai_before_save: false,
+  loom_ai_before_save: true,
   loom_platforms: {
     amazon: true,
     taobao: true,
@@ -21,6 +21,7 @@ const DEFAULTS = {
     demandSummary: "summary",
   },
 };
+const DEBUG_EVENT_LIMIT = 300;
 
 const LEGACY_KEY_MAP = {
   pmcopilot_api_base: "loom_api_base",
@@ -70,4 +71,54 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !chrome.sidePanel?.open) return;
   await chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+});
+
+function sanitizeDebugPayload(payload) {
+  if (!payload || typeof payload !== "object") return {};
+  const next = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (/token|cookie|password|secret|authorization/i.test(key)) {
+      next[key] = "[redacted]";
+    } else if (typeof value === "string") {
+      next[key] = value.length > 500 ? `${value.slice(0, 500)}...` : value;
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "LOOM_DEBUG_EVENT") {
+    const event = {
+      ts: new Date().toISOString(),
+      source: message.source || "extension",
+      name: message.name || "event",
+      tabId: sender.tab?.id || message.tabId || null,
+      url: sender.tab?.url || message.url || "",
+      payload: sanitizeDebugPayload(message.payload),
+    };
+    chrome.storage.local.get({ loom_debug_events: [] }, ({ loom_debug_events: events }) => {
+      const next = Array.isArray(events) ? events.slice(-DEBUG_EVENT_LIMIT + 1) : [];
+      next.push(event);
+      chrome.storage.local.set({ loom_debug_events: next });
+      console.log(`[loom:debug] ${event.source}:${event.name}`, event.payload);
+    });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message?.type === "LOOM_DEBUG_EVENTS_GET") {
+    chrome.storage.local.get({ loom_debug_events: [] }, ({ loom_debug_events: events }) => {
+      sendResponse({ ok: true, events: Array.isArray(events) ? events : [] });
+    });
+    return true;
+  }
+
+  if (message?.type === "LOOM_DEBUG_EVENTS_CLEAR") {
+    chrome.storage.local.set({ loom_debug_events: [] }, () => sendResponse({ ok: true }));
+    return true;
+  }
+
+  return undefined;
 });

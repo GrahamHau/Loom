@@ -48,12 +48,15 @@ import {
   listAllUsers,
   listNews,
   listNewsSources,
+  pruneNewsOlderThan,
   rawState,
   revokeApiToken,
   revokeUserApiTokens,
   upsertApiToken,
   releaseLock,
   resetRegularUsersToSampleWorkspace,
+  syncOfficialNewsToAllUsers,
+  syncOfficialNewsToUser,
   touchUserLogin,
   updateDemand,
   updateNews,
@@ -61,6 +64,7 @@ import {
   updateProduct,
   updateResearch,
   updateSettings,
+  visibleNewsItems,
 } from "./repository.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -70,6 +74,12 @@ const port = Number(process.env.PORT || 3000);
 const SQLiteStore = SQLiteStoreFactory(session);
 const wechatExporterAccountsPath = process.env.WECHAT_EXPORTER_ACCOUNTS_PATH || path.join(projectRoot, "data", "wechat-exporter-accounts.json");
 const wechatExporterSourceIntervalMinutes = Number(process.env.WECHAT_EXPORTER_SOURCE_INTERVAL_MINUTES || 1440);
+const wechatCollectHours = String(process.env.WECHAT_COLLECT_HOURS || "9,21")
+  .split(",")
+  .map((value) => Number(value.trim()))
+  .filter((value) => Number.isInteger(value) && value >= 0 && value <= 23);
+const wechatCacheDays = Math.max(1, Number(process.env.WECHAT_CACHE_DAYS || 5));
+const wechatCollectTimezone = process.env.WECHAT_COLLECT_TIMEZONE || "Asia/Shanghai";
 const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE === "true"
   ? true
   : process.env.SESSION_COOKIE_SECURE === "false"
@@ -80,6 +90,7 @@ validateAuthConfig();
 ensureSeed(loadInitialData());
 const legacyUser = ensureLegacyWorkspace();
 const sampleRefreshInFlight = new Set();
+const requestLogEnabled = ["1", "true", "yes"].includes(String(process.env.LOOM_REQUEST_LOG || "").toLowerCase());
 
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "2mb" }));
@@ -96,6 +107,28 @@ app.use(session({
     maxAge: 1000 * 60 * 60 * 24 * 14,
   },
 }));
+
+app.use((req, res, next) => {
+  if (!requestLogEnabled || !req.path.startsWith("/api/")) {
+    next();
+    return;
+  }
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    const durationMs = Date.now() - startedAt;
+    const userId = String(res.locals.loomUserId || req.session?.userId || "");
+    const fields = [
+      "loom:api",
+      req.method,
+      req.path,
+      `status=${res.statusCode}`,
+      `duration=${durationMs}ms`,
+      userId ? `userId=${userId}` : "userId=-",
+    ];
+    console.log(fields.join(" "));
+  });
+  next();
+});
 
 function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -136,6 +169,7 @@ function currentUser(req) {
 function requireAuth(req, res, next) {
   const user = currentUser(req);
   if (!user) return res.status(401).json({ error: "unauthorized" });
+  res.locals.loomUserId = user.id;
   req.session.userId = user.id;
   req.session.user = sessionUserResponse(user);
   next();
@@ -196,8 +230,9 @@ function refreshSampleWorkspaceNews(userId, { force = false } = {}) {
   sampleRefreshInFlight.add(userId);
   setImmediate(async () => {
     try {
-      const collected = await collectSources(userId, listNewsSources(userId));
-      await processCollectedNewsWithLlm(userId, collected);
+      const collected = await collectSources(legacyUser.id, listNewsSources(legacyUser.id));
+      await processCollectedNewsWithLlm(legacyUser.id, collected);
+      syncOfficialNewsToUser(userId);
     } catch (error) {
       console.error("Sample workspace news refresh failed", error);
     } finally {
@@ -215,6 +250,7 @@ function signInLegacyUser(req, res) {
   req.session.regenerate((error) => {
     if (error) return res.status(500).json({ error: "session_regenerate_failed" });
     touchUserLogin(legacyUser.id);
+    res.locals.loomUserId = legacyUser.id;
     req.session.userId = legacyUser.id;
     req.session.user = sessionUserResponse(legacyUser);
     res.json({ user: state.user, token });
@@ -247,6 +283,7 @@ function signInPasswordUser(req, res) {
   req.session.regenerate((error) => {
     if (error) return res.status(500).json({ error: "session_regenerate_failed" });
     touchUserLogin(user.id);
+    res.locals.loomUserId = user.id;
     req.session.userId = user.id;
     req.session.user = sessionUserResponse(user);
     res.json({ user: sessionUserResponse(user), token });
@@ -299,6 +336,35 @@ function syncWechatExporterSourcesForUser(userId) {
     interval: wechatExporterSourceIntervalMinutes,
     type: "wechat_exporter",
   });
+}
+
+function officialRssSources() {
+  return listNewsSources(legacyUser.id).filter((source) => String(source.type || "").toLowerCase() !== "wechat_exporter");
+}
+
+function officialWechatSources() {
+  return listNewsSources(legacyUser.id).filter((source) => String(source.type || "").toLowerCase() === "wechat_exporter");
+}
+
+async function collectOfficialRssSources() {
+  const collected = await collectDueSources(legacyUser.id, officialRssSources());
+  await processCollectedNewsWithLlm(legacyUser.id, collected);
+  pruneNewsOlderThan(legacyUser.id, { sourceGroups: ["official-default", "sample-live"], olderThanDays: 5 });
+  syncOfficialNewsToAllUsers();
+  return collected;
+}
+
+async function collectOfficialWechatSources({ force = false } = {}) {
+  syncWechatExporterSourcesForUser(legacyUser.id);
+  const sources = force ? officialWechatSources() : officialWechatSources().filter((source) => {
+    if (!source.last_fetched_at) return true;
+    const next = new Date(source.last_fetched_at).getTime() + Math.max(1, Number(source.fetch_interval || wechatExporterSourceIntervalMinutes)) * 60 * 1000;
+    return Date.now() >= next;
+  });
+  const collected = await collectSources(legacyUser.id, sources);
+  pruneNewsOlderThan(legacyUser.id, { sourceGroups: ["wechat-exporter"], olderThanDays: wechatCacheDays });
+  syncOfficialNewsToAllUsers();
+  return collected;
 }
 
 app.get("/api/health", (_req, res) => {
@@ -383,17 +449,35 @@ app.get("/api/auth/feishu/callback", asyncHandler(async (req, res) => {
     });
   }
 
-  req.session.userId = localUser.id;
-  req.session.user = buildSessionUser(sessionUserResponse(localUser), profile);
-  touchUserLogin(localUser.id);
-  refreshSampleWorkspaceNews(localUser.id);
-  res.redirect(safeReturnTo(returnTo));
+  req.session.regenerate((error) => {
+    if (error) {
+      console.error("feishu session regenerate failed", error);
+      return res.redirect("/app/?login_error=session_regenerate_failed");
+    }
+    req.session.userId = localUser.id;
+    req.session.user = buildSessionUser(sessionUserResponse(localUser), profile);
+    res.locals.loomUserId = localUser.id;
+    touchUserLogin(localUser.id);
+    refreshSampleWorkspaceNews(localUser.id);
+    res.redirect(safeReturnTo(returnTo));
+  });
 }));
 
 app.post("/api/auth/logout", (req, res) => {
+  const user = currentUser(req);
+  if (user?.id) res.locals.loomUserId = user.id;
   const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
   if (token) revokeApiToken(token);
-  req.session.destroy(() => res.json({ ok: true }));
+  if (user?.id) revokeUserApiTokens(user.id);
+  req.session.destroy(() => {
+    res.clearCookie("connect.sid", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: sessionCookieSecure,
+      path: "/",
+    });
+    res.json({ ok: true });
+  });
 });
 
 app.get("/api/me", (req, res) => {
@@ -404,18 +488,16 @@ app.get("/api/me", (req, res) => {
 
 app.post("/api/auth/extension/session-token", asyncHandler(async (req, res) => {
   const cookieValue = String(req.body?.session_cookie || "").trim();
-  if (!cookieValue) {
-    throw new AppError(400, "missing_session_cookie", "缺少 Web 登录会话。");
-  }
-
-  const user = await loadUserFromSessionCookie(cookieValue);
+  const sessionUser = currentUser(req);
+  const user = sessionUser || (cookieValue ? await loadUserFromSessionCookie(cookieValue) : null);
   if (!user) {
-    throw new AppError(401, "invalid_session_cookie", "当前 Web 登录已失效，请重新登录。");
+    throw new AppError(401, cookieValue ? "invalid_session_cookie" : "missing_session_cookie", "当前 Web 登录已失效，请重新登录。");
   }
 
   const token = apiToken();
   revokeUserApiTokens(user.id);
   upsertApiToken(token, user.id);
+  res.locals.loomUserId = user.id;
   touchUserLogin(user.id);
   refreshSampleWorkspaceNews(user.id);
   res.json({ token, user: sessionUserResponse(user) });
@@ -424,6 +506,7 @@ app.post("/api/auth/extension/session-token", asyncHandler(async (req, res) => {
 app.get("/api/bootstrap", requireAuth, (req, res) => {
   const userId = currentUserId(req);
   refreshSampleWorkspaceNews(userId);
+  syncOfficialNewsToUser(userId);
   res.json(bootstrap(userId));
 });
 
@@ -546,9 +629,12 @@ app.delete("/api/news/:id", requireAuth, (req, res) => {
 });
 app.post("/api/news/collect", requireAuth, asyncHandler(async (req, res) => {
   const userId = currentUserId(req);
-  const collected = await collectSources(userId, listNewsSources(userId));
-  const translated = await processCollectedNewsWithLlm(userId, collected);
-  res.json({ ...collected, translated });
+  const officialCollected = await collectOfficialRssSources();
+  const wechatCollected = await collectOfficialWechatSources({ force: true });
+  const translated = await processCollectedNewsWithLlm(legacyUser.id, officialCollected);
+  const distributed = syncOfficialNewsToAllUsers();
+  syncOfficialNewsToUser(userId);
+  res.json({ ...officialCollected, wechat: wechatCollected, translated, distributed });
 }));
 
 app.post("/api/onboarding/finish-sample", requireAuth, (req, res) => {
@@ -561,8 +647,10 @@ app.post("/api/news/refresh", requireAuth, asyncHandler(async (req, res) => {
   res.json({ message: "采集已触发，后台处理中" });
   setImmediate(async () => {
     try {
-      const collected = await collectSources(userId, listNewsSources(userId));
-      await processCollectedNewsWithLlm(userId, collected);
+      await collectOfficialRssSources();
+      await collectOfficialWechatSources({ force: true });
+      syncOfficialNewsToAllUsers();
+      syncOfficialNewsToUser(userId);
     } catch (error) {
       console.error("Manual news refresh failed", error);
     }
@@ -573,7 +661,7 @@ app.post("/api/news/process-llm", requireAuth, asyncHandler(async (req, res) => 
   res.json(await processNewsWithLlm(currentUserId(req), limit));
 }));
 app.get("/api/news/sources/status", requireAuth, (req, res) => {
-  res.json(listNewsSources(currentUserId(req)).map((source) => ({
+  res.json(listNewsSources(legacyUser.id).map((source) => ({
     id: source.id,
     name: source.name,
     last_fetched_at: source.last_fetched_at,
@@ -581,7 +669,7 @@ app.get("/api/news/sources/status", requireAuth, (req, res) => {
     last_error: source.last_error,
   })));
 });
-app.get("/api/news-sources", requireAuth, (req, res) => res.json(listNewsSources(currentUserId(req))));
+app.get("/api/news-sources", requireAuth, (req, res) => res.json(listNewsSources(currentUserId(req)).filter((source) => String(source.source_group || source.group || "").toLowerCase() === "custom")));
 app.post("/api/news-sources", requireAuth, (req, res) => res.status(201).json(createNewsSource(currentUserId(req), req.body || {})));
 app.patch("/api/news-sources/:id", requireAuth, (req, res) => {
   const item = updateNewsSource(currentUserId(req), req.params.id, req.body || {});
@@ -631,15 +719,54 @@ function startRssScheduler() {
         const state = rawState(user.id);
         const settings = state?.settings || {};
         if (settings.rss_collect_enabled === false || process.env.RSS_COLLECT_ENABLED === "false") continue;
-        syncWechatExporterSourcesForUser(user.id);
-        const collected = await collectDueSources(user.id, listNewsSources(user.id));
-        await processCollectedNewsWithLlm(user.id, collected);
+        await collectOfficialRssSources();
+        break;
       }
     } catch (error) {
       console.error("RSS collect failed", error);
     } finally {
       rssCollecting = false;
       releaseLock("rss-scheduler");
+    }
+  }, interval).unref();
+}
+
+let wechatCollecting = false;
+let lastWechatCollectDateHour = "";
+
+export function zonedDateHour(timeZone, date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    date: `${value.year}-${value.month}-${value.day}`,
+    hour: Number(value.hour),
+  };
+}
+
+function startWechatScheduler() {
+  const interval = Number(process.env.WECHAT_SCHEDULER_CHECK_INTERVAL_MS || 5 * 60 * 1000);
+  setInterval(async () => {
+    const current = zonedDateHour(wechatCollectTimezone);
+    const marker = `${current.date}-${current.hour}`;
+    if (!wechatCollectHours.includes(current.hour) || marker === lastWechatCollectDateHour) return;
+    if (wechatCollecting) return;
+    if (!acquireLock("wechat-scheduler", 60 * 60 * 1000)) return;
+    wechatCollecting = true;
+    try {
+      await collectOfficialWechatSources({ force: true });
+      lastWechatCollectDateHour = marker;
+    } catch (error) {
+      console.error("WeChat collect failed", error);
+    } finally {
+      wechatCollecting = false;
+      releaseLock("wechat-scheduler");
     }
   }, interval).unref();
 }
@@ -684,7 +811,10 @@ if (process.env.NODE_ENV !== "test") {
   app.listen(port, () => {
     console.log(`Loom listening on http://0.0.0.0:${port}`);
   });
-  if (process.env.NODE_ENV === "production") startRssScheduler();
+  if (process.env.NODE_ENV === "production") {
+    startRssScheduler();
+    startWechatScheduler();
+  }
 }
 
 export default app;

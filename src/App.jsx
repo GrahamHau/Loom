@@ -149,6 +149,34 @@ function GlobalSearchModal({ data, onClose, onPick }) {
   );
 }
 
+function DemoModeIntroModal({ onClose, onExit }) {
+  return (
+    <div className="modal-backdrop demo-mode-backdrop" onClick={onClose}>
+      <div className="modal demo-mode-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head demo-mode-modal-head">
+          <div className="demo-mode-modal-title">
+            <Tag tone="accent">演示模式</Tag>
+            <h3>你当前进入的是演示模式</h3>
+          </div>
+          <Btn variant="ghost" icon="x" onClick={onClose} />
+        </div>
+        <div className="modal-body demo-mode-modal-body">
+          <p>
+            这里展示的是一套可直接体验的示例工作区，用来让你快速感受 Stream、Lens、Spark 和 Weave 的完整效果。
+          </p>
+          <p>
+            如果你想回到自己的真实工作区，可以使用右上角的 <strong>退出演示模式</strong> 按钮。
+          </p>
+        </div>
+        <div className="modal-foot demo-mode-modal-foot">
+          <Btn variant="ghost" onClick={onClose}>我知道了</Btn>
+          <Btn className="demo-mode-exit-btn" icon="check" onClick={onExit}>退出演示模式</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: "include",
@@ -177,6 +205,7 @@ function normalizeData(input = {}) {
     newsCounts: input.newsCounts || { all: Array.isArray(input.news) ? input.news.length : 0, new_product: 0, trend: 0, starred: 0 },
     research: Array.isArray(input.research) ? input.research : [],
     rssSources: Array.isArray(input.rssSources) ? input.rssSources : [],
+    officialRssSources: Array.isArray(input.officialRssSources) ? input.officialRssSources : [],
     settings: input.settings || {},
     onboarding: input.onboarding || {},
   };
@@ -304,7 +333,10 @@ function App() {
   const [navTarget, setNavTarget] = useState(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [detailCollapsed, setDetailCollapsed] = useState(false);
+  const [demoIntroOpen, setDemoIntroOpen] = useState(false);
   const [t, setTweak] = useTweaks({ theme: "feishu", mode: "light", showLogin: false });
+  const prevSampleWorkspaceRef = useRef(false);
+  const prevUserIdRef = useRef("");
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", t.theme);
@@ -330,6 +362,21 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const resyncAuth = () => {
+      loadBootstrap().catch((err) => setError(err.message));
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") resyncAuth();
+    };
+    window.addEventListener("focus", resyncAuth);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", resyncAuth);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -337,6 +384,7 @@ function App() {
       }
       if (event.key === "Escape") {
         setSearchOpen(false);
+        setDemoIntroOpen(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -389,15 +437,28 @@ function App() {
     setError("");
     await api("/api/auth/logout", { method: "POST" });
     setMe(null);
+    setData(normalizeData(null));
     setSearchOpen(false);
     setNotificationsOpen(false);
   };
+
+  useEffect(() => {
+    if (!me || !data) return;
+    const isDemo = Boolean(data.onboarding?.sampleWorkspace);
+    if (!isDemo) {
+      setDemoIntroOpen(false);
+    } else if (!prevSampleWorkspaceRef.current || prevUserIdRef.current !== (data.user?.id || me.id || "visitor")) {
+      setDemoIntroOpen(true);
+    }
+    prevSampleWorkspaceRef.current = isDemo;
+    prevUserIdRef.current = data.user?.id || me.id || "visitor";
+  }, [me, data]);
 
   if (!data) {
     return (
       <div className="login-stage">
         <div className="login-card">
-          <div className="login-brand"><div className="mark">L</div><div><div className="name">LOOM</div><div className="sub">正在加载本地数据</div></div></div>
+          <div className="login-brand"><div><div className="name">LOOM</div><div className="sub">正在加载本地数据</div></div></div>
           {error && <div className="ai-block" style={{ color: "var(--danger)" }}>{error}</div>}
         </div>
       </div>
@@ -439,9 +500,6 @@ function App() {
               <Tag tone="accent">示例工作区</Tag>
               <span>{latestNewsAt ? `示例数据 · 更新 ${formatSampleDate(latestNewsAt)}` : "示例数据"}</span>
             </div>
-            {canExitSample ? (
-              <Btn size="sm" variant="primary" icon="check" onClick={finishSampleWorkspace}>开始处理真实数据</Btn>
-            ) : null}
           </div>
         )}
         <div className="topbar">
@@ -454,6 +512,16 @@ function App() {
           {active === "demands" && <span className="topbar-crumb">· {data.demands.length} 条灵感</span>}
           {active === "research" && <span className="topbar-crumb">· {data.research.length} 个项目</span>}
           <div className="topbar-actions">
+            {sampleWorkspace && canExitSample ? (
+              <Btn
+                className="demo-mode-exit-btn"
+                size="sm"
+                icon="check"
+                onClick={finishSampleWorkspace}
+              >
+                退出演示模式
+              </Btn>
+            ) : null}
             <button
               type="button"
               className="topbar-search-trigger"
@@ -509,6 +577,15 @@ function App() {
             setActive(item.screen);
             setNavTarget({ screen: item.screen, id: item.entityId, at: Date.now() });
             setSearchOpen(false);
+          }}
+        />
+      )}
+      {demoIntroOpen && sampleWorkspace && canExitSample && (
+        <DemoModeIntroModal
+          onClose={() => setDemoIntroOpen(false)}
+          onExit={async () => {
+            setDemoIntroOpen(false);
+            await finishSampleWorkspace();
           }}
         />
       )}

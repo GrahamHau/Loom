@@ -188,7 +188,6 @@ function DemandSourceCard({ demand }) {
   const stats = [
     ["点赞", demand?.likes],
     ["收藏", demand?.collects],
-    ["转发", demand?.shares],
     ["评论", demand?.comments],
   ];
   return (
@@ -711,7 +710,6 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
               {grouped[d].map((n) =>
               {
                 const brand = n.type === "新品发布" ? guessBrand(n) : "";
-                const showSource = !sameMetaLabel(brand, n.source);
                 return (
             <div className={`news-card ${n.unread ? "unread" : ""}`} key={n.id} role="button" tabIndex={0}
               onClick={() => openNews(n)}
@@ -734,8 +732,6 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
                     <div className="news-meta">
                       <Tag tone={n.type === "新品发布" ? "accent" : "warn"}>{n.type}</Tag>
                       {brand ? <Tag tone="outline">{brand}</Tag> : null}
-                      {showSource ? <span>{n.source}</span> : null}
-                      {showSource ? <span className="dot">·</span> : null}
                       <span>{formatRelativeTime(n.published_at)}</span>
                     </div>
                   </div>
@@ -954,6 +950,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   );
   const pageSize = 12;
   const paged = paginate(filtered, page, pageSize);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const selected = products.find((p) => p.id === selectedId);
   const selectedProducts = products.filter((item) => selectedIds.includes(item.id));
 
@@ -1125,7 +1122,11 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
             </tbody>
           </table>
         </div>
-        <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
+        {paged.total > pageSize && (
+          <div className="products-pagination-shell">
+            <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
+          </div>
+        )}
       </div>
 
       {selected && !detailCollapsed &&
@@ -2465,6 +2466,7 @@ function PickerModal({ title, items, excludeIds = [], onClose, onPick, renderIte
 // ============ SETTINGS ============
 function SettingsScreen({ data, api, refreshData }) {
   const [sources, setSources] = useState(data.rssSources);
+  const [officialSources, setOfficialSources] = useState(data.officialRssSources || []);
   const [settings, setSettings] = useState(data.settings || {});
   const [notice, setNotice] = useState("");
   const [settingsTab, setSettingsTab] = useState("general");
@@ -2473,14 +2475,16 @@ function SettingsScreen({ data, api, refreshData }) {
   const [deleteSourceTarget, setDeleteSourceTarget] = useState(null);
   const [deleteSourceBusy, setDeleteSourceBusy] = useState(false);
   useEffect(() => setSources(data.rssSources), [data.rssSources]);
+  useEffect(() => setOfficialSources(data.officialRssSources || []), [data.officialRssSources]);
   useEffect(() => setSettings(data.settings || {}), [data.settings]);
   useEffect(() => {
     if (!api) return;
     api("/api/news/sources/status").then((statusList) => {
       const statusMap = new Map((statusList || []).map((item) => [item.id, item]));
       setSources((current) => current.map((source) => ({ ...source, ...(statusMap.get(source.id) || {}) })));
+      setOfficialSources((current) => current.map((source) => ({ ...source, ...(statusMap.get(source.id) || {}) })));
     }).catch(() => {});
-  }, [api, data.rssSources]);
+  }, [api, data.rssSources, data.officialRssSources]);
   const saveSettings = async (patch = settings) => {
     setNotice("");
     try {
@@ -2552,7 +2556,16 @@ function SettingsScreen({ data, api, refreshData }) {
     if (fetchedB !== fetchedA) return fetchedB - fetchedA;
     return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hans-CN");
   });
-  const visibleSources = sourcesExpanded ? sortedSources : sortedSources.slice(0, 4);
+  const customSources = sortedSources.filter((source) => String(source.source_group || source.group || "").toLowerCase() === "custom");
+  const sortedOfficialSources = [...officialSources].sort((a, b) => {
+    const countDiff = Number(b.last_item_count || 0) - Number(a.last_item_count || 0);
+    if (countDiff !== 0) return countDiff;
+    const fetchedA = new Date(a.last_fetched_at || 0).getTime();
+    const fetchedB = new Date(b.last_fetched_at || 0).getTime();
+    if (fetchedB !== fetchedA) return fetchedB - fetchedA;
+    return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hans-CN");
+  });
+  const visibleSources = sourcesExpanded ? customSources : customSources.slice(0, 4);
 
   return (
     <div className="viewport">
@@ -2727,9 +2740,52 @@ function SettingsScreen({ data, api, refreshData }) {
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="rss" size={14} style={{ color: "var(--accent)" }} />
-            <div><h3>News 数据源</h3><div className="desc">RSS 与定向网页源,定时拉取后经 AI 中间层筛选</div></div>
+            <div><h3>官方 RSS 源</h3><div className="desc">系统统一在后端采集并分发到 Stream。你只需要决定是否接收。</div></div>
           </div>
           <div className="settings-section-body">
+            <div className="settings-row">
+              <div className="label">
+                接收官方信息流
+                <div className="hint">关闭后，Stream 将隐藏系统统一分发的官方 RSS 与公众号内容。</div>
+              </div>
+              <Switch on={settings.official_news_enabled !== false} onChange={async (on) => {
+                const next = { ...settings, official_news_enabled: on };
+                setSettings(next);
+                await saveSettings(next);
+              }} />
+            </div>
+            {sortedOfficialSources.map((s) =>
+            <div className="source-row" key={s.id}>
+                <div>
+                  <div style={{ fontWeight: 500 }}>{s.name}</div>
+                  <div className="url">{s.url}</div>
+                  <div className="muted text-sm">
+                    {s.last_fetched_at ? `上次采集 ${formatRelativeTime(s.last_fetched_at)}` : "未采集"}
+                    {` · 条数 ${s.last_item_count || 0}`}
+                    {s.last_error ? ` · 错误 ${s.last_error}` : ""}
+                  </div>
+                </div>
+                <div><Tag tone="outline">{NEWS_SOURCE_TYPE_LABEL[normalizeNewsSourceType(s.type)] || "RSS"}</Tag></div>
+                <div className="muted text-sm">{s.interval} min</div>
+                <div className="source-row-actions">
+                  <Btn size="sm" variant="ghost" icon="external" onClick={() => openSource(s)} />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-head">
+            <Icon name="rss" size={14} style={{ color: "var(--accent)" }} />
+            <div><h3>自定义 News 数据源</h3><div className="desc">默认留空。只在你想补充额外 RSS / 公众号源时手动添加。</div></div>
+          </div>
+          <div className="settings-section-body">
+            {customSources.length === 0 && (
+              <div className="settings-empty-note">
+                还没有自定义数据源。下面可以自己添加。
+              </div>
+            )}
             {visibleSources.map((s) =>
             <div className="source-row" key={s.id}>
                 <div>
@@ -2741,7 +2797,7 @@ function SettingsScreen({ data, api, refreshData }) {
                     {s.last_error ? ` · 错误 ${s.last_error}` : ""}
                   </div>
                 </div>
-                <div><Tag tone="outline">RSS</Tag></div>
+                <div><Tag tone="outline">{NEWS_SOURCE_TYPE_LABEL[normalizeNewsSourceType(s.type)] || "RSS"}</Tag></div>
                 <div className="muted text-sm">{s.interval} min</div>
                 <div className="source-row-actions">
                   <Switch on={s.active} onChange={() => toggle(s.id)} />
@@ -2750,13 +2806,13 @@ function SettingsScreen({ data, api, refreshData }) {
                 </div>
               </div>
             )}
-            {sources.length > 4 &&
+            {customSources.length > 4 &&
               <button
                 type="button"
                 className="sources-expand-btn"
                 onClick={() => setSourcesExpanded((v) => !v)}
               >
-                <span>{sourcesExpanded ? "收起数据源" : `展开全部 ${sources.length} 个数据源`}</span>
+                <span>{sourcesExpanded ? "收起数据源" : `展开全部 ${customSources.length} 个自定义源`}</span>
                 <Icon name={sourcesExpanded ? "chevron-up" : "chevron-down"} size={14} />
               </button>
             }

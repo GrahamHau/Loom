@@ -1008,11 +1008,17 @@
         "[class*='author']",
         "[class*='user']",
         "[class*='avatar']",
+        "[class*='bio']",
+        "[class*='sign']",
+        "[class*='signature']",
+        "[class*='intro']",
         "[class*='input']",
         "[class*='toolbar']",
         "[class*='engage']",
         "[class*='capsule']",
         "[class*='recommend']",
+        "[class*='bottom-container']",
+        "[class*='date']",
       ].join(",")));
     };
     const bestContentCandidate = (selectors, root, titleText, authorText) => {
@@ -1052,9 +1058,78 @@
       ];
       const fallback = bestContentCandidate(fallbackSelectors, detailRoot || scopedRoot, titleText, authorText);
       if (fallback) return fallback.slice(0, 2000);
-      const root = detailRoot || scopedRoot;
+      return "";
+    };
+    const isVisibleElement = (node) => {
+      if (!(node instanceof Element)) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const hasDetailMask = Boolean(document.querySelector(".note-detail-mask"));
+    const findEngagementRoot = () => {
+      const candidates = [
+        scopedRoot?.querySelector(".interactions.engage-bar"),
+        scopedRoot?.querySelector(".engage-bar-container"),
+        scopedRoot?.querySelector(".engage-bar"),
+        scopedRoot?.querySelector(".interact-container"),
+        scopedRoot?.querySelector(".buttons.engage-bar-style"),
+        detailRoot?.querySelector(".interactions.engage-bar"),
+        detailRoot?.querySelector(".engage-bar-container"),
+        detailRoot?.querySelector(".engage-bar"),
+        detailRoot?.querySelector(".interact-container"),
+        detailRoot?.querySelector(".buttons.engage-bar-style"),
+      ].filter(Boolean);
+      return candidates.find((node) => isVisibleElement(node)) || null;
+    };
+    const engagementRoot = findEngagementRoot();
+    const scopedMetricText = (selectors, root) => {
       if (!root) return "";
-      return normalizeNoteText(root.innerText || root.textContent || "", titleText, authorText).slice(0, 2000);
+      for (const selector of selectors) {
+        const nodes = Array.from(root.querySelectorAll(selector));
+        for (const node of nodes) {
+          if (!isVisibleElement(node)) continue;
+          const value = node.textContent?.trim();
+          if (value) return value;
+        }
+      }
+      return "";
+    };
+    const metricLabelPatterns = {
+      likes: [/赞/, /like/i],
+      collects: [/收藏/, /collect/i],
+      comments: [/评论/, /chat/i, /comment/i],
+    };
+    const findMetricFromLabels = (kind, root) => {
+      if (!root) return 0;
+      const patterns = metricLabelPatterns[kind] || [];
+      const nodes = Array.from(root.querySelectorAll("button, div, span"));
+      for (const node of nodes) {
+        if (!isVisibleElement(node)) continue;
+        const textValue = (node.textContent || "").replace(/\s+/g, " ").trim();
+        const ariaValue = node.getAttribute?.("aria-label") || "";
+        if (!patterns.some((pattern) => pattern.test(textValue) || pattern.test(ariaValue))) continue;
+        const group = node.closest("button, [role='button'], .left, .right, .buttons, .interact-container, .engage-bar") || node.parentElement || node;
+        const groupText = (group?.textContent || textValue).replace(/\s+/g, " ").trim();
+        const count = parseCount(groupText);
+        if (count) return count;
+        if (kind === "likes" && /赞|like/i.test(textValue || ariaValue || groupText)) return 0;
+        if (kind === "collects" && /收藏|collect/i.test(textValue || ariaValue || groupText)) return 0;
+        if (kind === "comments" && /评论|chat|comment/i.test(textValue || ariaValue || groupText)) return 0;
+      }
+      return 0;
+    };
+    const pickMetricCount = (kind, selectors) => {
+      const overlayStrictRoots = hasDetailMask
+        ? [engagementRoot, scopedRoot, detailRoot].filter(Boolean)
+        : [engagementRoot, detailRoot, scopedRoot, document].filter(Boolean);
+      for (const root of overlayStrictRoots) {
+        const textValue = scopedMetricText(selectors, root);
+        const count = parseCount(textValue);
+        if (count) return count;
+        const labeledCount = findMetricFromLabels(kind, root);
+        if (labeledCount || (hasDetailMask && root === engagementRoot)) return labeledCount;
+      }
+      return 0;
     };
     const title = scopedText(["#detail-title", ".title", "h1"], detailRoot) || bootstrapTitleNode?.textContent?.trim() || document.title;
     const content = extractDetailContent();
@@ -1069,10 +1144,9 @@
     return {
       title,
       content,
-      likes: parseCount(scopedText(["[class*='like-wrapper'] [class*='count']", ".like-count"], detailRoot) || text("[class*='like-wrapper'] [class*='count']") || text(".like-count")),
-      collects: parseCount(scopedText(["[class*='collect-wrapper'] [class*='count']", ".collect-count"], detailRoot) || text("[class*='collect-wrapper'] [class*='count']") || text(".collect-count")),
-      shares: pickShareCount(),
-      comments: parseCount(scopedText(["[class*='chat-wrapper'] [class*='count']", ".comment-count"], detailRoot) || text("[class*='chat-wrapper'] [class*='count']") || text(".comment-count")),
+      likes: pickMetricCount("likes", ["[class*='like-wrapper'] [class*='count']", ".like-count", ".like-wrapper .count"]),
+      collects: pickMetricCount("collects", ["[class*='collect-wrapper'] [class*='count']", ".collect-count", ".collect-wrapper .count"]),
+      comments: pickMetricCount("comments", ["[class*='chat-wrapper'] [class*='count']", ".comment-count", ".chat-wrapper .count"]),
       visible_comments: pickVisibleComments(),
       thumbnail_url: thumbnail,
       author: scopedText(["[class*='username']", ".author-name", "a[href*='/user/profile/']"], detailRoot) || text("[class*='username']") || text(".author-name"),

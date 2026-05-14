@@ -248,7 +248,7 @@ export async function parseDemandRaw(userId, { platform, data }) {
 URL：${source.url || ""}
 标题：${source.title || source.name || ""}
 作者：${source.author || source.brand || ""}
-互动：点赞 ${source.likes || 0}，收藏 ${source.collects || 0}，转发 ${source.shares || 0}，评论 ${source.comments || 0}
+互动：点赞 ${source.likes || 0}，收藏 ${source.collects || 0}，评论 ${source.comments || 0}
 内容：${source.content || source.description || ""}`,
     maxTokens: 240,
   });
@@ -270,7 +270,6 @@ URL：${source.url || ""}
     author: source.author || "",
     likes: safeNumber(source.likes) || 0,
     collects: safeNumber(source.collects) || 0,
-    shares: safeNumber(source.shares) || 0,
     comments: safeNumber(source.comments) || 0,
     date: source.date || new Date().toISOString().slice(0, 10),
     thumbHue: source.thumbHue ?? 180,

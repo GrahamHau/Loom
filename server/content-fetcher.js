@@ -23,6 +23,15 @@ function firstMatch(html, patterns) {
   return "";
 }
 
+function firstJsonString(value, keys) {
+  for (const key of keys) {
+    const pattern = new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`, "i");
+    const match = String(value || "").match(pattern);
+    if (match?.[1]) return normalizeExtractedValue(match[1]);
+  }
+  return "";
+}
+
 function decodeHtml(text) {
   return String(text || "")
     .replace(/&amp;/g, "&")
@@ -114,7 +123,7 @@ export async function fetchPageHtml(url) {
 }
 
 function extractImageFromHtml(html, pageUrl) {
-  return resolveAssetUrl(firstMatch(html, [
+  const metaImage = resolveAssetUrl(firstMatch(html, [
     /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+name=["']twitter:image:src["'][^>]+content=["']([^"']+)["']/i,
@@ -125,20 +134,32 @@ function extractImageFromHtml(html, pageUrl) {
     /"images"\s*:\s*\[\s*"([^"]+)"/i,
     /"imageList"\s*:\s*\[\s*"([^"]+)"/i,
   ]), pageUrl);
+  if (metaImage) return metaImage;
+
+  const bodyImage = firstMatch(html, [
+    /<img[^>]+(?:data-src|data-original|data-lazy-src|data-actualsrc|src)=["']([^"']+)["'][^>]*>/i,
+    /<source[^>]+srcset=["']([^"']+)["'][^>]*>/i,
+  ]);
+  const srcsetCandidate = String(bodyImage || "").split(",")[0]?.trim().split(/\s+/)[0] || "";
+  return resolveAssetUrl(srcsetCandidate || bodyImage, pageUrl);
 }
 
 export async function fetchPageImage(url) {
   const { parsed, response, html } = await fetchPageResponse(url);
   const pageUrl = response.url || parsed.toString();
+  const articleUrl = firstJsonString(html, ["url", "articleUrl", "canonicalUrl"]);
   return {
     url: pageUrl,
+    articleUrl: articleUrl && !articleUrl.includes("news.google.com") ? articleUrl : "",
     image: extractImageFromHtml(html, pageUrl),
   };
 }
 
 export async function resolvePageUrl(url) {
-  const { parsed, response } = await fetchPageResponse(url);
-  return response.url || parsed.toString();
+  const { parsed, response, html } = await fetchPageResponse(url);
+  const pageUrl = response.url || parsed.toString();
+  const articleUrl = firstJsonString(html, ["url", "articleUrl", "canonicalUrl"]);
+  return articleUrl && !articleUrl.includes("news.google.com") ? articleUrl : pageUrl;
 }
 
 export async function fetchPageContent(url) {

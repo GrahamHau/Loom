@@ -7,7 +7,7 @@ const LEGACY_API_BASE_HOSTS = new Set([
 const DEFAULTS = {
   loom_api_base: DEFAULT_API_BASE,
   loom_default_mode: "auto",
-  loom_ai_before_save: false,
+  loom_ai_before_save: true,
   loom_platforms: {
     amazon: true,
     taobao: true,
@@ -50,6 +50,13 @@ const LEGACY_KEY_MAP = {
   pmcopilot_field_mapping: "loom_field_mapping",
 };
 
+let currentLlmSettings = null;
+let llmLoading = false;
+let llmSaving = false;
+let llmTesting = false;
+
+document.addEventListener("DOMContentLoaded", load);
+
 function normalizeApiBase(value) {
   const raw = String(value || "").trim().replace(/\/$/, "");
   if (!raw) return DEFAULT_API_BASE;
@@ -61,8 +68,6 @@ function normalizeApiBase(value) {
     return DEFAULT_API_BASE;
   }
 }
-
-document.addEventListener("DOMContentLoaded", load);
 
 async function load() {
   const data = await getSettings();
@@ -80,6 +85,7 @@ async function load() {
   document.getElementById("map-demand-summary").value = mapping.demandSummary || "summary";
   await refreshConnectionState(data);
   bind();
+  await refreshLlmSettings({ silent: true });
 }
 
 async function getSettings() {
@@ -113,6 +119,9 @@ function bind() {
     await chrome.storage.local.set(DEFAULTS);
     await load();
   };
+  document.getElementById("refresh-llm").onclick = () => refreshLlmSettings();
+  document.getElementById("save-llm").onclick = saveLlmSettings;
+  document.getElementById("test-llm").onclick = testLlmSettings;
 }
 
 function openWebLogin() {
@@ -131,6 +140,7 @@ async function logout() {
   try {
     await fetch(`${apiBase}/api/auth/logout`, {
       method: "POST",
+      credentials: "include",
       headers: stored.loom_token ? { Authorization: `Bearer ${stored.loom_token}` } : {},
     });
   } catch {}
@@ -138,7 +148,10 @@ async function logout() {
     await chrome.cookies.remove({ url: apiBase, name: "connect.sid" });
   } catch {}
   await chrome.storage.local.remove(["loom_token", "loom_user", "pmcopilot_token", "pmcopilot_user"]);
+  currentLlmSettings = null;
+  fillLlmForm(null);
   setConnection("已退出登录，请在 Web 端重新登录");
+  setLlmState("等待 Web 端登录");
 }
 
 async function saveSettings() {
@@ -166,6 +179,24 @@ function setConnection(message) {
   document.getElementById("connection-state").textContent = message;
 }
 
+function setLlmState(message) {
+  document.getElementById("llm-state").textContent = message;
+}
+
+function updateLlmActionState() {
+  const disabled = llmLoading || llmSaving || llmTesting;
+  document.getElementById("refresh-llm").disabled = disabled;
+  document.getElementById("save-llm").disabled = disabled;
+  document.getElementById("test-llm").disabled = disabled;
+}
+
+function fillLlmForm(settings) {
+  document.getElementById("llm-api-type").value = settings?.llm_api_type || "openai";
+  document.getElementById("llm-model").value = settings?.llm_model || "";
+  document.getElementById("llm-api-url").value = settings?.llm_api_url || "";
+  document.getElementById("llm-api-key").value = settings?.llm_api_key || "";
+}
+
 async function refreshConnectionState(stored = null) {
   const data = stored || await getSettings();
   const apiBase = normalizeApiBase(document.getElementById("api-base")?.value.trim() || data.loom_api_base || DEFAULTS.loom_api_base);
@@ -182,5 +213,95 @@ async function refreshConnectionState(stored = null) {
     setConnection(`已登录 · ${payload.user?.name || payload.user?.email || "当前账号"}`);
   } catch (error) {
     setConnection(`登录态已失效：${error.message}`);
+  }
+}
+
+async function authedFetch(path, options = {}) {
+  const stored = await getSettings();
+  const apiBase = normalizeApiBase(document.getElementById("api-base")?.value.trim() || stored.loom_api_base || DEFAULTS.loom_api_base);
+  if (!stored.loom_token) {
+    throw new Error("请先在 Web 端登录");
+  }
+  const response = await fetch(`${apiBase}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${stored.loom_token}`,
+      ...(options.headers || {}),
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.message || payload.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function refreshLlmSettings({ silent = false } = {}) {
+  llmLoading = true;
+  updateLlmActionState();
+  if (!silent) setLlmState("正在同步…");
+  try {
+    const settings = await authedFetch("/api/settings");
+    currentLlmSettings = settings || {};
+    fillLlmForm(currentLlmSettings);
+    const configured = Boolean(settings?.llm_api_url && settings?.llm_model && settings?.llm_api_key);
+    setLlmState(configured ? "已同步 · 已配置" : "已同步 · 尚未配置完整");
+  } catch (error) {
+    currentLlmSettings = null;
+    fillLlmForm(null);
+    setLlmState(error.message || "同步失败");
+  } finally {
+    llmLoading = false;
+    updateLlmActionState();
+  }
+}
+
+function collectLlmPayload() {
+  return {
+    llm_api_type: document.getElementById("llm-api-type").value || "openai",
+    llm_model: document.getElementById("llm-model").value.trim(),
+    llm_api_url: document.getElementById("llm-api-url").value.trim(),
+    llm_api_key: document.getElementById("llm-api-key").value.trim() || (currentLlmSettings?.llm_api_key || ""),
+  };
+}
+
+async function saveLlmSettings() {
+  llmSaving = true;
+  updateLlmActionState();
+  setLlmState("正在保存…");
+  try {
+    const payload = collectLlmPayload();
+    const saved = await authedFetch("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    currentLlmSettings = saved || {};
+    fillLlmForm(currentLlmSettings);
+    const configured = Boolean(saved?.llm_api_url && saved?.llm_model && saved?.llm_api_key);
+    setLlmState(configured ? "已保存 · 已配置" : "已保存 · 尚未配置完整");
+  } catch (error) {
+    setLlmState(error.message || "保存失败");
+  } finally {
+    llmSaving = false;
+    updateLlmActionState();
+  }
+}
+
+async function testLlmSettings() {
+  llmTesting = true;
+  updateLlmActionState();
+  setLlmState("正在测试连接…");
+  try {
+    await authedFetch("/api/settings/test-llm", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    setLlmState("测试通过");
+  } catch (error) {
+    setLlmState(error.message || "测试失败");
+  } finally {
+    llmTesting = false;
+    updateLlmActionState();
   }
 }

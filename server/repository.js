@@ -17,6 +17,8 @@ import { normalizeTagGroups } from "./tag-config.js";
 import { buildEmptyState } from "./seed.js";
 import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
+const STREAM_NEWS_MAX_AGE_DAYS = Math.max(1, Number(process.env.STREAM_NEWS_MAX_AGE_DAYS || 5));
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -230,6 +232,27 @@ function cleanRecordList(value) {
   return cleanArray(value, 20);
 }
 
+function parseIsoTime(value) {
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function isOfficialSourceGroup(value) {
+  const group = String(value || "").toLowerCase();
+  return group === "official-default" || group === "sample-live" || group === "wechat-exporter";
+}
+
+function isOfficialSourceLike(source = {}) {
+  return isOfficialSourceGroup(source.source_group || source.group);
+}
+
+function isOfficialNewsItem(item = {}) {
+  return isOfficialSourceGroup(item?.classification?.source_group) ||
+    String(item?.source_id || "").startsWith("default-news-") ||
+    String(item?.source_id || "").startsWith("sample-news-");
+}
+
 export function maskSettings(settings) {
   const masked = { ...settings };
   if (masked.llm_api_key) masked.llm_api_key = "********";
@@ -284,10 +307,8 @@ export function ensureLocalUser(input = {}) {
   const saved = findUserById(user.id);
   if (input.withSampleWorkspace) {
     ensureSampleUserState(saved);
-    ensureSampleNewsSources(saved.id);
   } else {
     ensureUserState(saved);
-    ensureDefaultNewsSources(saved.id);
   }
   return saved;
 }
@@ -322,19 +343,46 @@ export function listAllUsers() {
   return db.prepare("SELECT * FROM users ORDER BY created_at ASC").all().map(mapUserRow);
 }
 
+function isVisibleNewsItem(item) {
+  if (!item) return false;
+  const publishedAt = parseIsoTime(item.published_at || item.date);
+  if (publishedAt && Date.now() - publishedAt > STREAM_NEWS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000) return false;
+  const sourceId = String(item.source_id || "");
+  if (sourceId.startsWith("sample-news-")) return Boolean(item.type);
+  if (!item.type) return false;
+  if (item.classification?.reason === "manual_llm_filtered") return false;
+  if (item.needsTranslation) return false;
+  if (item.contentZh === "" && item.summary === "" && item.titleZh === item.original_title) return false;
+  return true;
+}
+
+export function visibleNewsItems(userId) {
+  const state = requireState(userId);
+  if (!state) return [];
+  const officialEnabled = state?.settings?.official_news_enabled !== false;
+  const visible = listNews(userId).filter((item) => {
+    if (!isVisibleNewsItem(item)) return false;
+    if (!officialEnabled && isOfficialNewsItem(item)) return false;
+    return true;
+  });
+  return isSampleWorkspace(state) ? visible.filter((item) => isRecentSampleNews(item)) : visible;
+}
+
 export function bootstrap(userId) {
   const state = requireState(userId);
   if (!state) return null;
-  const allNews = listNews(userId);
-  const news = isSampleWorkspace(state) ? allNews.filter((item) => isRecentSampleNews(item)) : allNews;
+  const news = visibleNewsItems(userId);
   state.news = news.slice(0, 30);
   state.newsCounts = newsCountsFrom(news);
-  state.rssSources = listNewsSources(userId);
+  state.rssSources = listNewsSources(userId).filter((source) => !isOfficialSourceLike(source));
+  state.officialRssSources = listNewsSources(getLegacyUserId()).filter((source) => isOfficialSourceLike(source));
   state.onboarding = onboardingMeta(state, news);
   state.user = userSummaryFromState(state, findUserById(userId) || { id: userId });
   if (state.settings) {
+    const llmConfigured = Boolean(state.settings.llm_api_url && state.settings.llm_model && state.settings.llm_api_key);
     state.settings = { ...state.settings, tag_groups: normalizeTagGroups(state.settings.tag_groups) };
     state.settings = maskSettings(state.settings);
+    state.settings.llm_configured = llmConfigured;
   }
   return state;
 }
@@ -347,6 +395,38 @@ export function rawState(userId) {
     state.settings = { ...state.settings, tag_groups: normalizeTagGroups(state.settings.tag_groups) };
   }
   return state;
+}
+
+export function resetRegularUsersToSampleWorkspace() {
+  const legacyUserId = getLegacyUserId();
+  const sampleNewsSeed = visibleNewsItems(legacyUserId).map((item) => ({
+    source_id: item.source_id,
+    source: item.source,
+    source_authority: item.source_authority,
+    original_title: item.original_title,
+    original_url: item.original_url,
+    original_content: item.original_content,
+    titleZh: item.titleZh,
+    summary: item.summary,
+    contentZh: item.contentZh,
+    type: item.type,
+    thumbnail_url: item.thumbnail_url,
+    thumbHue: item.thumbHue,
+    published_at: item.published_at,
+    llmProcessed: true,
+    needsTranslation: false,
+    classification: item.classification,
+  }));
+  const users = listAllUsers().filter((user) => user.id !== legacyUserId);
+  const reset = [];
+  for (const user of users) {
+    ensureSampleUserState(user, { force: true });
+    db.prepare("DELETE FROM news_items WHERE user_id = ?").run(user.id);
+    db.prepare("DELETE FROM news_sources WHERE user_id = ? AND COALESCE(source_group, group_name, '') NOT IN ('official-default', 'sample-live', 'wechat-exporter')").run(user.id);
+    if (sampleNewsSeed.length) upsertNews(user.id, sampleNewsSeed);
+    reset.push(user.id);
+  }
+  return { reset };
 }
 
 export function createProduct(userId, input) {
@@ -559,6 +639,7 @@ export function updateSettings(userId, patch) {
       "feishu_demands_table_id",
       "feishu_news_table_id",
       "feishu_table_token",
+      "official_news_enabled",
       "rss_collect_enabled",
       "rss_collect_interval_ms",
     ];
@@ -592,7 +673,6 @@ export function finishSampleWorkspace(userId) {
     state.products = (state.products || []).filter((item) => !item.sample);
     state.demands = (state.demands || []).filter((item) => !item.sample);
     state.research = (state.research || []).filter((item) => !item.sample);
-    ensureDefaultNewsSources(userId);
     return state;
   });
 }
@@ -604,6 +684,49 @@ export function listNews(userId) {
     WHERE user_id = ?
     ORDER BY published_at DESC, created_at DESC
   `).all(userId).map(mapNewsRow);
+}
+
+export function officialNewsItems() {
+  return listNews(getLegacyUserId()).filter((item) => isOfficialNewsItem(item) && isVisibleNewsItem(item));
+}
+
+export function syncOfficialNewsToUser(userId) {
+  if (!userId || userId === getLegacyUserId()) return { inserted: [], updated: [] };
+  pruneNewsOlderThan(userId, { sourceGroups: ["official-default", "sample-live", "wechat-exporter"], olderThanDays: STREAM_NEWS_MAX_AGE_DAYS });
+  const items = officialNewsItems().map((item) => ({
+    source_id: item.source_id,
+    source: item.source,
+    source_authority: item.source_authority,
+    original_title: item.original_title,
+    original_url: item.original_url,
+    original_content: item.original_content,
+    titleZh: item.titleZh,
+    summary: item.summary,
+    contentZh: item.contentZh,
+    type: item.type,
+    thumbnail_url: item.thumbnail_url,
+    thumbHue: item.thumbHue,
+    published_at: item.published_at,
+    llmProcessed: !item.needsTranslation,
+    needsTranslation: item.needsTranslation,
+    classification: item.classification,
+  }));
+  const result = upsertNews(userId, items);
+  pruneNewsOlderThan(userId, { sourceGroups: ["official-default", "sample-live", "wechat-exporter"], olderThanDays: STREAM_NEWS_MAX_AGE_DAYS });
+  return result;
+}
+
+export function syncOfficialNewsToAllUsers() {
+  return listAllUsers()
+    .filter((user) => user.id !== getLegacyUserId())
+    .map((user) => {
+      const synced = syncOfficialNewsToUser(user.id);
+      return {
+        userId: user.id,
+        inserted: synced.inserted.length,
+        updated: synced.updated.length,
+      };
+    });
 }
 
 export function listPendingNewsForLlm(userId, limit = 20) {
@@ -655,14 +778,42 @@ export function deleteNews(userId, id) {
   return db.prepare("DELETE FROM news_items WHERE id = ? AND user_id = ?").run(id, userId).changes > 0;
 }
 
+export function pruneNewsOlderThan(userId, { sourceGroups = [], olderThanDays = 5 } = {}) {
+  const groups = cleanArray(sourceGroups);
+  if (!groups.length) return 0;
+  const cutoff = new Date(Date.now() - Math.max(1, Number(olderThanDays || 5)) * 24 * 60 * 60 * 1000).toISOString();
+  const placeholders = groups.map(() => "?").join(", ");
+  return db.prepare(`
+    DELETE FROM news_items
+    WHERE user_id = ?
+      AND COALESCE(published_at, created_at) < ?
+      AND COALESCE(json_extract(classification_json, '$.source_group'), '') IN (${placeholders})
+  `).run(userId, cutoff, ...groups).changes;
+}
+
 export function upsertNews(userId, items) {
   const inserted = [];
   const updated = [];
   const selectStmt = db.prepare("SELECT * FROM news_items WHERE user_id = ? AND original_url = ?");
-  const updateImageStmt = db.prepare(`
+  const updateExistingStmt = db.prepare(`
     UPDATE news_items
-    SET thumbnail_url = ?,
-        classification_json = COALESCE(?, classification_json),
+    SET source_id = ?,
+        source_name = ?,
+        source_authority = ?,
+        original_title = ?,
+        original_summary = ?,
+        original_content = ?,
+        title_zh = ?,
+        summary_zh = ?,
+        content_zh = ?,
+        type = ?,
+        thumbnail_url = ?,
+        thumb_hue = ?,
+        is_kept = ?,
+        published_at = ?,
+        llm_processed = ?,
+        needs_translation = ?,
+        classification_json = ?,
         updated_at = ?
     WHERE id = ? AND user_id = ?
   `);
@@ -679,14 +830,84 @@ export function upsertNews(userId, items) {
       if (!input.original_url) continue;
       const current = selectStmt.get(userId, input.original_url);
       if (current) {
-        if (!current.thumbnail_url && input.thumbnail_url) {
-          const mappedCurrent = mapNewsRow(current);
-          const classificationJson = input.classification ? JSON.stringify({
-            ...(current.classification_json ? JSON.parse(current.classification_json) : {}),
-            ...input.classification,
-          }) : null;
-          updateImageStmt.run(input.thumbnail_url, classificationJson, nowIso(), current.id, userId);
-          updated.push({ ...mappedCurrent, thumbnail_url: input.thumbnail_url, classification: input.classification || mappedCurrent.classification });
+        const currentPublishedAt = parseIsoTime(current.published_at);
+        const nextPublishedAt = parseIsoTime(input.published_at || input.date);
+        const mergedPublishedAt = nextPublishedAt >= currentPublishedAt
+          ? (input.published_at || input.date || current.published_at || nowIso())
+          : (current.published_at || input.published_at || input.date || nowIso());
+        const currentClassification = current.classification_json ? JSON.parse(current.classification_json) : {};
+        const mergedClassification = {
+          ...currentClassification,
+          ...(input.classification || {}),
+        };
+        const nextType = input.type ?? current.type;
+        const nextThumbnail = input.thumbnail_url || current.thumbnail_url || "";
+        const nextNeedsTranslation = input.needsTranslation !== undefined ? (input.needsTranslation ? 1 : 0) : current.needs_translation;
+        const nextLlmProcessed = input.llmProcessed !== undefined
+          ? (input.llmProcessed ? 1 : 0)
+          : (nextType ? 1 : current.llm_processed);
+        const nextPayload = {
+          source_id: input.source_id || current.source_id,
+          source_name: input.source || current.source_name,
+          source_authority: input.source_authority || input.classification?.authority || current.source_authority || "watchlist",
+          original_title: input.original_title || current.original_title,
+          original_summary: input.summary || current.original_summary || "",
+          original_content: input.original_content || current.original_content || "",
+          title_zh: input.titleZh || current.title_zh || input.original_title || current.original_title,
+          summary_zh: input.summary || current.summary_zh || current.original_summary || "",
+          content_zh: input.contentZh || current.content_zh || "",
+          type: nextType,
+          thumbnail_url: nextThumbnail,
+          thumb_hue: Number(input.thumbHue ?? current.thumb_hue ?? 40),
+          is_kept: nextType ? 1 : current.is_kept,
+          published_at: mergedPublishedAt,
+          llm_processed: nextLlmProcessed,
+          needs_translation: nextNeedsTranslation,
+          classification_json: Object.keys(mergedClassification).length ? JSON.stringify(mergedClassification) : null,
+        };
+        const hasChanges = (
+          nextPayload.source_id !== current.source_id ||
+          nextPayload.source_name !== current.source_name ||
+          nextPayload.source_authority !== current.source_authority ||
+          nextPayload.original_title !== current.original_title ||
+          nextPayload.original_summary !== (current.original_summary || "") ||
+          nextPayload.original_content !== (current.original_content || "") ||
+          nextPayload.title_zh !== (current.title_zh || "") ||
+          nextPayload.summary_zh !== (current.summary_zh || "") ||
+          nextPayload.content_zh !== (current.content_zh || "") ||
+          nextPayload.type !== current.type ||
+          nextPayload.thumbnail_url !== (current.thumbnail_url || "") ||
+          nextPayload.thumb_hue !== (current.thumb_hue ?? 40) ||
+          nextPayload.is_kept !== current.is_kept ||
+          nextPayload.published_at !== current.published_at ||
+          nextPayload.llm_processed !== current.llm_processed ||
+          nextPayload.needs_translation !== current.needs_translation ||
+          nextPayload.classification_json !== (current.classification_json || null)
+        );
+        if (hasChanges) {
+          updateExistingStmt.run(
+            nextPayload.source_id,
+            nextPayload.source_name,
+            nextPayload.source_authority,
+            nextPayload.original_title,
+            nextPayload.original_summary,
+            nextPayload.original_content,
+            nextPayload.title_zh,
+            nextPayload.summary_zh,
+            nextPayload.content_zh,
+            nextPayload.type,
+            nextPayload.thumbnail_url,
+            nextPayload.thumb_hue,
+            nextPayload.is_kept,
+            nextPayload.published_at,
+            nextPayload.llm_processed,
+            nextPayload.needs_translation,
+            nextPayload.classification_json,
+            nowIso(),
+            current.id,
+            userId
+          );
+          updated.push(mapNewsRow({ ...current, ...nextPayload, updated_at: nowIso() }));
         }
         continue;
       }
@@ -781,11 +1002,67 @@ export function createNewsSource(userId, input) {
   return listNewsSources(userId).find((item) => item.id === source.id) || null;
 }
 
+export function importWechatExporterAccounts(userId, manifest = {}, options = {}) {
+  const accounts = Array.isArray(manifest?.accounts) ? manifest.accounts : [];
+  const interval = clampFetchInterval(options.interval || manifest?.interval || 1440);
+  const type = cleanText(options.type, "wechat_exporter");
+  const created = [];
+  const updated = [];
+  const skipped = [];
+
+  for (const account of accounts) {
+    const fakeid = cleanText(account?.fakeid);
+    const nickname = cleanTitle(account?.nickname || account?.name, "");
+    if (!fakeid || !nickname) {
+      skipped.push({
+        fakeid,
+        name: nickname || cleanText(account?.nickname || account?.name, "未命名公众号"),
+        reason: "missing_fakeid_or_name",
+      });
+      continue;
+    }
+
+    const existing = listNewsSources(userId).find((source) =>
+      cleanText(source?.type).toLowerCase() === "wechat_exporter" &&
+      /[?&](fakeid|id)=/.test(String(source?.url || "")) &&
+      String(source.url).includes(encodeURIComponent(fakeid))
+    );
+
+    const payload = {
+      name: nickname,
+      url: `?fakeid=${encodeURIComponent(fakeid)}`,
+      type,
+      interval,
+      authority: "watchlist",
+      group: "wechat-exporter",
+      source_group: "wechat-exporter",
+      brand: nickname,
+      active: true,
+    };
+
+    if (existing) {
+      const next = updateNewsSource(userId, existing.id, payload);
+      if (next) updated.push(next);
+      continue;
+    }
+
+    const next = createNewsSource(userId, payload);
+    if (next) created.push(next);
+  }
+
+  return {
+    created,
+    updated,
+    skipped,
+    total: accounts.length,
+  };
+}
+
 export function ensureSampleNewsSources(userId) {
   const existing = new Set(listNewsSources(userId).map((source) => source.id));
   const created = [];
   for (const source of SAMPLE_NEWS_SOURCES) {
-    const id = sampleSourceId(userId, source.id);
+    const id = userId === getLegacyUserId() ? source.id : sampleSourceId(userId, source.id);
     if (existing.has(id)) continue;
     created.push(createNewsSource(userId, {
       ...source,
@@ -802,7 +1079,7 @@ export function ensureDefaultNewsSources(userId) {
   const existing = new Set(listNewsSources(userId).map((source) => source.id));
   const created = [];
   for (const source of DEFAULT_NEWS_SOURCES) {
-    const id = sampleSourceId(userId, source.id);
+    const id = userId === getLegacyUserId() ? source.id : sampleSourceId(userId, source.id);
     if (existing.has(id)) continue;
     created.push(createNewsSource(userId, {
       ...source,
@@ -893,6 +1170,7 @@ export function ensureLegacyWorkspace() {
   });
   ensureSampleUserState(user, { force: true });
   ensureSampleNewsSources(user.id);
+  ensureDefaultNewsSources(user.id);
   return user;
 }
 

@@ -8,6 +8,7 @@ const TOKEN_KEY = "loom_token";
 const USER_KEY = "loom_user";
 const DEFAULT_MODE_KEY = "loom_default_mode";
 const AI_BEFORE_SAVE_KEY = "loom_ai_before_save";
+const LLM_NOTICE_DISMISSED_KEY = "loom_llm_notice_dismissed";
 const LEGACY_KEY_MAP = {
   pmcopilot_api_base: API_BASE_KEY,
   pmcopilot_token: TOKEN_KEY,
@@ -30,7 +31,16 @@ const EXTRACTOR_FILES = {
   xiaohongshu: "content/xiaohongshu.js",
   kickstarter: "content/kickstarter.js",
 };
+const PLATFORM_WAITING_COPY = {
+  amazon: "请进入 Amazon 商品详情页后自动采集",
+  taobao: "请进入淘宝/天猫商品详情页后自动采集",
+  xiaohongshu: "请点进某一条小红书笔记后自动采集",
+  kickstarter: "请进入 Kickstarter 项目详情页后自动采集",
+};
 const DEFAULT_TAG_GROUPS = [
+  { key: "competitor_brands", name: "竞品品牌", tone: "outline", tags: ["Ulanzi", "DJI", "Insta360", "SmallRig", "NEEWER", "Tilta", "K&F CONCEPT", "Godox", "Nanlite", "Zhiyun", "智云", "Aputure", "Rode", "RODE"] },
+  { key: "camera_brands", name: "主机品牌", tone: "outline", tags: ["影石", "GoPro", "Apple", "Sony", "Canon", "Nikon", "Fujifilm", "Panasonic", "LUMIX"] },
+  { key: "product_categories", name: "产品品类", tone: "default", tags: ["灯光", "稳定器", "三脚架", "镜头", "麦克风", "相机配件", "运动相机", "无人机"] },
   { key: "scenarios", name: "使用场景", tone: "accent", tags: ["Vlog/自拍", "直播/带货", "短视频创作", "户外旅拍", "室内棚拍", "桌面俯拍", "运动/极限拍摄", "会议/活动记录", "产品摄影", "延时/慢动作", "街拍/纪实", "教育/网课"] },
   { key: "painpoints", name: "用户痛点", tone: "danger", tags: ["携带不便/太重", "续航不足", "操作复杂/学习成本高", "画质不够", "防抖不足", "散热过热", "噪音大", "兼容性差", "配件缺失/需另购", "安装固定麻烦", "调光/调色不精准", "无线连接不稳定", "收纳困难", "价格过高/性价比低", "做工质感差"] },
   { key: "innovation_types", name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] },
@@ -70,10 +80,13 @@ const state = {
   relationPickerQuery: "",
   relationPickerError: "",
   tagGroups: DEFAULT_TAG_GROUPS,
+  llmConfigured: false,
   tagPicker: null,
   commentCollecting: false,
   commentCollectStartedAt: 0,
   commentListExpanded: false,
+  processingAi: false,
+  llmNoticeDismissed: false,
 };
 
 let autoSyncTimer = null;
@@ -82,6 +95,9 @@ let commentCollectorTimer = null;
 let pendingUrlSync = false;
 let loginStatusTimer = null;
 let syncInFlight = null;
+let autoSyncBound = false;
+let storageStateBound = false;
+let successReturnTimer = null;
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -93,6 +109,17 @@ function cleanText(value, fallback = "") {
   return text;
 }
 
+function debugEvent(name, payload = {}) {
+  try {
+    chrome.runtime.sendMessage({
+      type: "LOOM_DEBUG_EVENT",
+      source: "sidepanel",
+      name,
+      payload,
+    });
+  } catch {}
+}
+
 function isVisitorUser(user) {
   const id = String(user?.id || "").toLowerCase();
   const name = String(user?.name || "").trim().toLowerCase();
@@ -101,31 +128,48 @@ function isVisitorUser(user) {
 
 document.addEventListener("DOMContentLoaded", init);
 document.addEventListener("click", handleGlobalClick);
+window.addEventListener("focus", () => {
+  void resyncAuthWhenIdle({ source: "window-focus" });
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    void resyncAuthWhenIdle({ source: "visibility-visible" });
+  }
+});
 
 async function init() {
   const stored = await getStoredSettings();
   state.apiBase = normalizeApiBase(stored[API_BASE_KEY] || DEFAULT_API_BASE);
   state.token = stored[TOKEN_KEY] || "";
   state.user = stored[USER_KEY] || null;
+  state.llmNoticeDismissed = Boolean(stored[LLM_NOTICE_DISMISSED_KEY]);
   state.sessionCookie = await getSessionCookieValue();
   state.syncedSessionCookie = state.token ? state.sessionCookie : "";
+  debugEvent("panel:init", {
+    apiBase: state.apiBase,
+    hasToken: Boolean(state.token),
+    hasSessionCookie: Boolean(state.sessionCookie),
+  });
   bindLoginStateSync();
+  bindStorageStateSync();
   if (!state.token) {
     renderLoginWait("请先在 Web 端完成登录");
-    void syncAuthFromWebSession();
+    void syncAuthFromWebSession({ force: true });
+    return;
+  }
+  if (!state.sessionCookie && !(await verifyStoredToken({ silent: false }))) {
     return;
   }
   if (stored[AI_BEFORE_SAVE_KEY] === undefined) {
-    await chrome.storage.local.set({ [AI_BEFORE_SAVE_KEY]: false });
+    await chrome.storage.local.set({ [AI_BEFORE_SAVE_KEY]: true });
   }
-  renderLoading("正在读取当前页面");
   bindAutoSync();
   await loadTagGroups();
   await loadCurrentPage(stored[DEFAULT_MODE_KEY] || "auto");
 }
 
 async function getStoredSettings() {
-  const keys = [API_BASE_KEY, TOKEN_KEY, USER_KEY, DEFAULT_MODE_KEY, AI_BEFORE_SAVE_KEY, ...Object.keys(LEGACY_KEY_MAP)];
+  const keys = [API_BASE_KEY, TOKEN_KEY, USER_KEY, DEFAULT_MODE_KEY, AI_BEFORE_SAVE_KEY, LLM_NOTICE_DISMISSED_KEY, ...Object.keys(LEGACY_KEY_MAP)];
   const stored = await chrome.storage.local.get(keys);
   const migrated = {};
   if (stored[API_BASE_KEY] !== undefined) {
@@ -146,39 +190,53 @@ async function getStoredSettings() {
 async function loadCurrentPage(defaultMode = "auto") {
   state.reloading = false;
   try {
+    if (!(await ensureAuthenticatedForPanel({ silent: false }))) return;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     state.tab = tab;
     state.lastSeenUrl = tab?.url || "";
+    debugEvent("collect:read-start", { url: state.lastSeenUrl, defaultMode });
     const result = await readPageData(tab);
     if (!result?.ok) {
       state.page = null;
-      renderUnsupported(result?.error || "unsupported_page");
+      debugEvent("collect:wait", {
+        url: state.lastSeenUrl,
+        platform: result?.platform || "",
+        reason: result?.error || "unsupported_page",
+      });
+      renderCollectionWait(result?.error || "unsupported_page");
       return;
     }
     state.page = result;
     state.message = "";
-    state.mode = defaultMode === "demand"
-      ? "demand"
-      : defaultMode === "product"
-        ? "product"
-        : DEMAND_PLATFORMS.has(result.platform) ? "demand" : "product";
+    state.mode = modeForPlatform(result.platform, defaultMode);
     state.tagPicker = null;
     stopCommentCollector();
     state.processed = result.data;
     state.form = buildDraft(state.mode, state.processed);
     state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
+    debugEvent("collect:read-ok", {
+      platform: result.platform,
+      mode: state.mode,
+      title: result.data?.title || result.data?.name || "",
+      hasImage: Boolean(result.data?.image || result.data?.thumbnail_url),
+    });
     renderMain();
   } catch (error) {
     state.page = null;
-    renderUnsupported(error.message || "无法读取页面");
+    debugEvent("collect:read-error", { error: error.message || "waiting_for_collect" });
+    renderCollectionWait(error.message || "waiting_for_collect");
   }
 }
 
 async function readPageData(tab) {
   if (!tab?.id) throw new Error("没有可读取的当前页面");
-  const platform = detectPlatformFromUrl(tab.url || "");
-  if (platform === "xiaohongshu" && !isXhsNoteUrl(tab.url || "")) {
-    throw new Error("请先打开一条小红书笔记详情页，再进行采集");
+  if (isLoomWebUrl(tab.url || "")) {
+    return { ok: false, error: "loom_web_page" };
+  }
+  const detection = detectPageTarget(tab.url || "");
+  const platform = detection.platform;
+  if (platform && !detection.detail) {
+    return { ok: false, platform, error: "waiting_for_detail_page" };
   }
   try {
     if (platform) {
@@ -217,25 +275,56 @@ async function readInjectedPageData(tabId, platform) {
 }
 
 function detectPlatformFromUrl(url) {
+  return detectPageTarget(url).platform;
+}
+
+function modeForPlatform(platform, preferredMode = "auto") {
+  if (preferredMode === "demand") return "demand";
+  if (preferredMode === "product") return "product";
+  return DEMAND_PLATFORMS.has(platform) ? "demand" : "product";
+}
+
+function detectPageTarget(url) {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname;
     const href = parsed.href.toLowerCase();
-    if (host.includes("amazon.")) return "amazon";
-    if (host.includes("taobao.com") || host.includes("tmall.com")) return "taobao";
-    if (host.includes("xiaohongshu.com")) return "xiaohongshu";
-    if (host.includes("kickstarter.com") && href.includes("/projects/")) return "kickstarter";
+    if (host.includes("amazon.")) {
+      return { platform: "amazon", detail: /^\/(?:[^/]+\/)?dp\/[a-z0-9]{10}(?:[/?]|$)/i.test(parsed.pathname) || /\/gp\/product\/[a-z0-9]{10}/i.test(parsed.pathname) };
+    }
+    if (host.includes("taobao.com")) {
+      return { platform: "taobao", detail: parsed.hostname.includes("item.taobao.com") && /(?:^|[?&])id=\d+/.test(parsed.search) };
+    }
+    if (host.includes("tmall.com")) {
+      return { platform: "taobao", detail: parsed.hostname.includes("detail.tmall.com") && /(?:^|[?&])id=\d+/.test(parsed.search) };
+    }
+    if (host.includes("xiaohongshu.com")) {
+      return { platform: "xiaohongshu", detail: isXhsNoteUrl(url) };
+    }
+    if (host.includes("kickstarter.com")) {
+      return { platform: "kickstarter", detail: href.includes("/projects/") };
+    }
   } catch {
-    return null;
+    return { platform: null, detail: false };
   }
-  return null;
+  return { platform: null, detail: false };
+}
+
+function isLoomWebUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const api = new URL(apiOrigin() || state.apiBase || DEFAULT_API_BASE);
+    return parsed.hostname === api.hostname;
+  } catch {
+    return false;
+  }
 }
 
 function shouldAutoSyncUrl(url) {
   try {
-    const parsed = new URL(url);
-    if (!parsed.hostname.includes("xiaohongshu.com")) return true;
-    return isXhsNoteUrl(url);
+    const detection = detectPageTarget(url);
+    if (!detection.platform) return false;
+    return true;
   } catch {
     return false;
   }
@@ -250,10 +339,26 @@ function isXhsNoteUrl(url) {
   }
 }
 
+function waitingCopyForPlatform(platform) {
+  return PLATFORM_WAITING_COPY[platform] || "请进入支持的详情页后自动采集";
+}
+
+function clearSuccessReturnTimer() {
+  if (!successReturnTimer) return;
+  clearTimeout(successReturnTimer);
+  successReturnTimer = null;
+}
+
+async function resyncAuthWhenIdle(payload = {}) {
+  if (state.busy || state.reloading || syncInFlight) return;
+  debugEvent("auth:resync-request", payload);
+  await syncAuthFromWebSession({ silent: false, force: true });
+}
+
 async function processRaw() {
   if (!state.page?.data) return;
   const endpoint = state.mode === "product" ? "/api/products/parse-raw" : "/api/demands/parse-raw";
-  state.busy = true;
+  debugEvent("parse-raw:start", { endpoint, platform: state.page.platform, mode: state.mode });
   try {
     const data = await api(endpoint, {
       method: "POST",
@@ -262,34 +367,59 @@ async function processRaw() {
     state.processed = { ...state.page.data, ...data };
     state.form = buildDraft(state.mode, state.processed);
     state.message = "AI 结构化完成";
+    debugEvent("parse-raw:ok", {
+      endpoint,
+      title: state.processed?.title || state.processed?.name || "",
+      tagCount: safeArray(state.processed?.tags).length + safeArray(state.processed?.scenarios).length + safeArray(state.processed?.painpoints).length,
+    });
   } catch (error) {
     state.processed = state.page.data;
     state.form = buildDraft(state.mode, state.processed);
+    debugEvent("parse-raw:error", { endpoint, code: error.code || "", error: error.message || "parse failed" });
+    if (error.code === "llm_not_configured") {
+      state.llmConfigured = false;
+      state.llmNoticeDismissed = false;
+      await chrome.storage.local.set({ [LLM_NOTICE_DISMISSED_KEY]: false });
+      state.message = "还没有配置 AI 模型，暂时不能使用 AI 整理。请先到设置里填写 LLM。";
+      return;
+    }
     state.message = `AI 处理失败，已保留原始字段：${error.message}`;
-  } finally {
-    state.busy = false;
   }
 }
 
 async function reloadCurrentPage() {
   state.reloading = true;
-  renderLoading("正在重新抓取当前页面");
+  debugEvent("collect:reload-start", { url: state.tab?.url || state.lastSeenUrl || "" });
+  if (state.page || state.form) {
+    state.message = "正在重新抓取当前页面…";
+    renderMain();
+  } else {
+    renderCollectionWait("waiting_for_collect");
+  }
   try {
+    if (!(await ensureAuthenticatedForPanel({ silent: false }))) return;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) state.tab = tab;
     state.lastSeenUrl = state.tab?.url || state.lastSeenUrl;
     const result = await readPageData(state.tab);
     if (!result?.ok) throw new Error(result?.error || "重新抓取失败");
+    const stored = await getStoredSettings();
     state.page = result;
+    state.mode = modeForPlatform(result.platform, stored[DEFAULT_MODE_KEY] || "auto");
     state.processed = result.data;
     stopCommentCollector();
     state.form = buildDraft(state.mode, state.processed);
     state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
+    debugEvent("collect:reload-ok", {
+      platform: result.platform,
+      title: result.data?.title || result.data?.name || "",
+      hasImage: Boolean(result.data?.image || result.data?.thumbnail_url),
+    });
     renderMain();
   } catch (error) {
     state.reloading = false;
-    state.message = `刷新失败：${error.message}`;
-    renderMain();
+    debugEvent("collect:reload-error", { error: error.message || "waiting_for_collect" });
+    renderCollectionWait(error.message || "waiting_for_collect");
   } finally {
     state.reloading = false;
     if (pendingUrlSync) {
@@ -300,14 +430,16 @@ async function reloadCurrentPage() {
 }
 
 function bindAutoSync() {
-  chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-    if (!state.tab?.id || tabId !== state.tab.id) return;
+  if (autoSyncBound) return;
+  autoSyncBound = true;
+  chrome.tabs.onActivated.addListener(async () => {
     await scheduleAutoSync();
   });
 
   chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
-    if (!state.tab?.id || tabId !== state.tab.id) return;
     if (!changeInfo.url && changeInfo.status !== "complete") return;
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id || activeTab.id !== tabId) return;
     await scheduleAutoSync();
   });
 
@@ -316,6 +448,41 @@ function bindAutoSync() {
       void scheduleAutoSync();
     }, 800);
   }
+}
+
+function bindStorageStateSync() {
+  if (storageStateBound || !chrome.storage?.onChanged) return;
+  storageStateBound = true;
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") return;
+    void (async () => {
+      const apiBaseChange = changes[API_BASE_KEY] || changes.pmcopilot_api_base;
+      if (apiBaseChange?.newValue !== undefined) {
+        state.apiBase = normalizeApiBase(apiBaseChange.newValue);
+      }
+      const userChange = changes[USER_KEY] || changes.pmcopilot_user;
+      if (userChange) {
+        state.user = userChange.newValue || null;
+      }
+      const tokenChange = changes[TOKEN_KEY] || changes.pmcopilot_token;
+      if (!tokenChange) return;
+      const nextToken = String(tokenChange.newValue || "");
+      if (!nextToken) {
+        if (!state.token) return;
+        await clearAuthState();
+        renderLoginWait("请先在 Web 端登录 LOOM");
+        return;
+      }
+      if (nextToken === state.token) return;
+      state.token = nextToken;
+      state.sessionCookie = await getSessionCookieValue();
+      state.syncedSessionCookie = state.sessionCookie;
+      bindAutoSync();
+      await loadTagGroups();
+      const stored = await getStoredSettings();
+      await loadCurrentPage(stored[DEFAULT_MODE_KEY] || "auto");
+    })();
+  });
 }
 
 async function scheduleAutoSync() {
@@ -333,7 +500,6 @@ async function syncIfUrlChanged() {
   }
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
-  if (state.tab?.id && tab.id !== state.tab.id) return;
   const nextUrl = tab.url || "";
   if (!nextUrl || nextUrl === state.lastSeenUrl) return;
   if (!shouldAutoSyncUrl(nextUrl)) {
@@ -343,10 +509,18 @@ async function syncIfUrlChanged() {
   }
   state.tab = tab;
   state.lastSeenUrl = nextUrl;
+  const detection = detectPageTarget(nextUrl);
+  if (detection.platform && !detection.detail) {
+    debugEvent("collect:detail-wait", { platform: detection.platform, url: nextUrl });
+    renderWaitingForDetail();
+    return;
+  }
+  debugEvent("collect:detail-detected", { platform: detection.platform, url: nextUrl });
   await reloadCurrentPage();
 }
 
 async function api(path, options = {}) {
+  const method = options.method || "GET";
   const res = await fetch(`${state.apiBase}${path}`, {
     ...options,
     headers: {
@@ -356,7 +530,14 @@ async function api(path, options = {}) {
     },
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || data.error || `请求失败 ${res.status}`);
+  if (path !== "/api/me") {
+    debugEvent("api:response", { method, path, status: res.status, ok: res.ok });
+  }
+  if (!res.ok) {
+    const error = new Error(data.message || data.error || `请求失败 ${res.status}`);
+    error.code = data.error || "";
+    throw error;
+  }
   return data;
 }
 
@@ -391,8 +572,112 @@ async function getSessionCookieValue() {
 async function clearAuthState() {
   state.token = "";
   state.user = null;
+  state.sessionCookie = "";
   state.syncedSessionCookie = "";
+  state.page = null;
+  state.processed = null;
+  state.form = null;
+  state.message = "";
   await chrome.storage.local.remove([TOKEN_KEY, USER_KEY, "pmcopilot_token", "pmcopilot_user"]);
+}
+
+async function applyExtensionSession(data, sessionCookie = "") {
+  if (!data?.token) throw new Error("服务器未返回插件登录凭证");
+  if (isVisitorUser(data.user)) {
+    await clearAuthState();
+    debugEvent("auth:visitor-blocked", { userId: data.user?.id || "" });
+    renderLoginWait("检测到当前 Web 端是访客账号，请先在 Web 端退出访客状态，再登录正式账号。");
+    return false;
+  }
+  await chrome.storage.local.set({
+    [API_BASE_KEY]: state.apiBase,
+    [TOKEN_KEY]: data.token,
+    [USER_KEY]: data.user || null,
+  });
+  state.token = data.token;
+  state.user = data.user || null;
+  state.syncedSessionCookie = sessionCookie || state.sessionCookie || "";
+  debugEvent("auth:token-ok", { userId: data.user?.id || "", userName: data.user?.name || "" });
+  bindAutoSync();
+  await loadTagGroups();
+  await loadCurrentPage((await getStoredSettings())[DEFAULT_MODE_KEY] || "auto");
+  return true;
+}
+
+async function trySyncAuthFromLoomTab() {
+  const origin = apiOrigin();
+  if (!origin || !chrome.scripting?.executeScript) return false;
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ url: [`${origin}/*`] });
+  } catch {
+    tabs = await chrome.tabs.query({});
+  }
+  const candidates = safeArray(tabs)
+    .filter((tab) => tab?.id && isLoomWebUrl(tab.url || ""))
+    .sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)));
+  for (const tab of candidates) {
+    try {
+      const [injection] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: async (apiBase) => {
+          try {
+            const res = await fetch(`${apiBase}/api/auth/extension/session-token`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),
+            });
+            const data = await res.json().catch(() => ({}));
+            return { ok: res.ok, status: res.status, data };
+          } catch (error) {
+            return { ok: false, status: 0, error: error?.message || "loom_tab_sync_failed" };
+          }
+        },
+        args: [origin],
+      });
+      const result = injection?.result || null;
+      debugEvent("auth:loom-tab-sync", {
+        ok: Boolean(result?.ok),
+        status: result?.status || 0,
+        tabId: tab.id,
+      });
+      if (result?.ok && result.data?.token) {
+        return applyExtensionSession(result.data, state.sessionCookie || "loom-tab");
+      }
+    } catch (error) {
+      debugEvent("auth:loom-tab-sync-error", {
+        tabId: tab.id,
+        error: error.message || "loom_tab_sync_failed",
+      });
+    }
+  }
+  return false;
+}
+
+async function ensureAuthenticatedForPanel(options = {}) {
+  if (!state.token) {
+    renderLoginWait(options.statusText || "请先在 Web 端登录 LOOM");
+    return false;
+  }
+  return verifyStoredToken(options);
+}
+
+async function verifyStoredToken(options = {}) {
+  if (!state.token) return false;
+  try {
+    const data = await api("/api/me");
+    state.user = data.user || state.user;
+    if (data.user) {
+      await chrome.storage.local.set({ [USER_KEY]: data.user });
+    }
+    return true;
+  } catch (error) {
+    await clearAuthState();
+    renderLoginWait(options.loggedOutMessage || "Web 端登录已退出，请重新登录 LOOM");
+    return false;
+  }
 }
 
 async function removeSessionCookie() {
@@ -406,50 +691,46 @@ async function removeSessionCookie() {
 async function syncAuthFromWebSession(options = {}) {
   if (syncInFlight) return syncInFlight;
   syncInFlight = (async () => {
-    const cookieValue = await getSessionCookieValue();
-    state.sessionCookie = cookieValue;
-
-    if (!cookieValue) {
-      if (state.token || state.user) await clearAuthState();
-      if (!options.silent) renderLoginWait("请先在 Web 端登录 LOOM");
-      return false;
-    }
-
-    if (!options.force && state.token && state.syncedSessionCookie && state.syncedSessionCookie === cookieValue) {
-      return true;
-    }
-
     try {
-      if (!options.silent) renderLoginWait("已检测到登录态，正在同步插件权限");
+      debugEvent("auth:start", { force: Boolean(options.force), silent: Boolean(options.silent) });
+      const cookieValue = await getSessionCookieValue();
+      state.sessionCookie = cookieValue;
+
+      if (!cookieValue && !options.force) {
+        if (await trySyncAuthFromLoomTab()) return true;
+        debugEvent("auth:no-session-cookie", { hasToken: Boolean(state.token), hasUser: Boolean(state.user) });
+        if (state.token) {
+          return verifyStoredToken({
+            ...options,
+            loggedOutMessage: "Web 端登录已退出，请重新登录 LOOM",
+          });
+        }
+        if (state.user) await clearAuthState();
+        renderLoginWait("请先在 Web 端登录 LOOM");
+        return false;
+      }
+
+      if (!options.force && state.token && state.syncedSessionCookie && state.syncedSessionCookie === cookieValue) {
+        return verifyStoredToken({
+          ...options,
+          loggedOutMessage: "Web 端登录已退出，请重新登录 LOOM",
+        });
+      }
+
       const res = await fetch(`${state.apiBase}/api/auth/extension/session-token`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_cookie: cookieValue }),
       });
       const data = await res.json().catch(() => ({}));
+      debugEvent("auth:session-token-response", { status: res.status, ok: res.ok });
       if (!res.ok) throw new Error(data.message || data.error || `请求失败 ${res.status}`);
-      if (!data.token) throw new Error("服务器未返回插件登录凭证");
-      if (isVisitorUser(data.user)) {
-        await clearAuthState();
-        if (!options.silent) {
-          renderLoginWait("检测到当前 Web 端是访客账号，请先在 Web 端退出访客状态，再登录正式账号。");
-        }
-        return false;
-      }
-      await chrome.storage.local.set({
-        [API_BASE_KEY]: state.apiBase,
-        [TOKEN_KEY]: data.token,
-        [USER_KEY]: data.user || null,
-      });
-      state.token = data.token;
-      state.user = data.user || null;
-      state.syncedSessionCookie = cookieValue;
-      if (!options.silent) renderLoading("正在读取当前页面");
-      await loadTagGroups();
-      await loadCurrentPage((await getStoredSettings())[DEFAULT_MODE_KEY] || "auto");
-      return true;
+      return applyExtensionSession(data, cookieValue);
     } catch (error) {
+      if (await trySyncAuthFromLoomTab()) return true;
       if (state.token || state.user) await clearAuthState();
+      debugEvent("auth:error", { error: error.message || "登录同步失败" });
       if (!options.silent) renderLoginWait(error.message || "登录同步失败，请重新打开 Web 端");
       return false;
     } finally {
@@ -477,7 +758,8 @@ function bindLoginStateSync() {
 
   if (!loginStatusTimer) {
     loginStatusTimer = setInterval(() => {
-      void syncAuthFromWebSession({ silent: true });
+      const shouldForce = !state.token;
+      void syncAuthFromWebSession({ silent: true, force: shouldForce });
     }, 4000);
   }
 }
@@ -485,13 +767,21 @@ function bindLoginStateSync() {
 async function loadTagGroups() {
   try {
     const data = await api("/api/bootstrap");
-    state.tagGroups = safeArray(data?.settings?.tag_groups).length ? data.settings.tag_groups : DEFAULT_TAG_GROUPS;
+    const settings = data?.settings || {};
+    state.tagGroups = safeArray(settings.tag_groups).length ? settings.tag_groups : DEFAULT_TAG_GROUPS;
+    state.llmConfigured = Boolean(settings.llm_configured);
+    if (state.llmConfigured && state.llmNoticeDismissed) {
+      state.llmNoticeDismissed = false;
+      await chrome.storage.local.set({ [LLM_NOTICE_DISMISSED_KEY]: false });
+    }
   } catch {
     state.tagGroups = DEFAULT_TAG_GROUPS;
+    state.llmConfigured = false;
   }
 }
 
 function renderLoginWait(statusText = "请先在 Web 端登录 LOOM") {
+  clearSuccessReturnTimer();
   document.getElementById("app").innerHTML = `
     <div class="shell shell-login-minimal">
       <button class="icon-btn login-minimal-settings" id="open-options" title="设置">⚙</button>
@@ -499,8 +789,8 @@ function renderLoginWait(statusText = "请先在 Web 端登录 LOOM") {
         <div class="login-minimal-spinner" aria-hidden="true">
           ${swirlSpinnerIcon()}
         </div>
-        <div class="login-minimal-title">等待登录完成</div>
-        <div class="login-minimal-sub">请在 Web 端登录后返回，插件会自动同步当前账号</div>
+        <div class="login-minimal-title">未登录</div>
+        <div class="login-minimal-sub">去 Web 端登录后，这里会自动同步</div>
         <button class="btn primary login-minimal-btn" id="open-web-login" type="button">现在登录</button>
         <div class="login-minimal-status">${escapeHtml(statusText)}</div>
       </div>
@@ -551,47 +841,91 @@ function renderLoading(text) {
 }
 
 function renderUnsupported(reason) {
+  if (reason === "waiting_for_detail_page") {
+    return renderWaitingForDetail();
+  }
+  return renderCollectionWait(reason);
+}
+
+function renderCollectionWait(reason = "waiting_for_collect") {
+  clearSuccessReturnTimer();
+  const isLoomPage = reason === "loom_web_page";
+  const title = "待采集";
+  const description = isLoomPage
+    ? "切回可采集页面后会自动开始"
+    : "检测到可采集页面后会自动开始";
+  const hint = isLoomPage
+    ? "回到可采集页面"
+    : "等待可采集页面";
   document.getElementById("app").innerHTML = `
-    <div class="shell">
-      ${headerHtml({ title: "当前页面无法采集", warning: true })}
-      <div class="cl-body cl-unsupported-body">
-        <div class="cl-unsupported">
-          <div class="cl-unsupported-title">未识别为支持的平台</div>
-          <div class="cl-unsupported-text">LOOM 目前只在以下平台自动采集，可以在设置中调整白名单。</div>
-          <div class="platform-list">
-            <div class="platform-list-row"><span class="platform-pill amz">Amazon</span><span class="platform-list-url mono">amazon.com/dp/*</span><span class="tag outline">竞品</span></div>
-            <div class="platform-list-row"><span class="platform-pill tb">淘宝/天猫</span><span class="platform-list-url mono">item.taobao.com · detail.tmall.com</span><span class="tag outline">竞品</span></div>
-            <div class="platform-list-row"><span class="platform-pill ks">Kickstarter</span><span class="platform-list-url mono">kickstarter.com/projects/*</span><span class="tag outline">竞品</span></div>
-            <div class="platform-list-row"><span class="platform-pill xhs">小红书</span><span class="platform-list-url mono">xiaohongshu.com/explore/*</span><span class="tag outline">需求</span></div>
-          </div>
-          <div class="cl-hint">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
-            <span>也可以在 LOOM Web 端手动新建竞品 / 需求</span>
-          </div>
+    <div class="shell shell-login-minimal">
+      <button class="icon-btn login-minimal-settings" id="open-options" title="设置">⚙</button>
+      <div class="login-minimal">
+        <div class="login-minimal-spinner" aria-hidden="true">
+          ${swirlSpinnerIcon()}
         </div>
-      </div>
-      <div class="cl-foot">
-        <button class="btn ghost grow" id="refresh" type="button">重新检测</button>
-        <button class="btn primary grow" id="open-web" type="button">打开 Web 端</button>
+        <div class="login-minimal-title">${escapeHtml(title)}</div>
+        <div class="login-minimal-sub">${escapeHtml(description)}</div>
+        <button class="btn primary login-minimal-btn" id="refresh" type="button">重新检测</button>
+        <div class="login-minimal-status">${escapeHtml(hint)}</div>
       </div>
     </div>`;
-  bindHeader();
+  document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
   document.getElementById("refresh").onclick = () => loadCurrentPage();
-  document.getElementById("open-web").onclick = () => chrome.tabs.create({ url: state.apiBase });
+}
+
+function renderWaitingForDetail() {
+  clearSuccessReturnTimer();
+  const platform = detectPlatformFromUrl(state.lastSeenUrl || state.tab?.url || "");
+  const title = PLATFORM_LABELS[platform] || "已识别";
+  const hint = platform === "xiaohongshu"
+    ? "点进笔记详情"
+    : platform === "amazon"
+      ? "点进商品详情"
+      : platform === "taobao"
+        ? "点进商品详情"
+        : platform === "kickstarter"
+          ? "点进项目详情"
+          : "进入详情页";
+  document.getElementById("app").innerHTML = `
+    <div class="shell shell-login-minimal">
+      <button class="icon-btn login-minimal-settings" id="open-options" title="设置">⚙</button>
+      <div class="login-minimal">
+        <div class="login-minimal-spinner" aria-hidden="true">
+          ${swirlSpinnerIcon()}
+        </div>
+        <div class="login-minimal-title">已识别</div>
+        <div class="login-minimal-sub">${escapeHtml(title)} 已识别，进入详情后自动采集</div>
+        <button class="btn primary login-minimal-btn" id="retry-detect" type="button">重新检测</button>
+        <div class="login-minimal-status">${escapeHtml(hint)}</div>
+      </div>
+    </div>`;
+  document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
+  document.getElementById("retry-detect").onclick = () => loadCurrentPage();
 }
 
 function renderMain() {
+  clearSuccessReturnTimer();
   const item = state.form || buildDraft(state.mode, state.processed || state.page?.data || {});
   const platform = state.page.platform;
   const canProduct = PRODUCT_PLATFORMS.has(platform);
   const canDemand = DEMAND_PLATFORMS.has(platform) || platform === "kickstarter";
+  const aiLabel = state.processingAi
+    ? `<span class="top-action-spinner" aria-label="AI 整理中">${spinIcon()}</span>`
+    : "AI 整理";
   document.getElementById("app").innerHTML = `
     <div class="shell">
       ${headerHtml({ platform, mode: state.mode, loading: state.reloading })}
       <div class="cl-top-actions">
         <button class="btn top-action" id="save-top" ${state.busy ? "disabled" : ""}>保存</button>
-        <button class="btn top-action" id="process-top" ${state.busy ? "disabled" : ""}>${state.busy ? "处理中..." : "AI 整理"}</button>
+        <button class="btn top-action ${state.processingAi ? "is-processing" : ""}" id="process-top" ${state.busy ? "disabled" : ""}>${aiLabel}</button>
       </div>
+      ${!state.llmConfigured && !state.llmNoticeDismissed ? `
+        <div class="cl-top-notice">
+          <div class="cl-top-notice-copy">还没有配置 AI 模型，AI 整理暂不可用。可先保存，或去设置里补上 LLM。</div>
+          <button class="cl-top-notice-close" id="dismiss-llm-notice" type="button" aria-label="关闭提示">×</button>
+        </div>
+      ` : ""}
 
       <nav class="cl-tabs">
         <button class="cl-tab ${state.mode === "product" ? "active" : ""}" id="mode-product">竞品</button>
@@ -614,13 +948,31 @@ function renderMain() {
   document.getElementById("mode-product").onclick = () => switchMode("product", canProduct, "此页面建议使用需求模式");
   document.getElementById("mode-demand").onclick = () => switchMode("demand", canDemand, "此页面建议使用竞品模式");
   const handleProcess = async () => {
-    renderLoading("AI 结构化中");
+    if (state.processingAi) return;
+    if (!state.llmConfigured) {
+      state.message = "还没有配置 AI 模型，暂时不能使用 AI 整理。请先到设置里填写 LLM。";
+      renderMain();
+      return;
+    }
+    state.busy = true;
+    state.processingAi = true;
+    renderMain();
     await processRaw();
+    state.processingAi = false;
+    state.busy = false;
     renderMain();
   };
   document.getElementById("process-top").onclick = handleProcess;
   document.getElementById("save-top").onclick = saveCurrent;
   document.getElementById("refresh-bottom").onclick = () => reloadCurrentPage();
+  const dismissNoticeButton = document.getElementById("dismiss-llm-notice");
+  if (dismissNoticeButton) {
+    dismissNoticeButton.onclick = async () => {
+      state.llmNoticeDismissed = true;
+      await chrome.storage.local.set({ [LLM_NOTICE_DISMISSED_KEY]: true });
+      renderMain();
+    };
+  }
   const relationButton = document.getElementById("open-relation");
   if (relationButton) relationButton.onclick = openRelationPicker;
   const relationBackdrop = document.querySelector("[data-relation-backdrop]");
@@ -761,7 +1113,6 @@ function buildDraft(mode, item) {
     author: cleanText(item?.author || item?.username || item?.creator, ""),
     likes: Number(item?.likes || 0),
     collects: Number(item?.collects || item?.favorites || 0),
-    shares: Number(item?.shares || item?.reposts || item?.forwards || 0),
     comments: Number(item?.comments || 0),
     visible_comments: mergeComments([], item?.visible_comments),
     innovation: cleanText(item?.innovation || item?.tags_innovation, "待分类"),
@@ -923,13 +1274,13 @@ function productView(item) {
   const listingBullets = safeArray(state.processed?.raw_bullets || state.processed?.listing_bullets || state.page?.data?.raw_bullets || state.page?.data?.listing_bullets);
   const mergedSellingPoints = safeArray(item.selling_points).length ? safeArray(item.selling_points) : listingBullets;
   return `
-    <div class="cl-detail-head-card">
-      <div class="cl-detail-head-main">
-        <input class="ghost-input cl-detail-title-input" data-key="name" value="${escapeAttr(item.name || "")}" placeholder="填入商品名">
-        <div class="cl-state"><span class="dot"></span>${escapeHtml(PLATFORM_LABELS[state.page.platform] || state.page.platform)} · ${state.mode === "product" ? "竞品采集" : "需求采集"}</div>
+    <div class="source-capture-card product-capture-card">
+      <div class="source-card-media product-card-media">
+        ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="">` : `<div class="ph">PRODUCT<br>IMG</div>`}
       </div>
-      <div class="cl-preview-cover">
-        ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="" style="width:100%;height:100%;object-fit:cover">` : `<div class="ph">PRODUCT<br>IMG</div>`}
+      <div class="source-capture-main product-capture-main">
+        <div class="source-card-state"><span class="dot"></span>${escapeHtml(PLATFORM_LABELS[state.page.platform] || state.page.platform)} · 竞品采集</div>
+        <input class="ghost-input cl-detail-title-input product-title-input" data-key="name" value="${escapeAttr(item.name || "")}" placeholder="填入商品名">
       </div>
     </div>
     <div class="cl-section">
@@ -938,12 +1289,10 @@ function productView(item) {
     </div>
     <div class="cl-grid-2">
       <div class="cl-section">
-        <div class="cl-section-label">品牌</div>
-        <input class="ghost-input full" data-key="brand" value="${escapeAttr(item.brand || "")}" placeholder="填入品牌名">
+        ${singleFieldSelect("brand", "品牌", item.brand || "", "outline", { groupKey: "competitor_brands" })}
       </div>
       <div class="cl-section">
-        <div class="cl-section-label">品类</div>
-        <input class="ghost-input full" data-key="category" value="${escapeAttr(item.category || "")}" placeholder="填入品类">
+        ${singleFieldSelect("category", "品类", item.category || "", "outline", { groupKey: "product_categories" })}
       </div>
     </div>
     <div class="cl-section">
@@ -1034,7 +1383,6 @@ function demandView(item) {
       <div class="source-metrics">
         ${sourceMetric("点赞", item.likes)}
         ${sourceMetric("收藏", item.collects)}
-        ${sourceMetric("转发", item.shares)}
         ${sourceMetric("评论", item.comments)}
       </div>
     </div>
@@ -1161,6 +1509,11 @@ function fieldSelect(key, label, selectedValues, tone = "accent", options = {}) 
       ${active ? tagPickerPanel(key, group, selected, tone, options) : ""}
     </div>
   `;
+}
+
+function singleFieldSelect(key, label, value, tone = "outline", options = {}) {
+  const selected = cleanText(value, "");
+  return fieldSelect(key, label, selected ? [selected] : [], tone, { ...options, single: true });
 }
 
 function tagPickerPanel(key, group, selected, tone, options = {}) {
@@ -1292,6 +1645,7 @@ function bindHeader() {
       try {
         await fetch(`${state.apiBase}/api/auth/logout`, {
           method: "POST",
+          credentials: "include",
           headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
         });
       } catch {}
@@ -1416,6 +1770,17 @@ document.addEventListener("input", (event) => {
   setField(key, el.value);
 });
 
+document.addEventListener("focusin", (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLInputElement)) return;
+  if (!el.classList.contains("cl-detail-title-input")) return;
+  requestAnimationFrame(() => {
+    try {
+      el.select();
+    } catch {}
+  });
+});
+
 function handleSaveMutation() {
   return state.form || buildDraft(state.mode, state.processed || state.page?.data || {});
 }
@@ -1466,7 +1831,6 @@ function demandPayload(item) {
     author: item.author || "",
     likes: Number(item.likes || 0),
     collects: Number(item.collects || 0),
-    shares: Number(item.shares || 0),
     comments: Number(item.comments || 0),
     visible_comments: mergeComments([], item.visible_comments),
     scenarios: safeArray(item.scenarios),
@@ -1486,26 +1850,35 @@ async function saveCurrent() {
   renderLoading("正在保存");
   try {
     const payload = state.mode === "product" ? productPayload(item) : demandPayload(item);
+    debugEvent("save:start", {
+      mode: state.mode,
+      platform: state.page.platform,
+      title: payload.name || payload.title || "",
+      hasImage: Boolean(payload.image || payload.thumbnail_url),
+    });
     await api(state.mode === "product" ? "/api/products" : "/api/demands", {
       method: "POST",
       body: JSON.stringify(payload),
     });
     state.message = "保存成功";
+    debugEvent("save:ok", { mode: state.mode, title: payload.name || payload.title || "" });
     renderSuccess(payload);
   } catch (error) {
     state.message = `保存失败：${error.message}`;
+    debugEvent("save:error", { mode: state.mode, error: error.message || "保存失败" });
     renderMain();
   }
 }
 
 function renderSuccess(payload) {
+  clearSuccessReturnTimer();
   document.getElementById("app").innerHTML = `
     <div class="shell">
       ${headerHtml()}
       <div class="cl-body">
         <div class="cl-success-hero" aria-hidden="true">${successMotionIcon()}</div>
         <div class="cl-hint">已保存到 ${state.mode === "product" ? "竞品库" : "需求管理"} · ${escapeHtml(payload.name || payload.title || "")}</div>
-        <div class="cl-empty-hint">你可以继续抓取下一条页面，或者打开 Web 端查看结果。</div>
+        <div class="cl-empty-hint">稍后自动返回，继续下一条。</div>
         <div class="cl-spacer"></div>
       </div>
       <div class="cl-foot">
@@ -1516,6 +1889,10 @@ function renderSuccess(payload) {
   bindHeader();
   document.getElementById("again").onclick = () => loadCurrentPage();
   document.getElementById("open-web").onclick = () => chrome.tabs.create({ url: state.apiBase });
+  successReturnTimer = setTimeout(() => {
+    successReturnTimer = null;
+    void loadCurrentPage();
+  }, 1800);
 }
 
 function headerHtml(options = {}) {

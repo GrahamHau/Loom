@@ -103,6 +103,18 @@ describe("rss-service classification", () => {
     expect(shouldEnrichSourceImages({ id: "custom-feed", source_group: "custom", authority: "watchlist" })).toBe(false);
   });
 
+  it("parses wechat exporter source urls", () => {
+    const parsed = __rssTestUtils.parseWechatExporterSourceUrl({
+      url: "https://wewerss.loom.ai/api/public/v1/article?fakeid=MzA3&authKey=abc123&size=15&begin=5",
+    });
+    expect(parsed.articleEndpoint).toBe("https://wewerss.loom.ai/api/public/v1/article");
+    expect(parsed.accountByUrlEndpoint).toBe("https://wewerss.loom.ai/api/public/v1/accountbyurl");
+    expect(parsed.fakeid).toBe("MzA3");
+    expect(parsed.authKey).toBe("abc123");
+    expect(parsed.size).toBe(15);
+    expect(parsed.begin).toBe(5);
+  });
+
   it("normalizes tracking params for rss item dedupe", () => {
     expect(__rssTestUtils.normalizeUrlForDedupe("https://example.com/a/?utm_source=google&utm_medium=rss&x=1#section")).toBe("https://example.com/a/?x=1");
   });
@@ -120,6 +132,26 @@ describe("rss-service classification", () => {
         link: "https://news.google.com/rss/articles/CBMi-demo?oc=5",
       });
       expect(result).toBe("https://www.example.com/news/product-launch");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("extracts canonical article urls from Google News html", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      url: "https://news.google.com/rss/articles/CBMi-demo?oc=5",
+      text: async () => '<html><script>{"url":"https:\\/\\/www.example.com\\/real-article?utm_source=google"}</script></html>',
+    });
+
+    try {
+      const result = await __rssTestUtils.resolveOriginalArticleUrl({
+        title: "SmallRig Launches Camera Cage - Example",
+        link: "https://news.google.com/rss/articles/CBMi-demo?oc=5",
+        source: { url: "https://www.example.com" },
+      });
+      expect(result).toBe("https://www.example.com/real-article");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -143,5 +175,15 @@ describe("rss-service classification", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it("builds a stable title-based dedupe key for unresolved Google News items", () => {
+    const key = __rssTestUtils.dedupeKeyForItem({
+      original_url: "google-news://newsshooter.com/smallrig-launches-new-camera-cage",
+      titleZh: "SmallRig launches new camera cage",
+      source: "配件竞品新品 - Google News",
+      classification: { source_homepage: "https://www.newsshooter.com" },
+    });
+    expect(key).toBe("https://newsshooter.com::smallrig-launches-new-camera-cage");
   });
 });

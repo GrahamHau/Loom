@@ -8,7 +8,7 @@ const MODULES = [
     sub: "资讯流",
     icon: NewspaperIcon,
     lede: "治 FOMO 靠的是及时性，不是搜索。",
-    body: "RSS + 摄影行业定向源（DPReview、PetaPixel、SmallRig blog、Peak Design 更新、小红书摄影博主 RSS 等），AI 翻译筛选后推到你眼前。",
+    body: "RSS + 公众号 + 摄影行业定向源（DPReview、PetaPixel、SmallRig blog、Peak Design 更新、小红书摄影博主 RSS 等），AI 翻译筛选后推到你眼前。",
     annotation: (
       <>
         <strong>纬线在哪里：</strong>

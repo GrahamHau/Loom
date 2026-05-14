@@ -81,6 +81,28 @@ describe("content-fetcher", () => {
     }
   });
 
+  it("falls back to the first body image when meta image is missing", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      url: "https://www.example.com/articles/demo",
+      text: async () => `
+        <html>
+          <body>
+            <img data-src="/images/body-cover.jpg" />
+          </body>
+        </html>
+      `,
+    });
+
+    try {
+      const result = await fetchPageImage("https://www.example.com/articles/demo");
+      expect(result.image).toBe("https://www.example.com/images/body-cover.jpg");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("resolves the final page url for rss dedupe", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => ({

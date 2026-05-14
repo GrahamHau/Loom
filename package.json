@@ -19,7 +19,8 @@
     "db:clear-demo": "npm run check:node && node scripts/clear-demo-state.js",
     "news:configure-sources": "npm run check:node && node scripts/configure-news-sources.js",
     "news:seed-sources": "npm run check:node && node scripts/seed-news-sources.js",
-    "news:reclassify": "npm run check:node && node scripts/reclassify-news.js"
+    "news:reclassify": "npm run check:node && node scripts/reclassify-news.js",
+    "listen:loom": "npm run check:node && node scripts/loom-listener.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",

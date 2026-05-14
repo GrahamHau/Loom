@@ -38,6 +38,7 @@ export function defaultSettings() {
     feishu_table_token: "",
     last_llm_test_at: null,
     last_feishu_test_at: null,
+    official_news_enabled: true,
     rss_collect_enabled: process.env.RSS_COLLECT_ENABLED !== "false",
     rss_collect_interval_ms: Number(process.env.RSS_COLLECT_INTERVAL_MS || 15 * 60 * 1000),
   };

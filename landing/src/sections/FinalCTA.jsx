@@ -2,7 +2,7 @@ import LoginPanel from "../auth/LoginPanel.jsx";
 
 const TUTORIAL_URL =
   "https://ulanzichina.feishu.cn/wiki/Xv2DwmqmfibDe2kubvfcXXoAn5g?from=from_copylink";
-const EXTENSION_URL = "/extension";
+const EXTENSION_DOWNLOAD_URL = "/downloads/loom-extension.zip";
 
 export default function FinalCTA() {
   return (
@@ -51,9 +51,8 @@ export default function FinalCTA() {
               </p>
               <a
                 className="btn btn-primary"
-                href={EXTENSION_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={EXTENSION_DOWNLOAD_URL}
+                download="loom-extension.zip"
               >
                 下载 Chrome 插件 <span aria-hidden="true">→</span>
               </a>

@@ -1,7 +1,7 @@
 import Parser from "rss-parser";
 import { callLLM } from "./ai-service.js";
 import { fetchPageImage, resolvePageUrl } from "./content-fetcher.js";
-import { listPendingNewsForLlm, updateNews, upsertNews, updateNewsSource } from "./repository.js";
+import { listNews, listPendingNewsForLlm, updateNews, upsertNews, updateNewsSource } from "./repository.js";
 
 const parser = new Parser({
   timeout: 20000,
@@ -48,9 +48,15 @@ const NEWS_LLM_SYSTEM_PROMPT = `你是一个信息筛选助手，服务于摄影
 
 const NEWS_LLM_INPUT_LIMIT = 1600;
 const NEWS_LLM_MAX_TOKENS = 520;
+const NEWS_DEDUPE_LLM_MAX_TOKENS = 220;
 const FETCH_TIMEOUT_MS = 30000;
 const OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE = Number(process.env.OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE || 12);
+const RECENT_NEWS_WINDOW_DAYS = Math.max(1, Number(process.env.NEWS_RECENT_WINDOW_DAYS || 5));
 const GOOGLE_NEWS_HOSTS = new Set(["news.google.com", "news.url.google.com"]);
+const WECHAT_EXPORTER_SOURCE_TYPES = new Set(["wechat_exporter", "wechat-exporter", "wechat"]);
+const WECHAT_EXPORTER_MAX_PER_SOURCE = Math.min(20, Math.max(1, Number(process.env.WECHAT_EXPORTER_MAX_PER_SOURCE || 20)));
+const WECHAT_EXPORTER_DEFAULT_BASE_URL = String(process.env.WECHAT_EXPORTER_BASE_URL || "").trim();
+const WECHAT_EXPORTER_DEFAULT_AUTH_KEY = String(process.env.WECHAT_EXPORTER_AUTH_KEY || "").trim();
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -97,6 +103,10 @@ function isGoogleNewsUrl(rawUrl) {
   return Boolean(url && GOOGLE_NEWS_HOSTS.has(url.hostname.toLowerCase()));
 }
 
+function isWechatExporterSource(source = {}) {
+  return WECHAT_EXPORTER_SOURCE_TYPES.has(String(source.type || "").toLowerCase());
+}
+
 function normalizeUrlForDedupe(rawUrl) {
   const url = safeUrl(rawUrl);
   if (!url) return String(rawUrl || "").trim();
@@ -127,6 +137,12 @@ function titleSlug(value) {
     .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 140);
+}
+
+function normalizedSourceHome(source) {
+  const url = safeUrl(source);
+  if (!url) return String(source || "").toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+  return `${url.protocol}//${url.hostname.replace(/^www\./, "").toLowerCase()}`;
 }
 
 function extractThumbnail(item) {
@@ -165,7 +181,103 @@ export const __rssTestUtils = {
   normalizeUrlForDedupe,
   resolveOriginalArticleUrl,
   titleSlug,
+  parseWechatExporterSourceUrl,
+  dedupeKeyForItem,
 };
+
+function dedupeKeyForItem(item = {}) {
+  const normalizedUrl = normalizeUrlForDedupe(item.original_url || item.article_url || "");
+  if (normalizedUrl && !normalizedUrl.startsWith("google-news://")) return normalizedUrl;
+  const source = normalizedSourceHome(item.classification?.source_homepage || item.source || "");
+  const title = titleSlug(item.titleZh || item.original_title || "");
+  return `${source}::${title}`;
+}
+
+function canonicalTitleKey(item = {}) {
+  return titleSlug(item.titleZh || item.original_title || "")
+    .replace(/-[^-]+$/g, "")
+    .replace(/\b(review|hands-on|first-look|announced|introduced|launches|released|official)\b/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function maybeDuplicateCandidates(existingItems = [], nextItem) {
+  const nextTitle = titleSlug(nextItem.titleZh || nextItem.original_title || "");
+  const nextDate = String(nextItem.published_at || "").slice(0, 10);
+  return existingItems.filter((item) => {
+    const title = titleSlug(item.titleZh || item.original_title || "");
+    const sameTitle = nextTitle && title && nextTitle === title;
+    const sameDate = nextDate && String(item.published_at || "").slice(0, 10) === nextDate;
+    return sameTitle || (sameDate && title && nextTitle && (title.includes(nextTitle) || nextTitle.includes(title)));
+  }).slice(0, 6);
+}
+
+async function llmLooksDuplicate(userId, nextItem, candidates = []) {
+  if (!candidates.length) return null;
+  const payload = {
+    candidate: {
+      title: nextItem.titleZh || nextItem.original_title || "",
+      summary: nextItem.summary || nextItem.original_content || "",
+      source: nextItem.source || "",
+      published_at: nextItem.published_at || "",
+      url: nextItem.original_url || "",
+    },
+    existing: candidates.map((item) => ({
+      id: item.id,
+      title: item.titleZh || item.original_title || "",
+      summary: item.summary || item.original_content || "",
+      source: item.source || "",
+      published_at: item.published_at || "",
+      url: item.original_url || "",
+    })),
+  };
+  try {
+    const result = await callLLM({
+      userId,
+      system: "你是资讯去重助手。判断 candidate 是否与 existing 中任一条是同一篇内容或同一事件的重复转载。只返回 JSON：{\"duplicate\":true|false,\"duplicate_id\":\"id或空字符串\",\"reason\":\"简短原因\"}。",
+      user: JSON.stringify(payload),
+      maxTokens: NEWS_DEDUPE_LLM_MAX_TOKENS,
+    });
+    if (!result?.duplicate) return null;
+    const duplicateId = String(result.duplicate_id || "").trim();
+    return {
+      duplicate: true,
+      duplicateId,
+      reason: String(result.reason || "llm_duplicate"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function dedupeCollectedItems(userId, items = []) {
+  const existing = listNews(userId);
+  const kept = [];
+  const seenKeys = new Set();
+  const seenTitleKeys = new Set(existing.map((item) => canonicalTitleKey(item)).filter(Boolean));
+  for (const item of items) {
+    const key = dedupeKeyForItem(item);
+    if (key && seenKeys.has(key)) continue;
+    if (key) seenKeys.add(key);
+    const titleKey = canonicalTitleKey(item);
+    if (titleKey && seenTitleKeys.has(titleKey)) continue;
+    if (titleKey) seenTitleKeys.add(titleKey);
+
+    const candidates = maybeDuplicateCandidates(existing, item);
+    const duplicate = await llmLooksDuplicate(userId, item, candidates);
+    if (duplicate?.duplicate) {
+      item.classification = {
+        ...(item.classification || {}),
+        dedupe_reason: duplicate.reason,
+        duplicate_of: duplicate.duplicateId || "",
+        duplicate_filtered: true,
+      };
+      continue;
+    }
+    kept.push(item);
+  }
+  return kept;
+}
 
 function publishedAtOf(item) {
   const candidates = [item.isoDate, item.pubDate, item.published, item.updated].filter(Boolean);
@@ -287,6 +399,188 @@ export function shouldEnrichSourceImages(source) {
   return isOfficialManagedSource(source);
 }
 
+function buildWechatExporterApiUrl(origin, pathPrefix, endpoint) {
+  const path = `${String(pathPrefix || "").replace(/\/+$/g, "")}/${endpoint.replace(/^\/+/g, "")}`.replace(/\/{2,}/g, "/");
+  return new URL(path.startsWith("/") ? path : `/${path}`, origin).toString();
+}
+
+function parseWechatExporterSourceUrl(source) {
+  const parsed = safeUrl(source?.url);
+  if (!parsed) throw new Error("公众号源地址无效");
+
+  const articlePath = "/api/public/v1/article";
+  const markerIndex = parsed.pathname.indexOf(articlePath);
+  const pathPrefix = markerIndex >= 0
+    ? parsed.pathname.slice(0, markerIndex)
+    : parsed.pathname.replace(/\/+$/g, "");
+
+  const authKey = parsed.searchParams.get("authKey") ||
+    parsed.searchParams.get("auth_key") ||
+    parsed.searchParams.get("x_auth_key") ||
+    parsed.searchParams.get("authkey") ||
+    WECHAT_EXPORTER_DEFAULT_AUTH_KEY;
+
+  return {
+    articleEndpoint: buildWechatExporterApiUrl(parsed.origin, pathPrefix, articlePath),
+    accountByUrlEndpoint: buildWechatExporterApiUrl(parsed.origin, pathPrefix, "/api/public/v1/accountbyurl"),
+    authKey,
+    fakeid: parsed.searchParams.get("fakeid") || parsed.searchParams.get("id") || "",
+    accountUrl: parsed.searchParams.get("accountUrl") ||
+      parsed.searchParams.get("account_url") ||
+      parsed.searchParams.get("articleUrl") ||
+      parsed.searchParams.get("article_url") ||
+      "",
+    begin: Math.max(0, Number(parsed.searchParams.get("begin") || 0)),
+    size: Math.min(20, Math.max(1, Number(parsed.searchParams.get("size") || WECHAT_EXPORTER_MAX_PER_SOURCE))),
+  };
+}
+
+function injectWechatExporterDefaults(source) {
+  if (!isWechatExporterSource(source) || !WECHAT_EXPORTER_DEFAULT_BASE_URL) return source;
+  const rawUrl = String(source?.url || "").trim();
+  const baseUrl = new URL(externalLikeUrl(WECHAT_EXPORTER_DEFAULT_BASE_URL));
+  if (!baseUrl.pathname.includes("/api/public/v1/article")) {
+    baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/g, "")}/api/public/v1/article`.replace(/\/{2,}/g, "/");
+  }
+  if (!rawUrl) return { ...source, url: baseUrl.toString() };
+  if (safeUrl(rawUrl)) return source;
+  return { ...source, url: new URL(rawUrl, baseUrl).toString() };
+}
+
+function externalLikeUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+}
+
+async function fetchWechatExporterJson(url, authKey) {
+  const response = await fetchWithTimeout(url, {
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      ...(authKey ? { "X-Auth-Key": authKey } : {}),
+    },
+    redirect: "follow",
+  });
+  if (response.status >= 400) throw new Error(`HTTP ${response.status}`);
+  try {
+    return await response.json();
+  } catch {
+    throw new Error("公众号源返回了无法解析的响应");
+  }
+}
+
+async function resolveWechatExporterFakeId(config) {
+  if (config.fakeid) return config.fakeid;
+  if (!config.accountUrl) throw new Error("公众号源缺少 fakeid 或文章链接");
+  const requestUrl = new URL(config.accountByUrlEndpoint);
+  requestUrl.searchParams.set("url", config.accountUrl);
+  const result = await fetchWechatExporterJson(requestUrl.toString(), config.authKey);
+  if (result?.base_resp?.ret !== 0) {
+    throw new Error(result?.base_resp?.err_msg || "公众号查询失败");
+  }
+  const fakeid = result?.list?.[0]?.fakeid;
+  if (!fakeid) throw new Error("未能从文章链接解析出公众号ID");
+  return fakeid;
+}
+
+function publishedAtFromWechatArticle(article) {
+  const timestamp = Number(article?.update_time || article?.create_time || 0);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return new Date().toISOString();
+  const millis = timestamp > 1e12 ? timestamp : timestamp * 1000;
+  const date = new Date(millis);
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+function classifyWechatExporterArticle(source, article) {
+  const title = stripHtml(article?.title || "");
+  const summary = stripHtml(article?.digest || article?.author_name || title).slice(0, 160);
+  const heuristic = heuristicClassifyNews({
+    source,
+    item: {
+      title,
+      contentSnippet: summary,
+      sourceName: source.name,
+    },
+  });
+  const lower = `${title}\n${summary}`.toLowerCase();
+  const looksLikeProduct = /新品|发布|正式推出|上市|升级|更新|app|固件|镜头|相机|补光灯|灯|麦克风|云台|稳定器|三脚架|电池|充电|配件|支架|笼|滤镜|手电筒|flash|light|mic|microphone|gimbal|tripod|lens|camera/i.test(lower);
+  const looksLikeEvent = /报名|展会|课程|直播|抽奖|周年庆|活动|体验会|招募|优惠|福利|五一|双11|618/i.test(lower);
+  const type = heuristic?.type && heuristic.type !== "待判定"
+    ? heuristic.type
+    : looksLikeProduct && !looksLikeEvent
+      ? "新品发布"
+      : "行业趋势";
+  return {
+    type,
+    titleZh: title || "未命名资讯",
+    summary: summary || title || "公众号文章",
+    contentZh: "",
+    needsTranslation: false,
+    llmProcessed: false,
+    classification: {
+      ...(heuristic?.classification || {}),
+      reason: heuristic?.classification?.reason || "wechat_exporter_default",
+      source_type: "wechat_exporter",
+      source_group: source.source_group || source.group || "",
+    },
+  };
+}
+
+async function collectWechatExporterSource(userId, source) {
+  const config = parseWechatExporterSourceUrl(source);
+  if (!config.authKey) throw new Error("公众号源缺少 Auth Key");
+  const fakeid = await resolveWechatExporterFakeId(config);
+  const requestUrl = new URL(config.articleEndpoint);
+  requestUrl.searchParams.set("fakeid", fakeid);
+  requestUrl.searchParams.set("begin", String(config.begin));
+  requestUrl.searchParams.set("size", String(config.size));
+
+  const result = await fetchWechatExporterJson(requestUrl.toString(), config.authKey);
+  if (result?.base_resp?.ret !== 0) {
+    throw new Error(result?.base_resp?.err_msg || "公众号文章拉取失败");
+  }
+
+  const items = Array.isArray(result?.articles) ? result.articles : [];
+  const newsItems = items
+    .map((article) => {
+      const originalUrl = normalizeUrlForDedupe(article?.link || "");
+      if (!originalUrl) return null;
+      const publishedAt = publishedAtFromWechatArticle(article);
+      const classified = classifyWechatExporterArticle(source, article);
+      return {
+        source_id: source.id,
+        source: source.name,
+        source_authority: source.authority || "watchlist",
+        original_title: stripHtml(article?.title || ""),
+        original_url: originalUrl,
+        article_url: originalUrl,
+        original_content: stripHtml(article?.digest || article?.author_name || article?.title || "").slice(0, 2000),
+        published_at: publishedAt,
+        date: publishedAt.slice(0, 10),
+        time: "",
+        thumbnail_url: article?.cover || article?.cover_img || article?.pic_cdn_url_235_1 || article?.pic_cdn_url_1_1 || "",
+        thumbHue: classified.type === "新品发布" ? 220 : 40,
+        ...classified,
+        classification: {
+          ...(classified.classification || {}),
+          fakeid,
+          article_aid: article?.aid || "",
+          article_author: stripHtml(article?.author_name || ""),
+          source_group: source.source_group || source.group || "",
+        },
+      };
+    })
+    .filter(Boolean);
+
+  const upserted = upsertNews(userId, newsItems);
+  updateNewsSource(userId, source.id, {
+    last_fetched_at: new Date().toISOString(),
+    last_item_count: items.length,
+    last_error: null,
+  });
+  return { source_id: source.id, source: source.name, fetched: items.length, kept: newsItems.length, ...upserted };
+}
+
 async function enrichOfficialImages(source, newsItems) {
   if (!isOfficialManagedSource(source)) return newsItems;
   let remaining = Math.max(0, OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE);
@@ -294,9 +588,13 @@ async function enrichOfficialImages(source, newsItems) {
     if (item.thumbnail_url || remaining <= 0) continue;
     remaining -= 1;
     try {
-      const imageUrl = isGoogleNewsUrl(item.article_url) ? item.original_url : item.article_url || item.original_url;
+      const imageUrl = item.article_url || item.original_url;
       if (!imageUrl || imageUrl.startsWith("google-news://")) continue;
       const page = await fetchPageImage(imageUrl);
+      if (page.articleUrl && isGoogleNewsUrl(item.original_url)) {
+        item.original_url = normalizeUrlForDedupe(page.articleUrl);
+        item.article_url = item.original_url;
+      }
       if (page.image) {
         item.thumbnail_url = page.image;
         item.classification = {
@@ -318,9 +616,15 @@ async function enrichOfficialImages(source, newsItems) {
 }
 
 export async function collectSource(userId, source) {
+  source = injectWechatExporterDefaults(source);
+  if (isWechatExporterSource(source)) {
+    return collectWechatExporterSource(userId, source);
+  }
   const feed = await fetchFeed(source);
+  const cutoffMs = Date.now() - RECENT_NEWS_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const items = [...(feed.items || [])]
     .sort((a, b) => new Date(publishedAtOf(b)).getTime() - new Date(publishedAtOf(a)).getTime())
+    .filter((item) => publishedAtOf(item) && new Date(publishedAtOf(item)).getTime() >= cutoffMs)
     .slice(0, 50);
 
   const newsItems = [];
@@ -349,18 +653,20 @@ export async function collectSource(userId, source) {
         ...(classified.classification || {}),
         ...(fallbackUrl && articleUrl && articleUrl !== fallbackUrl ? { rss_url: fallbackUrl } : {}),
         ...(extractSourceHomepage(item) ? { source_homepage: extractSourceHomepage(item) } : {}),
+        source_group: source.source_group || source.group || "",
       },
     });
   }
 
   await enrichOfficialImages(source, newsItems);
-  const result = upsertNews(userId, newsItems);
+  const dedupedNewsItems = await dedupeCollectedItems(userId, newsItems);
+  const result = upsertNews(userId, dedupedNewsItems);
   updateNewsSource(userId, source.id, {
     last_fetched_at: new Date().toISOString(),
     last_item_count: items.length,
     last_error: null,
   });
-  return { source_id: source.id, source: source.name, fetched: items.length, kept: newsItems.length, ...result };
+  return { source_id: source.id, source: source.name, fetched: items.length, kept: dedupedNewsItems.length, ...result };
 }
 
 export async function collectSources(userId, sources) {
