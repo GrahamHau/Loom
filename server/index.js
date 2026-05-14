@@ -7,6 +7,8 @@ import signature from "cookie-signature";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureSeed } from "./db.js";
+import { isAdmin, isOwner } from "./access-control.js";
+import adminRouter from "./admin-routes.js";
 import { AppError, isLLMConfigured, testLLM } from "./ai-service.js";
 import {
   apiToken,
@@ -41,6 +43,7 @@ import {
   ensureLegacyWorkspace,
   ensureLocalUser,
   getUserIdByApiToken,
+  findUserByEmail,
   findUserByFeishuProfile,
   findUserById,
   finishSampleWorkspace,
@@ -163,7 +166,8 @@ function currentUserId(req) {
 
 function currentUser(req) {
   const userId = currentUserId(req);
-  return userId ? findUserById(userId) : null;
+  const user = userId ? findUserById(userId) : null;
+  return user?.status === "active" ? user : null;
 }
 
 function requireAuth(req, res, next) {
@@ -181,10 +185,19 @@ function sessionUserResponse(user) {
     name: user.name,
     initials: user.initials,
     role: user.role,
+    role_code: user.role_code || "member",
     email: user.email || "",
     auth_provider: user.auth_provider,
+    is_admin: isAdmin(user),
+    is_owner: isOwner(user),
     is_visitor: user.id === legacyUser.id,
   };
+}
+
+function accountDisabledResponse(user, res) {
+  if (user?.status === "active") return false;
+  res.status(403).json({ error: "account_disabled", message: "当前账号已停用。" });
+  return true;
 }
 
 function getSessionIdFromCookieValue(cookieValue) {
@@ -266,17 +279,25 @@ function passwordUserId(username) {
 
 function ensurePasswordUser() {
   const { username } = getPasswordAuthConfig();
+  const normalizedEmail = String(username || "").trim().toLowerCase();
+  const ownerEmail = String(process.env.LOOM_OWNER_EMAIL || "").trim().toLowerCase();
+  const existing = normalizedEmail ? findUserByEmail(normalizedEmail) : null;
+  const isConfiguredOwner = ownerEmail && normalizedEmail === ownerEmail;
   return ensureLocalUser({
-    id: passwordUserId(username),
-    name: username,
+    ...(existing || {}),
+    id: existing?.id || passwordUserId(username),
+    email: username.includes("@") ? username : existing?.email || "",
+    name: existing?.name || username,
     initials: String(username || "L").trim().replace(/\s+/g, "").slice(0, 2).toUpperCase() || "L",
-    role: "成员",
+    role: isConfiguredOwner ? "主理人" : existing?.role || "成员",
+    role_code: isConfiguredOwner ? "owner" : existing?.role_code || "member",
     auth_provider: "password",
   });
 }
 
 function signInPasswordUser(req, res) {
   const user = ensurePasswordUser();
+  if (accountDisabledResponse(user, res)) return;
   const token = apiToken();
   revokeUserApiTokens(user.id);
   upsertApiToken(token, user.id);
@@ -367,6 +388,13 @@ async function collectOfficialWechatSources({ force = false } = {}) {
   return collected;
 }
 
+app.use((req, _res, next) => {
+  req.currentUser = () => currentUser(req);
+  next();
+});
+
+app.use("/api/admin", adminRouter);
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "loom", time: new Date().toISOString() });
 });
@@ -449,6 +477,10 @@ app.get("/api/auth/feishu/callback", asyncHandler(async (req, res) => {
     });
   }
 
+  if (localUser.status !== "active") {
+    throw new AppError(403, "account_disabled", "当前账号已停用。");
+  }
+
   req.session.regenerate((error) => {
     if (error) {
       console.error("feishu session regenerate failed", error);
@@ -492,6 +524,9 @@ app.post("/api/auth/extension/session-token", asyncHandler(async (req, res) => {
   const user = sessionUser || (cookieValue ? await loadUserFromSessionCookie(cookieValue) : null);
   if (!user) {
     throw new AppError(401, cookieValue ? "invalid_session_cookie" : "missing_session_cookie", "当前 Web 登录已失效，请重新登录。");
+  }
+  if (user.status !== "active") {
+    throw new AppError(403, "account_disabled", "当前账号已停用。");
   }
 
   const token = apiToken();
@@ -795,6 +830,7 @@ if (process.env.NODE_ENV === "production") {
   app.use("/app/assets", express.static(path.join(appDistDir, "assets"), immutableStaticOptions));
   app.use("/app", express.static(appDistDir, noCacheHtmlOptions));
   app.get(/^\/app(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(appDistDir, "index.html")));
+  app.get(/^\/admin(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(appDistDir, "index.html")));
 
   app.use("/assets", express.static(path.join(landingDistDir, "assets"), immutableStaticOptions));
   app.use(express.static(landingDistDir, noCacheHtmlOptions));

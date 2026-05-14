@@ -33,6 +33,7 @@ function userSummaryFromState(state, fallback = {}) {
     id: fallback.id || source.id || "",
     name: fallback.name || source.name || "LOOM",
     role: fallback.role || source.role || "成员",
+    role_code: fallback.role_code || source.role_code || "member",
     initials: fallback.initials || source.initials || "L",
     email: fallback.email || source.email || "",
     auth_provider: fallback.auth_provider || source.auth_provider || "password",
@@ -84,6 +85,7 @@ function mapUserRow(row) {
     name: row.name,
     initials: row.initials || "L",
     role: row.role || "成员",
+    role_code: row.role_code || "member",
     status: row.status || "active",
     auth_provider: row.auth_provider || "password",
     feishu_open_id: row.feishu_open_id || null,
@@ -270,6 +272,7 @@ export function ensureLocalUser(input = {}) {
     name: cleanTitle(input.name, "LOOM"),
     initials: cleanText(input.initials || String(input.name || "L").trim().replace(/\s+/g, "").slice(0, 2).toUpperCase(), "L").slice(0, 2).toUpperCase(),
     role: cleanTitle(input.role, "成员"),
+    role_code: ["owner", "admin", "member"].includes(input.role_code) ? input.role_code : "member",
     status: cleanText(input.status, "active"),
     auth_provider: cleanText(input.auth_provider, "password"),
     feishu_open_id: input.feishu_open_id || null,
@@ -282,15 +285,16 @@ export function ensureLocalUser(input = {}) {
   };
   db.prepare(`
     INSERT INTO users (
-      id, email, name, initials, role, status, auth_provider,
+      id, email, name, initials, role, role_code, status, auth_provider,
       feishu_open_id, feishu_union_id, feishu_tenant_key, avatar_url,
       created_at, updated_at, last_login_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       email = excluded.email,
       name = excluded.name,
       initials = excluded.initials,
       role = excluded.role,
+      role_code = excluded.role_code,
       status = excluded.status,
       auth_provider = excluded.auth_provider,
       feishu_open_id = COALESCE(excluded.feishu_open_id, users.feishu_open_id),
@@ -300,7 +304,7 @@ export function ensureLocalUser(input = {}) {
       updated_at = excluded.updated_at,
       last_login_at = COALESCE(excluded.last_login_at, users.last_login_at)
   `).run(
-    user.id, user.email, user.name, user.initials, user.role, user.status, user.auth_provider,
+    user.id, user.email, user.name, user.initials, user.role, user.role_code, user.status, user.auth_provider,
     user.feishu_open_id, user.feishu_union_id, user.feishu_tenant_key, user.avatar_url,
     user.created_at, user.updated_at, user.last_login_at
   );
@@ -315,6 +319,12 @@ export function ensureLocalUser(input = {}) {
 
 export function findUserById(userId) {
   return mapUserRow(db.prepare("SELECT * FROM users WHERE id = ?").get(userId));
+}
+
+export function findUserByEmail(email) {
+  const normalized = cleanText(email).toLowerCase();
+  if (!normalized) return null;
+  return mapUserRow(db.prepare("SELECT * FROM users WHERE lower(email) = ? LIMIT 1").get(normalized));
 }
 
 export function findUserByFeishuProfile(profile) {

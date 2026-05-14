@@ -52,6 +52,7 @@ export function migrate() {
       name TEXT NOT NULL,
       initials TEXT DEFAULT 'L',
       role TEXT DEFAULT '成员',
+      role_code TEXT NOT NULL DEFAULT 'member',
       status TEXT DEFAULT 'active',
       auth_provider TEXT DEFAULT 'password',
       feishu_open_id TEXT,
@@ -134,6 +135,20 @@ export function migrate() {
   if (!newsSourceColumns.has("source_group")) db.exec("ALTER TABLE news_sources ADD COLUMN source_group TEXT DEFAULT 'custom';");
   if (!newsSourceColumns.has("brand")) db.exec("ALTER TABLE news_sources ADD COLUMN brand TEXT DEFAULT '';");
   if (!newsSourceColumns.has("last_item_count")) db.exec("ALTER TABLE news_sources ADD COLUMN last_item_count INTEGER DEFAULT 0;");
+
+  const userColumns = new Set(db.prepare("PRAGMA table_info(users)").all().map((column) => column.name));
+  if (!userColumns.has("role_code")) {
+    db.exec("ALTER TABLE users ADD COLUMN role_code TEXT NOT NULL DEFAULT 'member';");
+  }
+  const ownerEmail = String(process.env.LOOM_OWNER_EMAIL || "").trim().toLowerCase();
+  const ownerOpenId = String(process.env.LOOM_OWNER_FEISHU_OPEN_ID || "").trim();
+  if (ownerEmail) {
+    db.prepare("UPDATE users SET role_code = 'owner', role = '主理人' WHERE id <> ? AND lower(email) = ?").run(LEGACY_USER_ID, ownerEmail);
+  }
+  if (ownerOpenId) {
+    db.prepare("UPDATE users SET role_code = 'owner', role = '主理人' WHERE id <> ? AND feishu_open_id = ?").run(LEGACY_USER_ID, ownerOpenId);
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_users_role_code ON users(role_code);");
 
   const newsItemsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'news_items'").get()?.sql || "";
   if (newsItemsSql.includes("original_url TEXT NOT NULL UNIQUE")) {
@@ -262,6 +277,43 @@ export function revokeUserApiTokens(userId) {
   db.prepare("UPDATE api_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL").run(userId);
 }
 
+let sessionsDb = null;
+
+function getSessionsDb() {
+  if (sessionsDb) return sessionsDb;
+  try {
+    sessionsDb = new Database(path.join(dataDir, "sessions.sqlite"));
+    return sessionsDb;
+  } catch {
+    return null;
+  }
+}
+
+export function purgeUserSessions(userId) {
+  const sessionDb = getSessionsDb();
+  if (!sessionDb) return 0;
+  try {
+    const table = sessionDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").get();
+    if (!table) return 0;
+    const rows = sessionDb.prepare("SELECT sid, sess FROM sessions").all();
+    const ids = rows
+      .filter((row) => {
+        try {
+          return String(JSON.parse(row.sess)?.userId || "") === String(userId);
+        } catch {
+          return false;
+        }
+      })
+      .map((row) => row.sid);
+    if (ids.length === 0) return 0;
+    sessionDb.prepare(`DELETE FROM sessions WHERE sid IN (${ids.map(() => "?").join(",")})`).run(...ids);
+    return ids.length;
+  } catch (error) {
+    console.error("[loom] purge user sessions failed", error);
+    return 0;
+  }
+}
+
 export function acquireLock(key, ttlMs) {
   const now = Date.now();
   const lockedUntil = new Date(now + ttlMs).toISOString();
@@ -289,12 +341,13 @@ function ensureLegacyUser(seedState) {
   const now = new Date().toISOString();
   db.prepare(`
     INSERT INTO users (
-      id, email, name, initials, role, status, auth_provider, avatar_url, created_at, updated_at, last_login_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, email, name, initials, role, role_code, status, auth_provider, avatar_url, created_at, updated_at, last_login_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       initials = excluded.initials,
       role = excluded.role,
+      role_code = excluded.role_code,
       updated_at = excluded.updated_at
   `).run(
     LEGACY_USER_ID,
@@ -302,6 +355,7 @@ function ensureLegacyUser(seedState) {
     state.user.name || "visitor",
     state.user.initials || "VI",
     state.user.role || "产品经理",
+    "member",
     "active",
     state.user.auth_provider || "password",
     "",
@@ -434,6 +488,7 @@ export function ensureUserState(user) {
           id: user.id,
           name: user.name,
           role: user.role || (fallback.user || {}).role || "成员",
+          role_code: user.role_code || (fallback.user || {}).role_code || "member",
           initials: user.initials || (fallback.user || {}).initials || "L",
           auth_provider: user.auth_provider || (fallback.user || {}).auth_provider || "feishu",
         },
