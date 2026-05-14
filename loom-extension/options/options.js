@@ -1,5 +1,11 @@
+const DEFAULT_API_BASE = "https://loom.my1panelsite.xyz";
+const LEGACY_API_BASE_HOSTS = new Set([
+  "ulanzi-copilot.my1panelsite.xyz",
+  "loom.43.156.166.134.sslip.io",
+]);
+
 const DEFAULTS = {
-  loom_api_base: "https://loom.my1panelsite.xyz",
+  loom_api_base: DEFAULT_API_BASE,
   loom_default_mode: "auto",
   loom_ai_before_save: false,
   loom_platforms: {
@@ -44,6 +50,18 @@ const LEGACY_KEY_MAP = {
   pmcopilot_field_mapping: "loom_field_mapping",
 };
 
+function normalizeApiBase(value) {
+  const raw = String(value || "").trim().replace(/\/$/, "");
+  if (!raw) return DEFAULT_API_BASE;
+  try {
+    const parsed = new URL(raw);
+    if (LEGACY_API_BASE_HOSTS.has(parsed.hostname)) return DEFAULT_API_BASE;
+    return parsed.origin.replace(/\/$/, "");
+  } catch {
+    return DEFAULT_API_BASE;
+  }
+}
+
 document.addEventListener("DOMContentLoaded", load);
 
 async function load() {
@@ -67,8 +85,16 @@ async function load() {
 async function getSettings() {
   const stored = await chrome.storage.local.get(KEYS);
   const migrated = {};
+  if (stored.loom_api_base !== undefined) {
+    const normalized = normalizeApiBase(stored.loom_api_base);
+    if (normalized !== stored.loom_api_base) migrated.loom_api_base = normalized;
+  }
   for (const [legacyKey, loomKey] of Object.entries(LEGACY_KEY_MAP)) {
-    if (stored[loomKey] === undefined && stored[legacyKey] !== undefined) migrated[loomKey] = stored[legacyKey];
+    if (stored[loomKey] === undefined && stored[legacyKey] !== undefined) {
+      migrated[loomKey] = loomKey === "loom_api_base"
+        ? normalizeApiBase(stored[legacyKey])
+        : stored[legacyKey];
+    }
   }
   if (Object.keys(migrated).length) await chrome.storage.local.set(migrated);
   return { ...DEFAULTS, ...stored, ...migrated };
@@ -76,7 +102,7 @@ async function getSettings() {
 
 function bind() {
   document.getElementById("open-web").onclick = async () => {
-    const apiBase = document.getElementById("api-base").value.trim() || DEFAULTS.loom_api_base;
+    const apiBase = normalizeApiBase(document.getElementById("api-base").value.trim() || DEFAULTS.loom_api_base);
     chrome.tabs.create({ url: apiBase });
   };
   document.getElementById("open-web-login").onclick = openWebLogin;
@@ -90,7 +116,7 @@ function bind() {
 }
 
 function openWebLogin() {
-  const apiBase = document.getElementById("api-base").value.trim().replace(/\/$/, "") || DEFAULTS.loom_api_base;
+  const apiBase = normalizeApiBase(document.getElementById("api-base").value.trim() || DEFAULTS.loom_api_base);
   chrome.tabs.create({ url: `${apiBase}/app?login=1` });
 }
 
@@ -101,7 +127,7 @@ async function testConnection() {
 
 async function logout() {
   const stored = await getSettings();
-  const apiBase = document.getElementById("api-base").value.trim().replace(/\/$/, "") || stored.loom_api_base || DEFAULTS.loom_api_base;
+  const apiBase = normalizeApiBase(document.getElementById("api-base").value.trim() || stored.loom_api_base || DEFAULTS.loom_api_base);
   try {
     await fetch(`${apiBase}/api/auth/logout`, {
       method: "POST",
@@ -121,7 +147,7 @@ async function saveSettings() {
     platforms[input.dataset.platform] = input.checked;
   });
   await chrome.storage.local.set({
-    loom_api_base: document.getElementById("api-base").value.trim().replace(/\/$/, ""),
+    loom_api_base: normalizeApiBase(document.getElementById("api-base").value.trim()),
     loom_default_mode: document.getElementById("default-mode").value,
     loom_ai_before_save: document.getElementById("ai-before-save").value === "true",
     loom_platforms: platforms,
@@ -142,7 +168,7 @@ function setConnection(message) {
 
 async function refreshConnectionState(stored = null) {
   const data = stored || await getSettings();
-  const apiBase = document.getElementById("api-base")?.value.trim().replace(/\/$/, "") || data.loom_api_base || DEFAULTS.loom_api_base;
+  const apiBase = normalizeApiBase(document.getElementById("api-base")?.value.trim() || data.loom_api_base || DEFAULTS.loom_api_base);
   if (!data.loom_token) {
     setConnection("等待 Web 端登录");
     return;

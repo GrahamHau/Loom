@@ -1,4 +1,8 @@
 const DEFAULT_API_BASE = "https://loom.my1panelsite.xyz";
+const LEGACY_API_BASE_HOSTS = new Set([
+  "ulanzi-copilot.my1panelsite.xyz",
+  "loom.43.156.166.134.sslip.io",
+]);
 const API_BASE_KEY = "loom_api_base";
 const TOKEN_KEY = "loom_token";
 const USER_KEY = "loom_user";
@@ -32,6 +36,18 @@ const DEFAULT_TAG_GROUPS = [
   { key: "innovation_types", name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] },
   { key: "custom_tags", name: "自定义标签", tone: "outline", tags: ["便携", "高显色", "模块化", "磁吸", "手机摄影"] },
 ];
+
+function normalizeApiBase(value) {
+  const raw = String(value || "").trim().replace(/\/$/, "");
+  if (!raw) return DEFAULT_API_BASE;
+  try {
+    const parsed = new URL(raw);
+    if (LEGACY_API_BASE_HOSTS.has(parsed.hostname)) return DEFAULT_API_BASE;
+    return parsed.origin.replace(/\/$/, "");
+  } catch {
+    return DEFAULT_API_BASE;
+  }
+}
 
 const state = {
   apiBase: "",
@@ -88,7 +104,7 @@ document.addEventListener("click", handleGlobalClick);
 
 async function init() {
   const stored = await getStoredSettings();
-  state.apiBase = (stored[API_BASE_KEY] || DEFAULT_API_BASE).replace(/\/$/, "");
+  state.apiBase = normalizeApiBase(stored[API_BASE_KEY] || DEFAULT_API_BASE);
   state.token = stored[TOKEN_KEY] || "";
   state.user = stored[USER_KEY] || null;
   state.sessionCookie = await getSessionCookieValue();
@@ -112,8 +128,16 @@ async function getStoredSettings() {
   const keys = [API_BASE_KEY, TOKEN_KEY, USER_KEY, DEFAULT_MODE_KEY, AI_BEFORE_SAVE_KEY, ...Object.keys(LEGACY_KEY_MAP)];
   const stored = await chrome.storage.local.get(keys);
   const migrated = {};
+  if (stored[API_BASE_KEY] !== undefined) {
+    const normalized = normalizeApiBase(stored[API_BASE_KEY]);
+    if (normalized !== stored[API_BASE_KEY]) migrated[API_BASE_KEY] = normalized;
+  }
   for (const [legacyKey, loomKey] of Object.entries(LEGACY_KEY_MAP)) {
-    if (stored[loomKey] === undefined && stored[legacyKey] !== undefined) migrated[loomKey] = stored[legacyKey];
+    if (stored[loomKey] === undefined && stored[legacyKey] !== undefined) {
+      migrated[loomKey] = loomKey === API_BASE_KEY
+        ? normalizeApiBase(stored[legacyKey])
+        : stored[legacyKey];
+    }
   }
   if (Object.keys(migrated).length) await chrome.storage.local.set(migrated);
   return { ...stored, ...migrated };
