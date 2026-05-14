@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import session from "express-session";
 import SQLiteStoreFactory from "connect-sqlite3";
+import fs from "node:fs";
 import signature from "cookie-signature";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +44,7 @@ import {
   findUserByFeishuProfile,
   findUserById,
   finishSampleWorkspace,
+  importWechatExporterAccounts,
   listAllUsers,
   listNews,
   listNewsSources,
@@ -51,6 +53,7 @@ import {
   revokeUserApiTokens,
   upsertApiToken,
   releaseLock,
+  resetRegularUsersToSampleWorkspace,
   touchUserLogin,
   updateDemand,
   updateNews,
@@ -65,6 +68,8 @@ const projectRoot = path.resolve(__dirname, "..");
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const SQLiteStore = SQLiteStoreFactory(session);
+const wechatExporterAccountsPath = process.env.WECHAT_EXPORTER_ACCOUNTS_PATH || path.join(projectRoot, "data", "wechat-exporter-accounts.json");
+const wechatExporterSourceIntervalMinutes = Number(process.env.WECHAT_EXPORTER_SOURCE_INTERVAL_MINUTES || 1440);
 const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE === "true"
   ? true
   : process.env.SESSION_COOKIE_SECURE === "false"
@@ -78,8 +83,9 @@ const sampleRefreshInFlight = new Set();
 
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "2mb" }));
+const sessionStore = new SQLiteStore({ dir: process.env.DATA_DIR || path.join(projectRoot, "data"), db: "sessions.sqlite" });
 app.use(session({
-  store: new SQLiteStore({ dir: process.env.DATA_DIR || path.join(projectRoot, "data"), db: "sessions.sqlite" }),
+  store: sessionStore,
   secret: process.env.SESSION_SECRET || "loom-dev-secret-change-me",
   resave: false,
   saveUninitialized: false,
@@ -159,7 +165,7 @@ function loadUserFromSessionCookie(cookieValue) {
   const sessionId = getSessionIdFromCookieValue(cookieValue);
   if (!sessionId) return Promise.resolve(null);
   return new Promise((resolve, reject) => {
-    app.sessionStore.get(sessionId, (error, sessionData) => {
+    sessionStore.get(sessionId, (error, sessionData) => {
       if (error) return reject(error);
       const userId = String(sessionData?.userId || "").trim();
       if (!userId) return resolve(null);
@@ -237,6 +243,27 @@ async function processCollectedNewsWithLlm(userId, collected) {
       errors: [{ message: error.message || "LLM 处理失败" }],
     };
   }
+}
+
+function loadWechatExporterManifest() {
+  if (!wechatExporterAccountsPath || !fs.existsSync(wechatExporterAccountsPath)) return null;
+  try {
+    const payload = JSON.parse(fs.readFileSync(wechatExporterAccountsPath, "utf8"));
+    if (payload?.usefor !== "wechat-article-exporter" || !Array.isArray(payload?.accounts)) return null;
+    return payload;
+  } catch (error) {
+    console.error("Failed to read wechat exporter accounts manifest", error);
+    return null;
+  }
+}
+
+function syncWechatExporterSourcesForUser(userId) {
+  const manifest = loadWechatExporterManifest();
+  if (!manifest) return null;
+  return importWechatExporterAccounts(userId, manifest, {
+    interval: wechatExporterSourceIntervalMinutes,
+    type: "wechat_exporter",
+  });
 }
 
 app.get("/api/health", (_req, res) => {
@@ -553,6 +580,9 @@ app.patch("/api/settings", requireAuth, (req, res) => res.json(updateSettings(cu
 app.post("/api/settings/test-llm", requireAuth, asyncHandler(async (req, res) => res.json(await testLLM(currentUserId(req)))));
 app.post("/api/settings/test-feishu", requireAuth, asyncHandler(async (req, res) => res.json(await testFeishuForUser(currentUserId(req)))));
 app.post("/api/sync/feishu", requireAuth, asyncHandler(async (req, res) => res.json(await syncFeishuForUser(currentUserId(req), req.body || {}))));
+app.post("/api/admin/reset-regular-users-to-sample", requireAuth, (req, res) => {
+  res.json(resetRegularUsersToSampleWorkspace());
+});
 
 let rssCollecting = false;
 function startRssScheduler() {
@@ -566,6 +596,7 @@ function startRssScheduler() {
         const state = rawState(user.id);
         const settings = state?.settings || {};
         if (settings.rss_collect_enabled === false || process.env.RSS_COLLECT_ENABLED === "false") continue;
+        syncWechatExporterSourcesForUser(user.id);
         const collected = await collectDueSources(user.id, listNewsSources(user.id));
         await processCollectedNewsWithLlm(user.id, collected);
       }
@@ -581,11 +612,30 @@ function startRssScheduler() {
 if (process.env.NODE_ENV === "production") {
   const appDistDir = path.join(projectRoot, "dist");
   const landingDistDir = path.join(projectRoot, "landing", "dist");
+  const immutableStaticOptions = {
+    index: false,
+    etag: true,
+    lastModified: true,
+    maxAge: "1y",
+    immutable: true,
+  };
+  const noCacheHtmlOptions = {
+    index: false,
+    etag: true,
+    lastModified: true,
+    setHeaders(res, filePath) {
+      if (filePath.endsWith(".html")) {
+        res.setHeader("Cache-Control", "no-cache");
+      }
+    },
+  };
 
-  app.use("/app", express.static(appDistDir));
+  app.use("/app/assets", express.static(path.join(appDistDir, "assets"), immutableStaticOptions));
+  app.use("/app", express.static(appDistDir, noCacheHtmlOptions));
   app.get(/^\/app(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(appDistDir, "index.html")));
 
-  app.use(express.static(landingDistDir));
+  app.use("/assets", express.static(path.join(landingDistDir, "assets"), immutableStaticOptions));
+  app.use(express.static(landingDistDir, noCacheHtmlOptions));
   app.get(/^\/(?:extension)?$/, (_req, res) => res.sendFile(path.join(landingDistDir, "index.html")));
 }
 
