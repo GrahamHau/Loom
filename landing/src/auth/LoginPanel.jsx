@@ -1,5 +1,5 @@
-import { useId, useState } from "react";
-import { loginRequest } from "./auth-hook.js";
+import { useEffect, useId, useState } from "react";
+import { getAuthProviders, loginRequest, startFeishuLogin } from "./auth-hook.js";
 
 /**
  * Embedded login panel for the landing page final CTA section.
@@ -20,6 +20,24 @@ export default function LoginPanel() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [status, setStatus] = useState("idle"); // idle | submitting | error | success
   const [errorMessage, setErrorMessage] = useState("");
+  const [providers, setProviders] = useState({ password: true, feishu: false });
+
+  useEffect(() => {
+    let cancelled = false;
+    getAuthProviders()
+      .then((nextProviders) => {
+        if (!cancelled) setProviders({
+          password: nextProviders?.password !== false,
+          feishu: Boolean(nextProviders?.feishu),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setProviders({ password: true, feishu: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const validate = () => {
     const next = {};
@@ -51,6 +69,7 @@ export default function LoginPanel() {
 
   const submitting = status === "submitting";
   const succeeded = status === "success";
+  const feishuEnabled = providers.feishu && !submitting && !succeeded;
 
   return (
     <form
@@ -134,6 +153,34 @@ export default function LoginPanel() {
         {succeeded ? "已登录 ✓" : submitting ? "登录中…" : "登录 LOOM"}
       </button>
 
+      <div className="login-oauth">
+        <div className="login-oauth-divider">
+          <span>其他方式</span>
+        </div>
+        <div className="login-oauth-actions">
+          <button
+            className="login-oauth-btn"
+            type="button"
+            title="使用飞书登录"
+            aria-label="使用飞书登录"
+            disabled={!feishuEnabled}
+            onClick={startFeishuLogin}
+          >
+            <img src="/feishu.png" alt="飞书" />
+          </button>
+        </div>
+      </div>
+
+      <button className="login-demo-link" type="button" disabled>
+        进入演示模式
+      </button>
+
+      <div className="login-inline-tip">
+        {providers.feishu
+          ? "演示模式可直接体验示例工作区；公司成员可使用飞书登录个人账号。"
+          : "演示模式可直接体验示例工作区；飞书登录完成 OAuth 配置后即可启用。"}
+      </div>
+
       {status === "error" && (
         <div role="alert" className="login-error">
           {errorMessage}
@@ -145,12 +192,8 @@ export default function LoginPanel() {
         </div>
       )}
 
-      <div className="login-hint">
-        登录成功后会直接进入 LOOM Web 工作台，路径为 <code>/app</code>。
-      </div>
-
       <div className="login-card-foot">
-        LOOM v2.0 · 首页、插件页与 Web 工作台已分流
+        LOOM v2.0 · 支持演示、账号密码与飞书登录
       </div>
     </form>
   );

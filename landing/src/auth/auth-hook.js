@@ -45,3 +45,15 @@ export async function loginRequest({ username, password }) {
   }
   window.location.href = "/app";
 }
+
+export async function getAuthProviders() {
+  const res = await fetch("/api/auth/providers", {
+    credentials: "include",
+  });
+  if (!res.ok) return { password: true, feishu: false };
+  return res.json();
+}
+
+export function startFeishuLogin() {
+  window.location.href = `/api/auth/feishu/start?return_to=${encodeURIComponent("/app")}`;
+}
