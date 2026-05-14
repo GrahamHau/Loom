@@ -426,7 +426,7 @@ function App() {
   }[active];
   const notifications = [
     { id: "n1", label: "系统", text: "全局搜索已经接通，可用 ⌘K 快速打开。", tone: "outline" },
-    { id: "n2", label: "News", text: `${data.newsCounts?.all || data.news.length} 条资讯已载入，当前数据源 ${data.rssSources.length} 个。`, tone: "outline" },
+    { id: "n2", label: "News", text: `${data.newsCounts?.all || data.news.length} 条资讯已载入。`, tone: "outline" },
   ];
 
   return (
@@ -437,10 +437,7 @@ function App() {
           <div className="sample-workspace-banner">
             <div className="sample-workspace-copy">
               <Tag tone="accent">示例工作区</Tag>
-              <span>
-                这里预置了一组竞品、灵感和调研结构，News 只展示最新抓取的信息流
-                {liveNewsReady && latestNewsAt ? `，最新更新 ${formatSampleDate(latestNewsAt)}` : "，正在更新中"}。
-              </span>
+              <span>{latestNewsAt ? `示例数据 · 更新 ${formatSampleDate(latestNewsAt)}` : "示例数据"}</span>
             </div>
             {canExitSample ? (
               <Btn size="sm" variant="primary" icon="check" onClick={finishSampleWorkspace}>开始处理真实数据</Btn>
@@ -453,7 +450,7 @@ function App() {
             {TITLES[active]?.subLabel && <span className="topbar-title-sub"> {TITLES[active].subLabel}</span>}
           </div>
           {active === "products" && <span className="topbar-crumb">· {data.products.length} 条记录</span>}
-          {active === "news" && <span className="topbar-crumb">· 实时采集 · {data.rssSources.length} 个数据源</span>}
+          {active === "news" && <span className="topbar-crumb">· 插件采集 · {data.newsCounts?.all || data.news.length} 条资讯</span>}
           {active === "demands" && <span className="topbar-crumb">· {data.demands.length} 条灵感</span>}
           {active === "research" && <span className="topbar-crumb">· {data.research.length} 个项目</span>}
           <div className="topbar-actions">

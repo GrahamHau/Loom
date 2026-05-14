@@ -16,7 +16,7 @@ export default function Hero() {
 
   const onSecondary = (e) => {
     e.preventDefault();
-    smoothScrollTo("modules");
+    smoothScrollTo("problem");
   };
 
   return (
@@ -43,7 +43,7 @@ export default function Hero() {
         <div className="hero-cta-row">
           <a
             className="btn btn-primary"
-            href="#modules"
+            href="#problem"
             onClick={onSecondary}
           >
             看看它怎么工作 <span aria-hidden="true">↓</span>

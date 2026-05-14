@@ -61,22 +61,6 @@ export default function WhyNow() {
             </li>
           ))}
         </ol>
-
-        <blockquote className="whynow-quote">
-          <p className="whynow-quote-en">
-            "Specific knowledge is knowledge you cannot be trained for.
-            If society can train you, it can train someone else, and replace you."
-          </p>
-          <p className="whynow-quote-zh">
-            「Specific knowledge（专属知识）是无法被培训出来的。
-            如果社会能培训你，就能培训别人来替代你。」
-          </p>
-          <cite className="whynow-quote-cite">— Naval Ravikant（纳瓦尔·拉维坎特）</cite>
-          <p className="whynow-quote-gloss">
-            你对这个行业的判断就是这种 specific knowledge。AI
-            读过全网，但它从没跟高手共事过。LOOM 让你把这种知识织进去。
-          </p>
-        </blockquote>
       </div>
     </section>
   );

@@ -680,7 +680,6 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           }
           <Btn size="sm" variant="ghost" icon="filter">筛选</Btn>
           <Btn size="sm" variant="ghost" icon="sparkles" onClick={processLlm} disabled={busy}>{busy ? "处理中..." : "LLM处理"}</Btn>
-          <Btn size="sm" variant="primary" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>
         </div>
       </div>
 
@@ -693,19 +692,17 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
                 <Icon name="rss" size={15} />
                 <span>
                   {liveNewsReady
-                    ? `News 只展示最近 ${newsMaxAgeHours} 小时内采集到的实时内容，示例数据不会进入同步或导出。`
-                    : "News 正在抓取最新公开信息，完成后会自动出现在这里。"}
+                    ? `News 只展示最近 ${newsMaxAgeHours} 小时内保存的内容。`
+                    : "等待 Chrome 插件保存内容。"}
                 </span>
               </div>
-              <Btn size="sm" variant="ghost" icon="sync" onClick={collect} disabled={busy}>{busy ? "更新中..." : "刷新实时信息流"}</Btn>
             </div>
           )}
           {dates.length === 0 &&
             <EmptyState
               icon="newspaper"
-              title={sampleWorkspace ? "正在更新实时信息流" : "还没有真实 News"}
-              action={<Btn size="sm" variant="primary" icon="sync" onClick={collect} disabled={busy}>{busy ? "采集中..." : "立即采集"}</Btn>}>
-              {sampleWorkspace ? "系统正在从预置公开数据源获取最新内容，不会使用旧的静态新闻。" : "先到系统设置添加 RSS 源，或点击立即采集导入真实资讯。"}
+              title={sampleWorkspace ? "正在等待信息流" : "还没有真实 News"}>
+              请使用 Chrome 插件采集。
             </EmptyState>
           }
           {dates.map((d) =>
@@ -1034,7 +1031,6 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
           <div className="products-toolbar-actions page-actions">
             <Tag tone="outline" className="products-toolbar-count">{filtered.length} 条</Tag>
             <Btn size="sm" variant="ghost" icon="sync" onClick={syncProducts}>同步飞书</Btn>
-            <Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>添加竞品</Btn>
           </div>
         </div>
         {notice && <div className="ai-block" style={{ margin: "0 12px 10px" }}>{notice}</div>}
@@ -1120,9 +1116,8 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                   <td colSpan={selectMode ? 9 : 8}>
                     <EmptyState
                       icon="boxes"
-                      title={products.length ? "没有匹配的竞品" : "还没有真实竞品"}
-                      action={<Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>添加竞品</Btn>}>
-                      粘贴真实商品链接解析，确认后会写入本地数据库。
+                      title={products.length ? "没有匹配的竞品" : "还没有真实竞品"}>
+                      请使用 Chrome 插件采集。
                     </EmptyState>
                   </td>
                 </tr>
@@ -1259,7 +1254,6 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
         </div>
       }
 
-      {showAdd && <AddProductModal api={api} refreshData={refreshData} onClose={() => setShowAdd(false)} />}
       {deleteTarget && <DeleteItemsConfirmModal entityLabel="竞品" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
       {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="竞品" items={selectedProducts} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}
     </div>);
@@ -1540,11 +1534,10 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div>
             <h1 className="h1">Spark 灵感库</h1>
-            <div className="muted text-sm">{demands.length} 条已录入 · 使用真实链接解析或手动录入</div>
+            <div className="muted text-sm">{demands.length} 条已录入</div>
           </div>
           <div className="page-actions">
             <Btn size="sm" icon="sync" onClick={syncDemands}>同步飞书</Btn>
-            <Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>录入需求</Btn>
           </div>
         </div>
         {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
@@ -1630,9 +1623,8 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             <div style={{ gridColumn: "1 / -1" }}>
               <EmptyState
                 icon="lightbulb"
-                title={demands.length ? "没有匹配的需求" : "还没有真实需求"}
-                action={<Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>录入需求</Btn>}>
-                粘贴真实内容链接解析，确认后会写入本地数据库。
+                title={demands.length ? "没有匹配的需求" : "还没有真实需求"}>
+                请使用 Chrome 插件采集。
               </EmptyState>
             </div>
           }
@@ -1678,7 +1670,6 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
         <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条灵感" />
       </div>
 
-      {showAdd && <AddDemandModal api={api} refreshData={refreshData} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setShowAdd(false)} />}
       {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
       {deleteTarget && <DeleteDemandConfirmModal demand={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={confirmDelete} />}
       {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="需求" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={async () => { await deleteSelected(); setShowBulkDeleteConfirm(false); }} />}
