@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-const { cleanHtml, fetchPageContent, fetchPageImage } = await import("./content-fetcher.js");
+const { cleanHtml, fetchPageContent, fetchPageImage, resolvePageUrl } = await import("./content-fetcher.js");
 
 describe("content-fetcher", () => {
   it("keeps plain text cleanup bounded", () => {
@@ -76,6 +76,21 @@ describe("content-fetcher", () => {
     try {
       const result = await fetchPageImage("https://www.example.com/articles/demo");
       expect(result.image).toBe("https://cdn.example.com/card.jpg");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("resolves the final page url for rss dedupe", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      url: "https://www.example.com/articles/original?utm_source=google",
+      text: async () => "<html></html>",
+    });
+
+    try {
+      await expect(resolvePageUrl("https://news.google.com/rss/articles/demo")).resolves.toBe("https://www.example.com/articles/original?utm_source=google");
     } finally {
       globalThis.fetch = originalFetch;
     }

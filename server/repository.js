@@ -717,11 +717,21 @@ export function listNewsSources(userId) {
 }
 
 export function createNewsSource(userId, input) {
+  const normalizedUrl = cleanText(input.url);
+  const existingByUrl = normalizedUrl
+    ? db.prepare("SELECT * FROM news_sources WHERE user_id = ? AND url = ?").get(userId, normalizedUrl)
+    : null;
+  if (existingByUrl) {
+    return updateNewsSource(userId, existingByUrl.id, {
+      ...input,
+      url: normalizedUrl,
+    });
+  }
     const source = {
       id: input.id || nanoid(10),
       user_id: userId,
       name: cleanTitle(input.name, "未命名数据源"),
-      url: cleanText(input.url),
+      url: normalizedUrl,
       type: cleanText(input.type, "rss"),
       language: cleanText(input.language),
       authority: cleanText(input.authority, "watchlist"),

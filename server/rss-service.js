@@ -1,6 +1,6 @@
 import Parser from "rss-parser";
 import { callLLM } from "./ai-service.js";
-import { fetchPageImage } from "./content-fetcher.js";
+import { fetchPageImage, resolvePageUrl } from "./content-fetcher.js";
 import { listPendingNewsForLlm, updateNews, upsertNews, updateNewsSource } from "./repository.js";
 
 const parser = new Parser({
@@ -50,6 +50,7 @@ const NEWS_LLM_INPUT_LIMIT = 1600;
 const NEWS_LLM_MAX_TOKENS = 520;
 const FETCH_TIMEOUT_MS = 30000;
 const OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE = Number(process.env.OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE || 12);
+const GOOGLE_NEWS_HOSTS = new Set(["news.google.com", "news.url.google.com"]);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -83,6 +84,51 @@ function arrayFirst(value) {
   return Array.isArray(value) ? value.find(Boolean) : value;
 }
 
+function safeUrl(rawUrl, baseUrl) {
+  try {
+    return new URL(String(rawUrl || ""), baseUrl);
+  } catch {
+    return null;
+  }
+}
+
+function isGoogleNewsUrl(rawUrl) {
+  const url = safeUrl(rawUrl);
+  return Boolean(url && GOOGLE_NEWS_HOSTS.has(url.hostname.toLowerCase()));
+}
+
+function normalizeUrlForDedupe(rawUrl) {
+  const url = safeUrl(rawUrl);
+  if (!url) return String(rawUrl || "").trim();
+  url.hash = "";
+  for (const param of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id", "fbclid", "gclid", "mc_cid", "mc_eid"]) {
+    url.searchParams.delete(param);
+  }
+  const normalized = url.toString();
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+function extractSourceHomepage(item) {
+  const source = arrayFirst(item.source);
+  return source?.url || source?.$?.url || "";
+}
+
+function sourceHostname(item) {
+  const homepage = extractSourceHomepage(item);
+  const url = safeUrl(homepage);
+  return url?.hostname.replace(/^www\./, "").toLowerCase() || "";
+}
+
+function titleSlug(value) {
+  return stripHtml(value)
+    .replace(/\s+-\s+[^-]+$/g, "")
+    .toLowerCase()
+    .replace(/['"“”‘’]/g, "")
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 140);
+}
+
 function extractThumbnail(item) {
   const mediaContent = arrayFirst(item.mediaContent);
   const mediaThumbnail = arrayFirst(item.mediaThumbnail);
@@ -98,6 +144,28 @@ function extractThumbnail(item) {
 export function extractRssThumbnail(item) {
   return extractThumbnail(item);
 }
+
+async function resolveOriginalArticleUrl(item) {
+  const originalUrl = item.link || item.guid || "";
+  if (!originalUrl || !isGoogleNewsUrl(originalUrl)) return normalizeUrlForDedupe(originalUrl);
+  try {
+    const resolvedUrl = await resolvePageUrl(originalUrl);
+    if (resolvedUrl && !isGoogleNewsUrl(resolvedUrl)) return normalizeUrlForDedupe(resolvedUrl);
+  } catch {
+    // Google News links are still stable enough as a fallback dedupe key.
+  }
+  const host = sourceHostname(item);
+  const slug = titleSlug(item.title);
+  if (host && slug) return `google-news://${host}/${slug}`;
+  return normalizeUrlForDedupe(originalUrl);
+}
+
+export const __rssTestUtils = {
+  isGoogleNewsUrl,
+  normalizeUrlForDedupe,
+  resolveOriginalArticleUrl,
+  titleSlug,
+};
 
 function publishedAtOf(item) {
   const candidates = [item.isoDate, item.pubDate, item.published, item.updated].filter(Boolean);
@@ -226,7 +294,9 @@ async function enrichOfficialImages(source, newsItems) {
     if (item.thumbnail_url || remaining <= 0) continue;
     remaining -= 1;
     try {
-      const page = await fetchPageImage(item.original_url);
+      const imageUrl = isGoogleNewsUrl(item.article_url) ? item.original_url : item.article_url || item.original_url;
+      if (!imageUrl || imageUrl.startsWith("google-news://")) continue;
+      const page = await fetchPageImage(imageUrl);
       if (page.image) {
         item.thumbnail_url = page.image;
         item.classification = {
@@ -255,17 +325,19 @@ export async function collectSource(userId, source) {
 
   const newsItems = [];
   for (const item of items) {
-    const originalUrl = item.link || item.guid || "";
-    if (!originalUrl) continue;
+    if (!(item.link || item.guid)) continue;
     const classified = await classifyNews({ source, item });
     if (!classified) continue;
     const publishedAt = publishedAtOf(item);
+    const articleUrl = await resolveOriginalArticleUrl(item);
+    const fallbackUrl = item.link || item.guid || "";
     newsItems.push({
       source_id: source.id,
       source: source.name,
       source_authority: source.authority || "watchlist",
       original_title: stripHtml(item.title || ""),
-      original_url: originalUrl,
+      original_url: articleUrl || fallbackUrl,
+      article_url: articleUrl || fallbackUrl,
       original_content: stripHtml(item.contentSnippet || item.summary || item.content || "").slice(0, 2000),
       published_at: publishedAt,
       date: publishedAt.slice(0, 10),
@@ -273,6 +345,11 @@ export async function collectSource(userId, source) {
       thumbnail_url: extractThumbnail(item),
       thumbHue: classified.type === "新品发布" ? 220 : 40,
       ...classified,
+      classification: {
+        ...(classified.classification || {}),
+        ...(fallbackUrl && articleUrl && articleUrl !== fallbackUrl ? { rss_url: fallbackUrl } : {}),
+        ...(extractSourceHomepage(item) ? { source_homepage: extractSourceHomepage(item) } : {}),
+      },
     });
   }
 

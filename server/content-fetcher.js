@@ -136,6 +136,11 @@ export async function fetchPageImage(url) {
   };
 }
 
+export async function resolvePageUrl(url) {
+  const { parsed, response } = await fetchPageResponse(url);
+  return response.url || parsed.toString();
+}
+
 export async function fetchPageContent(url) {
   try {
     const { parsed, response, html } = await fetchPageResponse(url);

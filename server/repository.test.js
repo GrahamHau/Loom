@@ -128,6 +128,18 @@ describe("repository", () => {
     expect(updated?.last_error).toBe("HTTP 403");
   });
 
+  it("dedupes news sources by url per user", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const first = repo.createNewsSource(legacyUserId, { name: "Feed A", url: "https://example.com/feed.xml", group: "brand-news" });
+    const second = repo.createNewsSource(legacyUserId, { name: "Feed A Updated", url: "https://example.com/feed.xml", group: "brand-news", fetch_interval: 120 });
+    const sources = repo.listNewsSources(legacyUserId).filter((source) => source.url === "https://example.com/feed.xml");
+
+    expect(second.id).toBe(first.id);
+    expect(sources).toHaveLength(1);
+    expect(sources[0].name).toBe("Feed A Updated");
+    expect(sources[0].fetch_interval).toBe(120);
+  });
+
   it("does not overwrite masked secrets", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.updateSettings(legacyUserId, { llm_api_key: "********", feishu_app_secret: "********", llm_model: "m2" });

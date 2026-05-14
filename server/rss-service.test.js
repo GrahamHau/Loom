@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 process.env.DATABASE_PATH = ":memory:";
 
-const { extractRssThumbnail, heuristicClassifyNews, shouldCollectSource, shouldEnrichSourceImages } = await import("./rss-service.js");
+const { __rssTestUtils, extractRssThumbnail, heuristicClassifyNews, shouldCollectSource, shouldEnrichSourceImages } = await import("./rss-service.js");
 
 describe("rss-service classification", () => {
   it("keeps official product launches as product news", () => {
@@ -101,5 +101,47 @@ describe("rss-service classification", () => {
   it("only enriches managed official sources with page images", () => {
     expect(shouldEnrichSourceImages({ id: "rss-google-camera-launches", authority: "aggregator" })).toBe(true);
     expect(shouldEnrichSourceImages({ id: "custom-feed", source_group: "custom", authority: "watchlist" })).toBe(false);
+  });
+
+  it("normalizes tracking params for rss item dedupe", () => {
+    expect(__rssTestUtils.normalizeUrlForDedupe("https://example.com/a/?utm_source=google&utm_medium=rss&x=1#section")).toBe("https://example.com/a/?x=1");
+  });
+
+  it("uses resolved article urls for Google News item dedupe", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      url: "https://www.example.com/news/product-launch?utm_source=google",
+      text: async () => "<html></html>",
+    });
+
+    try {
+      const result = await __rssTestUtils.resolveOriginalArticleUrl({
+        link: "https://news.google.com/rss/articles/CBMi-demo?oc=5",
+      });
+      expect(result).toBe("https://www.example.com/news/product-launch");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("falls back to source and title keys when Google News does not reveal article urls", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      url: "https://news.google.com/rss/articles/CBMi-demo?oc=5",
+      text: async () => "<html></html>",
+    });
+
+    try {
+      const result = await __rssTestUtils.resolveOriginalArticleUrl({
+        title: "SmallRig Launches New Camera Cage - Newsshooter",
+        link: "https://news.google.com/rss/articles/CBMi-demo?oc=5",
+        source: { url: "https://www.newsshooter.com" },
+      });
+      expect(result).toBe("google-news://newsshooter.com/smallrig-launches-new-camera-cage");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
