@@ -11,7 +11,7 @@
   <main class="page">
     <header class="top">
       <div class="brand">
-        <div class="mark">L</div>
+        <img class="mark mark-image" src="../icons/icon48.png" alt="LOOM extension logo">
         <div>
           <h1>LOOM Clipper</h1>
           <p>配置采集插件的服务器、登录状态、平台和字段映射。</p>
@@ -26,13 +26,13 @@
         <span id="connection-state">未检测</span>
       </div>
       <div class="form-grid">
-        <label>服务器地址<input id="api-base" type="url" placeholder="https://ulanzi-copilot.my1panelsite.xyz"></label>
-        <label>用户名<input id="username" type="text" placeholder="graham"></label>
-        <label>密码<input id="password" type="password" placeholder="••••••••"></label>
+        <label>服务器地址<input id="api-base" type="url" placeholder="https://loom.my1panelsite.xyz"></label>
+        <label>登录方式<input value="跟随 Web 端登录态自动同步" type="text" readonly></label>
       </div>
+      <div class="section-note">插件不再单独保存账号密码。请先在 Web 端登录，插件会自动同步当前账号。</div>
       <div class="actions">
-        <button id="save-login" class="btn primary">登录并保存</button>
-        <button id="test-connection" class="btn">测试连接</button>
+        <button id="open-web-login" class="btn primary">现在登录</button>
+        <button id="test-connection" class="btn">刷新状态</button>
         <button id="logout" class="btn danger">退出登录</button>
       </div>
     </section>

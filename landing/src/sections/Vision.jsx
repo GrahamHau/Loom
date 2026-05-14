@@ -23,11 +23,11 @@ export default function Vision() {
         <div className="kicker">愿景</div>
         <h2 className="section-title">越织越密的飞轮</h2>
         <p className="section-lead">
-          Loom 不是一次性工具，它是一个会随着你使用而变得更聪明的工作台 ——
+          LOOM 不是一次性工具，它是一个会随着你使用而变得更聪明的工作台 ——
           一个长期积累、可被继承的行业资产。
         </p>
 
-        <div className="vision-flywheel" aria-label="Loom 飞轮">
+        <div className="vision-flywheel" aria-label="LOOM 飞轮">
           <span className="flywheel-node">采集</span>
           <span className="flywheel-arrow">→</span>
           <span className="flywheel-node">判断 / 点评</span>

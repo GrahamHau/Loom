@@ -50,8 +50,18 @@ button, input, select { font: inherit; }
   place-items: center;
   font-weight: 700;
 }
+.mark-image {
+  object-fit: cover;
+  background: transparent;
+  color: transparent;
+}
 h1 { font-size: 24px; line-height: 1.2; margin-bottom: 6px; letter-spacing: 0; }
 p { color: var(--text-secondary); line-height: 1.6; }
+.section-note {
+  margin-top: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
 .section {
   background: var(--surface);
   border: 1px solid var(--border);

@@ -60,6 +60,7 @@
         return String(window.location.pathname || "").replace(/\/+$/, "");
       }
     })();
+    const currentNoteId = currentPath.split("/").filter(Boolean).pop() || "";
     const sameCurrentPath = (href) => {
       if (!href || !currentPath) return false;
       try {
@@ -67,6 +68,58 @@
       } catch {
         return false;
       }
+    };
+    const decodeHtml = (value) => {
+      const textValue = String(value || "");
+      if (!/[&<>]/.test(textValue)) return textValue;
+      const textarea = document.createElement("textarea");
+      textarea.innerHTML = textValue;
+      return textarea.value;
+    };
+    const decodeScriptString = (value) => {
+      const raw = String(value || "");
+      try {
+        return JSON.parse(`"${raw.replace(/"/g, '\\"')}"`);
+      } catch {
+        return raw
+          .replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+          .replace(/\\n/g, "\n")
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, "\\");
+      }
+    };
+    const normalizeNoteText = (value, titleText = "", authorText = "") => {
+      const blockedLines = new Set([
+        "关注",
+        "添加",
+        "说点什么",
+        "评论",
+        "点击评论",
+        "这是一片荒地",
+        "- THE END -",
+        "展开",
+        "收起",
+      ]);
+      const seen = new Set();
+      return decodeHtml(value)
+        .replace(/\u00a0/g, " ")
+        .replace(/\r/g, "\n")
+        .split(/\n+/)
+        .map((line) => line.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .filter((line) => {
+          if (seen.has(line)) return false;
+          seen.add(line);
+          if (line === titleText || line === authorText) return false;
+          if (blockedLines.has(line)) return false;
+          if (/^(点赞|收藏|转发|分享|评论|更多|举报)$/.test(line)) return false;
+          if (/^共\s*\d+\s*条评论$/.test(line)) return false;
+          if (/^展开\s*\d+\s*条回复$/.test(line)) return false;
+          if (/^\d+\s*(赞|收藏|评论|转发)?$/.test(line)) return false;
+          return line.length >= 2;
+        })
+        .join("\n")
+        .trim();
     };
     const findCurrentNoteAnchor = () => {
       const anchors = Array.from(document.querySelectorAll("a[href*='/explore/']"))
@@ -796,6 +849,10 @@
       if (cleaned.includes("万")) return Math.round((Number.parseFloat(cleaned) || 0) * 10000);
       return Number.parseInt(cleaned.replace(/[^0-9]/g, ""), 10) || 0;
     };
+    const cleanText = (value, fallback = "") => {
+      const clean = String(value ?? "").replace(/\s+/g, " ").trim();
+      return clean && clean !== "null" && clean !== "undefined" ? clean : fallback;
+    };
     const pickShareCount = () => {
       const selectors = [
         ".share-count",
@@ -816,6 +873,58 @@
       }
       return 0;
     };
+    const pickVisibleComments = () => {
+      const root = document.querySelector("#noteContainer") || detailRoot || scopedRoot || document;
+      const items = Array.from(root.querySelectorAll("[id^='comment-'], .comment-item"));
+      const seen = new Set();
+      const pickAuthorLink = (item) => {
+        const links = Array.from(item.querySelectorAll([
+          ".author-wrapper a[href*='/user/profile/']",
+          ".author a[href*='/user/profile/']",
+          "a.name[href*='/user/profile/']",
+          "a[href*='/user/profile/']",
+        ].join(",")));
+        return links.find((link) => cleanText(link.textContent || "")) || links[0] || null;
+      };
+      const pickAuthorName = (item, authorLink) => {
+        const fromLink = cleanText(authorLink?.textContent || authorLink?.innerText || "");
+        if (fromLink) return fromLink;
+        return cleanText(
+          item.querySelector(".author-wrapper .name, .author .name, .author-wrapper, .author")?.textContent || ""
+        );
+      };
+      return items.map((item) => {
+        if (!(item instanceof Element)) return null;
+        const commentId = cleanText(item.id || "");
+        if (commentId && seen.has(commentId)) return null;
+        if (commentId) seen.add(commentId);
+        const authorLink = pickAuthorLink(item);
+        const contentNode = item.querySelector(".content .note-text, [class*='content'] [class*='note-text'], .content");
+        const dateNode = item.querySelector(".date");
+        const locationNode = item.querySelector(".location");
+        const likeText = item.querySelector(".like .count, [class*='like-wrapper'] .count")?.textContent?.trim() || "";
+        const userUrl = authorLink?.href || "";
+        const userId = (() => {
+          try {
+            return new URL(userUrl, window.location.href).pathname.split("/").filter(Boolean).pop() || "";
+          } catch {
+            return "";
+          }
+        })();
+        const content = normalizeNoteText(contentNode?.innerText || contentNode?.textContent || "");
+        if (!content) return null;
+        return {
+          id: commentId,
+          user_id: userId,
+          user_name: pickAuthorName(item, authorLink),
+          content,
+          like_count: likeText === "赞" ? 0 : parseCount(likeText),
+          posted_at_text: cleanText(dateNode?.textContent || ""),
+          location: cleanText(locationNode?.textContent || ""),
+          is_reply: item.classList.contains("comment-item-sub"),
+        };
+      }).filter(Boolean);
+    };
     const scopedText = (selectors, root = scopedRoot) => {
       if (!root) return "";
       for (const selector of selectors) {
@@ -824,25 +933,128 @@
       }
       return "";
     };
-    const extractDetailContent = () => {
-      const direct = scopedText(["#detail-desc", ".desc", "[class*='content']", "[class*='note-text']", "[class*='desc']", "[class*='detail-desc']"], detailRoot);
-      if (direct) return direct.slice(0, 1000);
-      const root = detailRoot || scopedRoot;
+    const scriptTextCandidates = () => {
+      const idPattern = currentNoteId ? new RegExp(currentNoteId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) : null;
+      return Array.from(document.scripts)
+        .map((script) => script.textContent || "")
+        .filter((content) => {
+          if (content.length < 80) return false;
+          if (idPattern?.test(content)) return true;
+          return /note|desc|title|xiaohongshu|小红书/i.test(content);
+        });
+    };
+    const valueFromScriptPattern = (patterns) => {
+      for (const content of scriptTextCandidates()) {
+        for (const pattern of patterns) {
+          const match = content.match(pattern);
+          const value = decodeScriptString(match?.[1] || "");
+          if (value && value.length >= 2) return value;
+        }
+      }
+      return "";
+    };
+    const contentFromMeta = () => {
+      const metaValue = [
+        document.querySelector("meta[name='description']")?.content,
+        document.querySelector("meta[property='og:description']")?.content,
+        document.querySelector("meta[name='twitter:description']")?.content,
+      ].find(Boolean) || "";
+      return normalizeNoteText(
+        metaValue
+          .replace(/\s*-\s*小红书\s*$/i, "")
+          .replace(/\s*-\s*Xiaohongshu\s*$/i, "")
+      );
+    };
+    const contentFromJsonLd = () => {
+      const scripts = Array.from(document.querySelectorAll("script[type='application/ld+json']"));
+      for (const script of scripts) {
+        try {
+          const data = JSON.parse(script.textContent || "{}");
+          const items = Array.isArray(data) ? data : [data];
+          for (const item of items) {
+            const value = item?.articleBody || item?.description || item?.caption || item?.text;
+            const clean = normalizeNoteText(value);
+            if (clean) return clean;
+          }
+        } catch {
+          // ignore invalid structured data
+        }
+      }
+      return "";
+    };
+    const contentFromHydration = () => normalizeNoteText(valueFromScriptPattern([
+      /"desc"\s*:\s*"((?:\\.|[^"\\])*)"/,
+      /"description"\s*:\s*"((?:\\.|[^"\\])*)"/,
+      /"content"\s*:\s*"((?:\\.|[^"\\])*)"/,
+      /"noteContent"\s*:\s*"((?:\\.|[^"\\])*)"/,
+      /"articleBody"\s*:\s*"((?:\\.|[^"\\])*)"/,
+    ]));
+    const contentCandidateScore = (value) => {
+      const clean = String(value || "").trim();
+      if (clean.length < 2) return 0;
+      let score = clean.length;
+      if (/[，。！？；：,.!?]/.test(clean)) score += 80;
+      if (clean.includes("\n")) score += Math.min(clean.split("\n").length * 30, 180);
+      if (/#/.test(clean)) score += 20;
+      if (/编辑于|发布于|共\s*\d+\s*条评论|说点什么|回复/.test(clean)) score -= 180;
+      return score;
+    };
+    const isContentNoiseNode = (node) => {
+      if (!(node instanceof Element)) return true;
+      return Boolean(node.closest([
+        "[id^='comment-']",
+        "[class*='comment']",
+        "[class*='reply']",
+        "[class*='author']",
+        "[class*='user']",
+        "[class*='avatar']",
+        "[class*='input']",
+        "[class*='toolbar']",
+        "[class*='engage']",
+        "[class*='capsule']",
+        "[class*='recommend']",
+      ].join(",")));
+    };
+    const bestContentCandidate = (selectors, root, titleText, authorText) => {
       if (!root) return "";
+      const candidates = [];
+      for (const selector of selectors) {
+        root.querySelectorAll(selector).forEach((node) => {
+          if (!(node instanceof Element)) return;
+          if (isContentNoiseNode(node)) return;
+          const value = normalizeNoteText(node.innerText || node.textContent || "", titleText, authorText);
+          const score = contentCandidateScore(value);
+          if (score > 0) candidates.push({ value, score });
+        });
+      }
+      candidates.sort((a, b) => b.score - a.score);
+      return candidates[0]?.value || "";
+    };
+    const extractDetailContent = () => {
       const titleText = bootstrapTitleNode?.textContent?.trim() || "";
       const authorText = scopedText(["[class*='username']", ".author-name", "a[href*='/user/profile/']"], detailRoot) || "";
-      const lines = String(root.innerText || root.textContent || "")
-        .split(/\n+/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .filter((line) => {
-          if (line === titleText || line === authorText) return false;
-          if (/^(关注|添加|说点什么|评论|点击评论|这是一片荒地|- THE END -)$/.test(line)) return false;
-          if (/^共\s*\d+\s*条评论$/.test(line)) return false;
-          if (/^展开\s*\d+\s*条回复$/.test(line)) return false;
-          return line.length >= 2;
-        });
-      return lines.join("\n").slice(0, 1000);
+      const primarySelectors = [
+        "#detail-desc",
+        "[data-testid*='detail-desc']",
+        "[class*='detail-desc']",
+        "[class*='detailDesc']",
+        "[class*='desc']",
+      ];
+      const primaryRoot = document.querySelector("#noteContainer") || detailRoot || scopedRoot;
+      const primary = bestContentCandidate(primarySelectors, primaryRoot, titleText, authorText);
+      if (primary) return primary.slice(0, 2000);
+      const structured = contentFromJsonLd() || contentFromHydration() || contentFromMeta();
+      if (structured) return normalizeNoteText(structured, titleText, authorText).slice(0, 2000);
+      const fallbackSelectors = [
+        "[class*='note-content']",
+        "[class*='noteContent']",
+        "[class*='note-text']",
+      ];
+      const fallback = bestContentCandidate(fallbackSelectors, detailRoot || scopedRoot, titleText, authorText);
+      if (fallback) return fallback.slice(0, 2000);
+      const root = detailRoot || scopedRoot;
+      if (!root) return "";
+      return normalizeNoteText(root.innerText || root.textContent || "", titleText, authorText).slice(0, 2000);
     };
     const title = scopedText(["#detail-title", ".title", "h1"], detailRoot) || bootstrapTitleNode?.textContent?.trim() || document.title;
     const content = extractDetailContent();
@@ -861,6 +1073,7 @@
       collects: parseCount(scopedText(["[class*='collect-wrapper'] [class*='count']", ".collect-count"], detailRoot) || text("[class*='collect-wrapper'] [class*='count']") || text(".collect-count")),
       shares: pickShareCount(),
       comments: parseCount(scopedText(["[class*='chat-wrapper'] [class*='count']", ".comment-count"], detailRoot) || text("[class*='chat-wrapper'] [class*='count']") || text(".comment-count")),
+      visible_comments: pickVisibleComments(),
       thumbnail_url: thumbnail,
       author: scopedText(["[class*='username']", ".author-name", "a[href*='/user/profile/']"], detailRoot) || text("[class*='username']") || text(".author-name"),
       debug,

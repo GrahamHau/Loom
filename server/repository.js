@@ -15,7 +15,7 @@ import {
 } from "./db.js";
 import { normalizeTagGroups } from "./tag-config.js";
 import { buildEmptyState } from "./seed.js";
-import { isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
+import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -191,6 +191,25 @@ function cleanArray(value, limit = 20) {
   return value.map((item) => cleanText(item)).filter(Boolean).slice(0, limit);
 }
 
+function cleanVisibleComments(value, limit = 80) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (!item || typeof item !== "object") return null;
+    const content = cleanText(item.content).slice(0, 600);
+    if (!content) return null;
+    return {
+      id: cleanText(item.id).slice(0, 120),
+      user_id: cleanText(item.user_id).slice(0, 120),
+      user_name: cleanText(item.user_name || item.username || item.author).slice(0, 120),
+      content,
+      like_count: Number(item.like_count || item.likes || 0),
+      posted_at_text: cleanText(item.posted_at_text || item.time || item.date).slice(0, 120),
+      location: cleanText(item.location).slice(0, 60),
+      is_reply: Boolean(item.is_reply),
+    };
+  }).filter(Boolean).slice(0, limit);
+}
+
 function cleanPlatformArray(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(0, 6).map((platform, index) => ({
@@ -268,6 +287,7 @@ export function ensureLocalUser(input = {}) {
     ensureSampleNewsSources(saved.id);
   } else {
     ensureUserState(saved);
+    ensureDefaultNewsSources(saved.id);
   }
   return saved;
 }
@@ -405,6 +425,7 @@ export function createDemand(userId, input) {
       comments: Number(input.comments || 0),
       thumbnail_url: cleanText(input.thumbnail_url || input.image),
       image: cleanText(input.image || input.thumbnail_url),
+      visible_comments: cleanVisibleComments(input.visible_comments),
       date: input.date || new Date().toISOString().slice(0, 10),
       innovation: cleanTitle(input.innovation, "待分类"),
       scenarios: cleanArray(input.scenarios),
@@ -438,6 +459,7 @@ export function updateDemand(userId, id, patch) {
       ...(patch.collects !== undefined ? { collects: Number(patch.collects || 0) } : {}),
       ...(patch.shares !== undefined ? { shares: Number(patch.shares || 0) } : {}),
       ...(patch.comments !== undefined ? { comments: Number(patch.comments || 0) } : {}),
+      ...(patch.visible_comments !== undefined ? { visible_comments: cleanVisibleComments(patch.visible_comments) } : {}),
       ...(patch.thumbnail_url !== undefined ? { thumbnail_url: cleanText(patch.thumbnail_url, item.thumbnail_url || "") } : {}),
       ...(patch.image !== undefined ? { image: cleanText(patch.image, item.image || "") } : {}),
       ...(patch.innovation !== undefined ? { innovation: cleanTitle(patch.innovation, item.innovation) } : {}),
@@ -570,6 +592,7 @@ export function finishSampleWorkspace(userId) {
     state.products = (state.products || []).filter((item) => !item.sample);
     state.demands = (state.demands || []).filter((item) => !item.sample);
     state.research = (state.research || []).filter((item) => !item.sample);
+    ensureDefaultNewsSources(userId);
     return state;
   });
 }
@@ -762,6 +785,23 @@ export function ensureSampleNewsSources(userId) {
   const existing = new Set(listNewsSources(userId).map((source) => source.id));
   const created = [];
   for (const source of SAMPLE_NEWS_SOURCES) {
+    const id = sampleSourceId(userId, source.id);
+    if (existing.has(id)) continue;
+    created.push(createNewsSource(userId, {
+      ...source,
+      id,
+      type: "rss",
+      active: true,
+      is_active: true,
+    }));
+  }
+  return created;
+}
+
+export function ensureDefaultNewsSources(userId) {
+  const existing = new Set(listNewsSources(userId).map((source) => source.id));
+  const created = [];
+  for (const source of DEFAULT_NEWS_SOURCES) {
     const id = sampleSourceId(userId, source.id);
     if (existing.has(id)) continue;
     created.push(createNewsSource(userId, {

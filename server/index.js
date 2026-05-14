@@ -2,10 +2,11 @@ import "dotenv/config";
 import express from "express";
 import session from "express-session";
 import SQLiteStoreFactory from "connect-sqlite3";
+import signature from "cookie-signature";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureSeed } from "./db.js";
-import { AppError, testLLM } from "./ai-service.js";
+import { AppError, isLLMConfigured, testLLM } from "./ai-service.js";
 import {
   apiToken,
   buildFeishuAuthUrl,
@@ -142,7 +143,29 @@ function sessionUserResponse(user) {
     role: user.role,
     email: user.email || "",
     auth_provider: user.auth_provider,
+    is_visitor: user.id === legacyUser.id,
   };
+}
+
+function getSessionIdFromCookieValue(cookieValue) {
+  const raw = String(cookieValue || "").trim();
+  if (!raw) return "";
+  if (!raw.startsWith("s:")) return "";
+  const unsigned = signature.unsign(raw.slice(2), process.env.SESSION_SECRET || "loom-dev-secret-change-me");
+  return unsigned || "";
+}
+
+function loadUserFromSessionCookie(cookieValue) {
+  const sessionId = getSessionIdFromCookieValue(cookieValue);
+  if (!sessionId) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    app.sessionStore.get(sessionId, (error, sessionData) => {
+      if (error) return reject(error);
+      const userId = String(sessionData?.userId || "").trim();
+      if (!userId) return resolve(null);
+      resolve(findUserById(userId) || null);
+    });
+  });
 }
 
 function sampleNewsReady(userId) {
@@ -159,7 +182,8 @@ function refreshSampleWorkspaceNews(userId, { force = false } = {}) {
   sampleRefreshInFlight.add(userId);
   setImmediate(async () => {
     try {
-      await collectSources(userId, listNewsSources(userId));
+      const collected = await collectSources(userId, listNewsSources(userId));
+      await processCollectedNewsWithLlm(userId, collected);
     } catch (error) {
       console.error("Sample workspace news refresh failed", error);
     } finally {
@@ -190,6 +214,17 @@ function visibleNewsItems(userId) {
 
 async function processCollectedNewsWithLlm(userId, collected) {
   const changed = Number(collected?.inserted || 0) + Number(collected?.updated || 0);
+  if (!isLLMConfigured(userId)) {
+    return {
+      processed: 0,
+      kept: 0,
+      filtered: 0,
+      failed: 0,
+      skipped: true,
+      reason: "llm_not_configured",
+      remaining: 0,
+    };
+  }
   try {
     return await processNewsWithLlm(userId, Math.min(100, Math.max(20, changed)));
   } catch (error) {
@@ -304,6 +339,25 @@ app.get("/api/me", (req, res) => {
   if (!user) return res.status(401).json({ error: "unauthorized" });
   res.json({ user: sessionUserResponse(user) });
 });
+
+app.post("/api/auth/extension/session-token", asyncHandler(async (req, res) => {
+  const cookieValue = String(req.body?.session_cookie || "").trim();
+  if (!cookieValue) {
+    throw new AppError(400, "missing_session_cookie", "缺少 Web 登录会话。");
+  }
+
+  const user = await loadUserFromSessionCookie(cookieValue);
+  if (!user) {
+    throw new AppError(401, "invalid_session_cookie", "当前 Web 登录已失效，请重新登录。");
+  }
+
+  const token = apiToken();
+  revokeUserApiTokens(user.id);
+  upsertApiToken(token, user.id);
+  touchUserLogin(user.id);
+  refreshSampleWorkspaceNews(user.id);
+  res.json({ token, user: sessionUserResponse(user) });
+}));
 
 app.get("/api/bootstrap", requireAuth, (req, res) => {
   const userId = currentUserId(req);
@@ -525,9 +579,14 @@ function startRssScheduler() {
 }
 
 if (process.env.NODE_ENV === "production") {
-  const distDir = path.join(projectRoot, "dist");
-  app.use(express.static(distDir));
-  app.get(/.*/, (_req, res) => res.sendFile(path.join(distDir, "index.html")));
+  const appDistDir = path.join(projectRoot, "dist");
+  const landingDistDir = path.join(projectRoot, "landing", "dist");
+
+  app.use("/app", express.static(appDistDir));
+  app.get(/^\/app(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(appDistDir, "index.html")));
+
+  app.use(express.static(landingDistDir));
+  app.get(/^\/(?:extension)?$/, (_req, res) => res.sendFile(path.join(landingDistDir, "index.html")));
 }
 
 app.use("/api", (_req, res) => {

@@ -3,7 +3,8 @@ import react from "@vitejs/plugin-react";
 
 // Landing page sits on its own port (5174) so it can run alongside the main
 // Loom dev server (5173) without colliding. Build output lives in dist/.
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === "build" ? "/" : "/",
   plugins: [react()],
   server: {
     port: 5174,
@@ -12,4 +13,4 @@ export default defineConfig({
   preview: {
     port: 5174,
   },
-});
+}));

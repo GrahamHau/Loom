@@ -46,7 +46,7 @@ export default function SiteNav() {
         </a>
       </nav>
       <a href="#login" className="site-nav-cta" onClick={onLoginAnchor}>
-        进入 Loom
+        进入 LOOM
       </a>
     </header>
   );

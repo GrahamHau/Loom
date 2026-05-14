@@ -1,0 +1,26 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="loomSpiralGradient" x1="88" y1="72" x2="294" y2="330" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5FA6FF"/>
+      <stop offset="1" stop-color="#0A63DB"/>
+    </linearGradient>
+  </defs>
+  <path
+    d="M82 79C46 101 22 140 22 184C22 251 76 305 143 305C210 305 264 251 264 184C264 117 210 63 143 63C98 63 58 87 34 123"
+    stroke="url(#loomSpiralGradient)"
+    stroke-width="20"
+    stroke-linecap="round"
+  />
+  <path
+    d="M141 122C175 122 203 149 203 184C203 218 175 246 141 246C106 246 78 218 78 184C78 160 92 138 113 128"
+    stroke="url(#loomSpiralGradient)"
+    stroke-width="20"
+    stroke-linecap="round"
+  />
+  <path
+    d="M141 167C150 167 157 174 157 184C157 193 150 200 141 200C131 200 124 193 124 184C124 177 128 171 134 168"
+    stroke="url(#loomSpiralGradient)"
+    stroke-width="20"
+    stroke-linecap="round"
+  />
+</svg>

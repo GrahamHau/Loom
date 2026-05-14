@@ -53,7 +53,7 @@
 
   /* landing-specific */
   --max-width: 1080px;
-  --section-py: clamp(64px, 9vw, 128px);
+  --section-py: clamp(40px, 5vw, 72px);
   --section-px: clamp(20px, 5vw, 56px);
   --thread: rgba(15, 17, 22, 0.05);
   --thread-strong: rgba(15, 17, 22, 0.08);

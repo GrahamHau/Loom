@@ -57,14 +57,25 @@ export default function LoginPanel() {
       className="login-card"
       onSubmit={onSubmit}
       noValidate
-      aria-label="登录 Loom"
+      aria-label="登录 LOOM"
     >
-      <h3 className="login-card-title">进入你的 Loom</h3>
-      <p className="login-card-sub">输入凭证，进入你的工作台</p>
+      <div className="login-brand">
+        <div>
+          <div className="login-brand-name">LOOM</div>
+          <div className="login-brand-sub">Link · Observe · Organize · Make</div>
+        </div>
+      </div>
+
+      <div className="login-card-head">
+        <h3 className="login-card-title">登录工作台</h3>
+        <p className="login-card-sub">
+          用你已经沉淀下来的判断，继续训练一个更懂业务的 LOOM。
+        </p>
+      </div>
 
       <div className="login-field">
         <label className="login-label" htmlFor="login-username">
-          用户名
+          账号
         </label>
         <input
           id="login-username"
@@ -79,7 +90,7 @@ export default function LoginPanel() {
             fieldErrors.username ? `${fieldId}-username-err` : undefined
           }
           disabled={submitting || succeeded}
-          placeholder="graham"
+          placeholder="请输入你的账号"
         />
         {fieldErrors.username && (
           <div id={`${fieldId}-username-err`} className="login-fielderror">
@@ -105,7 +116,7 @@ export default function LoginPanel() {
             fieldErrors.password ? `${fieldId}-password-err` : undefined
           }
           disabled={submitting || succeeded}
-          placeholder="••••••••"
+          placeholder="请输入你的密码"
         />
         {fieldErrors.password && (
           <div id={`${fieldId}-password-err`} className="login-fielderror">
@@ -120,7 +131,7 @@ export default function LoginPanel() {
         disabled={submitting || succeeded}
       >
         {submitting && <span className="login-spinner" aria-hidden="true" />}
-        {succeeded ? "已登录 ✓" : submitting ? "正在进入…" : "开始织造 →"}
+        {succeeded ? "已登录 ✓" : submitting ? "登录中…" : "登录 LOOM"}
       </button>
 
       {status === "error" && (
@@ -135,8 +146,11 @@ export default function LoginPanel() {
       )}
 
       <div className="login-hint">
-        当前为 landing 演示，登录后端由 Codex 后续接线 ——
-        见 <code>src/auth/auth-hook.js</code> 中的 <code>TODO(codex)</code>。
+        登录成功后会直接进入 LOOM Web 工作台，路径为 <code>/app</code>。
+      </div>
+
+      <div className="login-card-foot">
+        LOOM v2.0 · 首页、插件页与 Web 工作台已分流
       </div>
     </form>
   );

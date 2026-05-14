@@ -3,8 +3,8 @@
 独立的产品 launch 页。讲清楚 Loom 是干什么的、为什么这件事现在重要，
 并把登录交互直接做进页面尾部。
 
-> 这个目录是**独立子项目**。不依赖 Loom 主仓库的 `package.json` / `src/` / `server/`，
-> 也不会自己接 `/api/auth/login`。集成由 Codex 在后续完成。
+> 这个目录是**独立子项目**。开发时独立跑在 5174；生产环境下会被 Loom
+> 主服务托管为首页 `/` 和插件引导页 `/extension`。
 
 ## 本地启动
 
@@ -24,40 +24,21 @@ npm run build              # 输出到 landing/dist/
 npm run preview            # 预览构建产物
 ```
 
-## 给 Codex 的集成说明
+## 当前生产路由结构
 
-完成集成只需要做这几件事：
+当前推荐结构：
 
-1. **托管静态资源**：把 `landing/dist/` 挂到 Loom 的 Express 上，例如
-   ```js
-   // server/index.js
-   app.use("/welcome", express.static(path.resolve("landing/dist")));
-   ```
-   或单独部署在 Vercel / Netlify / 对象存储。
+- `/`：产品首页（landing）
+- `/extension`：插件安装引导页
+- `/app`：真实 LOOM Web 工作台
+- `/api/*`：API
 
-2. **替换登录注入点**：landing 的登录表单完整、状态机完整，**但实际 API
-   调用是占位**。打开 `src/auth/auth-hook.js`，把 `loginRequest()` 函数体
-   替换为对 Loom 现有 `/api/auth/login` 的调用：
-   ```js
-   export async function loginRequest({ username, password }) {
-     const res = await fetch("/api/auth/login", {
-       method: "POST",
-       credentials: "include",
-       headers: { "Content-Type": "application/json" },
-       body: JSON.stringify({ username, password }),
-     });
-     if (!res.ok) {
-       const data = await res.json().catch(() => ({}));
-       throw new Error(data.message || "登录失败");
-     }
-     // 登录成功后跳到主 app
-     window.location.href = "/";
-   }
-   ```
-   接线点已经在文件头部用 `TODO(codex):` 标出，搜得到。
+## 与主服务的集成约定
 
-3. **指向真实 Loom URL**：把 `.env` 里的 `VITE_LOOM_APP_URL` 改成生产域名，
-   或直接走 same-origin 让登录后 `window.location.href = "/"` 跳进主 app。
+1. 首页和插件页由 `landing/dist/` 承载
+2. 主工作台由仓库根目录的 `dist/` 承载，并挂到 `/app`
+3. landing 内嵌登录直接调用同域 `/api/auth/login`
+4. 登录成功后跳转到 `/app`
 
 ## 设计 token
 
@@ -69,8 +50,7 @@ npm run preview            # 预览构建产物
 ## 范围
 
 ✅ 7 个 section 的完整内容 + 经纬交织的视觉 motif + 模块卡的微交互
-✅ 登录表单完整前端（UI + 校验 + idle/submitting/error/success 状态）
+✅ 登录表单完整前端（UI + 校验 + 成功后跳转 `/app`）
 ✅ 响应式（375px 起手）
-❌ 不实际调 `/api/auth/login`（Codex 接线）
-❌ 不动主 app 任何代码
-❌ 不部署、不改 nginx、不改 Express server
+✅ `/extension` 插件安装引导页
+❌ 不包含 Chrome 商店发布流程

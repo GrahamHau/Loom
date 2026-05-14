@@ -46,7 +46,8 @@
     "storage",
     "activeTab",
     "scripting",
-    "sidePanel"
+    "sidePanel",
+    "cookies"
   ],
   "host_permissions": [
     "*://*.amazon.com/*",
@@ -58,6 +59,6 @@
     "*://*.kickstarter.com/*",
     "http://127.0.0.1:*/*",
     "http://localhost:*/*",
-    "https://ulanzi-copilot.my1panelsite.xyz/*"
+    "https://loom.my1panelsite.xyz/*"
   ]
 }

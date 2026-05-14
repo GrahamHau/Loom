@@ -37,24 +37,16 @@ export default function Hero() {
 
         <p className="hero-sub">
           每天看资讯、翻竞品、记需求 —— 你本来就在做这些事。
-          Loom 让你做的每一个判断都不白做：它们会沉淀下来，让 AI 越来越懂你这一行。
+          LOOM 让你做的每一个判断都不白做：它们会沉淀下来，让 AI 越来越懂你这一行。
         </p>
 
         <div className="hero-cta-row">
           <a
             className="btn btn-primary"
-            href={LOOM_URL}
-            onClick={onPrimary}
-            aria-label="进入 Loom 工作台"
-          >
-            进入 Loom <span aria-hidden="true">→</span>
-          </a>
-          <a
-            className="btn btn-secondary"
             href="#modules"
             onClick={onSecondary}
           >
-            看看它怎么工作
+            看看它怎么工作 <span aria-hidden="true">↓</span>
           </a>
         </div>
 

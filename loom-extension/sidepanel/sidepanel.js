@@ -1,3 +1,4 @@
+const DEFAULT_API_BASE = "https://loom.my1panelsite.xyz";
 const API_BASE_KEY = "loom_api_base";
 const TOKEN_KEY = "loom_token";
 const USER_KEY = "loom_user";
@@ -25,11 +26,19 @@ const EXTRACTOR_FILES = {
   xiaohongshu: "content/xiaohongshu.js",
   kickstarter: "content/kickstarter.js",
 };
+const DEFAULT_TAG_GROUPS = [
+  { key: "scenarios", name: "使用场景", tone: "accent", tags: ["Vlog/自拍", "直播/带货", "短视频创作", "户外旅拍", "室内棚拍", "桌面俯拍", "运动/极限拍摄", "会议/活动记录", "产品摄影", "延时/慢动作", "街拍/纪实", "教育/网课"] },
+  { key: "painpoints", name: "用户痛点", tone: "danger", tags: ["携带不便/太重", "续航不足", "操作复杂/学习成本高", "画质不够", "防抖不足", "散热过热", "噪音大", "兼容性差", "配件缺失/需另购", "安装固定麻烦", "调光/调色不精准", "无线连接不稳定", "收纳困难", "价格过高/性价比低", "做工质感差"] },
+  { key: "innovation_types", name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] },
+  { key: "custom_tags", name: "自定义标签", tone: "outline", tags: ["便携", "高显色", "模块化", "磁吸", "手机摄影"] },
+];
 
 const state = {
   apiBase: "",
   token: "",
   user: null,
+  sessionCookie: "",
+  syncedSessionCookie: "",
   tab: null,
   lastSeenUrl: "",
   page: null,
@@ -44,11 +53,19 @@ const state = {
   relationPickerItems: [],
   relationPickerQuery: "",
   relationPickerError: "",
+  tagGroups: DEFAULT_TAG_GROUPS,
+  tagPicker: null,
+  commentCollecting: false,
+  commentCollectStartedAt: 0,
+  commentListExpanded: false,
 };
 
 let autoSyncTimer = null;
 let autoSyncPoller = null;
+let commentCollectorTimer = null;
 let pendingUrlSync = false;
+let loginStatusTimer = null;
+let syncInFlight = null;
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -60,16 +77,26 @@ function cleanText(value, fallback = "") {
   return text;
 }
 
+function isVisitorUser(user) {
+  const id = String(user?.id || "").toLowerCase();
+  const name = String(user?.name || "").trim().toLowerCase();
+  return Boolean(user?.is_visitor || id === "visitor" || name === "visitor");
+}
+
 document.addEventListener("DOMContentLoaded", init);
 document.addEventListener("click", handleGlobalClick);
 
 async function init() {
   const stored = await getStoredSettings();
-  state.apiBase = (stored[API_BASE_KEY] || "https://ulanzi-copilot.my1panelsite.xyz").replace(/\/$/, "");
+  state.apiBase = (stored[API_BASE_KEY] || DEFAULT_API_BASE).replace(/\/$/, "");
   state.token = stored[TOKEN_KEY] || "";
   state.user = stored[USER_KEY] || null;
+  state.sessionCookie = await getSessionCookieValue();
+  state.syncedSessionCookie = state.token ? state.sessionCookie : "";
+  bindLoginStateSync();
   if (!state.token) {
-    renderLogin();
+    renderLoginWait("请先在 Web 端完成登录");
+    void syncAuthFromWebSession();
     return;
   }
   if (stored[AI_BEFORE_SAVE_KEY] === undefined) {
@@ -77,6 +104,7 @@ async function init() {
   }
   renderLoading("正在读取当前页面");
   bindAutoSync();
+  await loadTagGroups();
   await loadCurrentPage(stored[DEFAULT_MODE_KEY] || "auto");
 }
 
@@ -110,6 +138,8 @@ async function loadCurrentPage(defaultMode = "auto") {
       : defaultMode === "product"
         ? "product"
         : DEMAND_PLATFORMS.has(result.platform) ? "demand" : "product";
+    state.tagPicker = null;
+    stopCommentCollector();
     state.processed = result.data;
     state.form = buildDraft(state.mode, state.processed);
     state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
@@ -123,6 +153,9 @@ async function loadCurrentPage(defaultMode = "auto") {
 async function readPageData(tab) {
   if (!tab?.id) throw new Error("没有可读取的当前页面");
   const platform = detectPlatformFromUrl(tab.url || "");
+  if (platform === "xiaohongshu" && !isXhsNoteUrl(tab.url || "")) {
+    throw new Error("请先打开一条小红书笔记详情页，再进行采集");
+  }
   try {
     if (platform) {
       await chrome.scripting.executeScript({
@@ -130,7 +163,7 @@ async function readPageData(tab) {
         files: ["content/detector.js", EXTRACTOR_FILES[platform]],
       });
     }
-    return await chrome.tabs.sendMessage(tab.id, { type: "LOOM_GET_PAGE_DATA" });
+    return await readInjectedPageData(tab.id, platform);
   } catch (error) {
     if (!String(error.message || "").includes("Receiving end does not exist")) throw error;
     if (!platform) throw new Error("当前页面不在插件支持范围内");
@@ -138,8 +171,25 @@ async function readPageData(tab) {
       target: { tabId: tab.id },
       files: ["content/detector.js", EXTRACTOR_FILES[platform]],
     });
-    return chrome.tabs.sendMessage(tab.id, { type: "LOOM_GET_PAGE_DATA" });
+    return readInjectedPageData(tab.id, platform);
   }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readInjectedPageData(tabId, platform) {
+  const attempts = platform === "xiaohongshu" ? 4 : 1;
+  let lastResult = null;
+  for (let index = 0; index < attempts; index += 1) {
+    const result = await chrome.tabs.sendMessage(tabId, { type: "LOOM_GET_PAGE_DATA" });
+    lastResult = result;
+    const content = cleanText(result?.data?.content || result?.data?.original_content || result?.data?.summary, "");
+    if (platform !== "xiaohongshu" || content.length >= 2) return result;
+    await wait(450);
+  }
+  return lastResult;
 }
 
 function detectPlatformFromUrl(url) {
@@ -161,7 +211,16 @@ function shouldAutoSyncUrl(url) {
   try {
     const parsed = new URL(url);
     if (!parsed.hostname.includes("xiaohongshu.com")) return true;
-    return /^\/explore\/[a-z0-9]+$/i.test(parsed.pathname);
+    return isXhsNoteUrl(url);
+  } catch {
+    return false;
+  }
+}
+
+function isXhsNoteUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.includes("xiaohongshu.com") && /^\/explore\/[a-z0-9]+$/i.test(parsed.pathname);
   } catch {
     return false;
   }
@@ -199,6 +258,7 @@ async function reloadCurrentPage() {
     if (!result?.ok) throw new Error(result?.error || "重新抓取失败");
     state.page = result;
     state.processed = result.data;
+    stopCommentCollector();
     state.form = buildDraft(state.mode, state.processed);
     state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
     renderMain();
@@ -285,113 +345,144 @@ async function pingApiBase(apiBase) {
   return res.json().catch(() => ({}));
 }
 
-function renderLogin() {
+function apiOrigin() {
+  try {
+    return new URL(state.apiBase).origin;
+  } catch {
+    return "";
+  }
+}
+
+async function getSessionCookieValue() {
+  const url = apiOrigin();
+  if (!url || !chrome.cookies?.get) return "";
+  try {
+    const cookie = await chrome.cookies.get({ url, name: "connect.sid" });
+    return cookie?.value || "";
+  } catch {
+    return "";
+  }
+}
+
+async function clearAuthState() {
+  state.token = "";
+  state.user = null;
+  state.syncedSessionCookie = "";
+  await chrome.storage.local.remove([TOKEN_KEY, USER_KEY, "pmcopilot_token", "pmcopilot_user"]);
+}
+
+async function removeSessionCookie() {
+  const url = apiOrigin();
+  if (!url || !chrome.cookies?.remove) return;
+  try {
+    await chrome.cookies.remove({ url, name: "connect.sid" });
+  } catch {}
+}
+
+async function syncAuthFromWebSession(options = {}) {
+  if (syncInFlight) return syncInFlight;
+  syncInFlight = (async () => {
+    const cookieValue = await getSessionCookieValue();
+    state.sessionCookie = cookieValue;
+
+    if (!cookieValue) {
+      if (state.token || state.user) await clearAuthState();
+      if (!options.silent) renderLoginWait("请先在 Web 端登录 LOOM");
+      return false;
+    }
+
+    if (!options.force && state.token && state.syncedSessionCookie && state.syncedSessionCookie === cookieValue) {
+      return true;
+    }
+
+    try {
+      if (!options.silent) renderLoginWait("已检测到登录态，正在同步插件权限");
+      const res = await fetch(`${state.apiBase}/api/auth/extension/session-token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_cookie: cookieValue }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || `请求失败 ${res.status}`);
+      if (!data.token) throw new Error("服务器未返回插件登录凭证");
+      if (isVisitorUser(data.user)) {
+        await clearAuthState();
+        if (!options.silent) {
+          renderLoginWait("检测到当前 Web 端是访客账号，请先在 Web 端退出访客状态，再登录正式账号。");
+        }
+        return false;
+      }
+      await chrome.storage.local.set({
+        [API_BASE_KEY]: state.apiBase,
+        [TOKEN_KEY]: data.token,
+        [USER_KEY]: data.user || null,
+      });
+      state.token = data.token;
+      state.user = data.user || null;
+      state.syncedSessionCookie = cookieValue;
+      if (!options.silent) renderLoading("正在读取当前页面");
+      await loadTagGroups();
+      await loadCurrentPage((await getStoredSettings())[DEFAULT_MODE_KEY] || "auto");
+      return true;
+    } catch (error) {
+      if (state.token || state.user) await clearAuthState();
+      if (!options.silent) renderLoginWait(error.message || "登录同步失败，请重新打开 Web 端");
+      return false;
+    } finally {
+      syncInFlight = null;
+    }
+  })();
+  return syncInFlight;
+}
+
+function bindLoginStateSync() {
+  if (chrome.cookies?.onChanged && !bindLoginStateSync.bound) {
+    chrome.cookies.onChanged.addListener((changeInfo) => {
+      if (changeInfo.cookie?.name !== "connect.sid") return;
+      if (!apiOrigin()) return;
+      try {
+        const cookieUrl = `${changeInfo.cookie.secure ? "https" : "http"}://${changeInfo.cookie.domain.replace(/^\./, "")}${changeInfo.cookie.path || "/"}`;
+        if (new URL(cookieUrl).hostname !== new URL(apiOrigin()).hostname) return;
+      } catch {
+        return;
+      }
+      void syncAuthFromWebSession({ silent: false });
+    });
+    bindLoginStateSync.bound = true;
+  }
+
+  if (!loginStatusTimer) {
+    loginStatusTimer = setInterval(() => {
+      void syncAuthFromWebSession({ silent: true });
+    }, 4000);
+  }
+}
+
+async function loadTagGroups() {
+  try {
+    const data = await api("/api/bootstrap");
+    state.tagGroups = safeArray(data?.settings?.tag_groups).length ? data.settings.tag_groups : DEFAULT_TAG_GROUPS;
+  } catch {
+    state.tagGroups = DEFAULT_TAG_GROUPS;
+  }
+}
+
+function renderLoginWait(statusText = "请先在 Web 端登录 LOOM") {
   document.getElementById("app").innerHTML = `
-    <div class="shell">
-      <div class="header">
-        <div class="brand">
-          <div class="logo">L</div>
-          <div>
-            <div class="title">LOOM</div>
-            <div class="sub">连接情报工作台</div>
-          </div>
+    <div class="shell shell-login-minimal">
+      <button class="icon-btn login-minimal-settings" id="open-options" title="设置">⚙</button>
+      <div class="login-minimal">
+        <div class="login-minimal-spinner" aria-hidden="true">
+          ${swirlSpinnerIcon()}
         </div>
-        <button class="icon-btn" id="open-options" title="设置">⚙</button>
-      </div>
-      <div class="cl-body cl-login-body">
-        <form class="cl-login" id="login-form">
-          <div class="cl-login-head">
-            <div class="cl-login-glyph">
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            </div>
-            <div>
-              <div class="cl-login-title">登录 LOOM</div>
-              <div class="cl-login-sub">连接后端后才能保存采集到的竞品与需求</div>
-            </div>
-          </div>
-
-          <div class="cl-login-fields">
-            <label class="cl-login-field">
-              <span>服务器地址</span>
-              <input class="login-input mono" id="api-base" type="url" value="${escapeHtml(state.apiBase)}" placeholder="https://ulanzi-copilot.my1panelsite.xyz">
-            </label>
-            <label class="cl-login-field">
-              <span>用户名</span>
-              <input class="login-input" id="username" type="text" placeholder="graham">
-            </label>
-            <label class="cl-login-field">
-              <span>密码</span>
-              <div class="input-wrap">
-                <input class="login-input mono" id="password" type="password" placeholder="••••••••">
-                <button class="ico-btn sm" id="toggle-password" type="button" aria-label="显示密码">${eyeIcon()}</button>
-              </div>
-            </label>
-          </div>
-
-          <div class="cl-login-note hint-warn">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-            <span>账号信息会保存在 chrome.storage.local，仅本机使用</span>
-          </div>
-
-          <div class="cl-login-status mono" id="login-status">等待连接测试</div>
-        </form>
-      </div>
-      <div class="cl-foot">
-        <button class="btn ghost grow" id="test-connection" type="button">测试连接</button>
-        <button class="btn primary grow" form="login-form" type="submit">登录并保存</button>
+        <div class="login-minimal-title">等待登录完成</div>
+        <div class="login-minimal-sub">请在 Web 端登录后返回，插件会自动同步当前账号</div>
+        <button class="btn primary login-minimal-btn" id="open-web-login" type="button">现在登录</button>
+        <div class="login-minimal-status">${escapeHtml(statusText)}</div>
       </div>
     </div>`;
   document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
-  document.getElementById("toggle-password").onclick = () => {
-    const input = document.getElementById("password");
-    const button = document.getElementById("toggle-password");
-    const visible = input.type === "text";
-    input.type = visible ? "password" : "text";
-    button.innerHTML = visible ? eyeIcon() : eyeOffIcon();
-  };
-  document.getElementById("test-connection").onclick = async () => {
-    const apiBase = document.getElementById("api-base").value.trim().replace(/\/$/, "");
-    const status = document.getElementById("login-status");
-    if (!apiBase) {
-      status.textContent = "请先填写服务器地址";
-      return;
-    }
-    status.textContent = "正在测试连接…";
-    try {
-      await pingApiBase(apiBase);
-      status.textContent = "连接正常";
-    } catch (error) {
-      status.textContent = `连接失败：${error.message}`;
-    }
-  };
-  document.getElementById("login-form").onsubmit = async (event) => {
-    event.preventDefault();
-    const apiBase = document.getElementById("api-base").value.trim().replace(/\/$/, "");
-    const username = document.getElementById("username").value.trim();
-    const password = document.getElementById("password").value;
-    if (!apiBase || !username || !password) return alert("请填写服务器地址、用户名和密码");
-    try {
-      const res = await fetch(`${apiBase}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "登录失败");
-      if (!data.token) throw new Error("服务器还未更新插件登录接口：/api/auth/login 没有返回 token。请先部署最新后端。");
-      await chrome.storage.local.set({
-        [API_BASE_KEY]: apiBase,
-        [TOKEN_KEY]: data.token,
-        [USER_KEY]: { username, ...(data.user || {}) },
-      });
-      state.apiBase = apiBase;
-      state.token = data.token;
-      state.user = { username, ...(data.user || {}) };
-      await loadCurrentPage();
-    } catch (error) {
-      alert(error.message);
-    }
-  };
+  document.getElementById("open-web-login").onclick = () => chrome.tabs.create({ url: `${state.apiBase}/app?login=1` });
 }
 
 function renderLoading(text) {
@@ -527,11 +618,31 @@ function renderMain() {
       renderMain();
     });
   }
+  const collectCommentsButton = document.getElementById("collect-comments-more");
+  if (collectCommentsButton) {
+    collectCommentsButton.onclick = () => {
+      if (state.commentCollecting) {
+        stopCommentCollector();
+        state.message = "已停止监听评论。";
+        renderMain();
+        return;
+      }
+      startCommentCollector();
+    };
+  }
+  const commentsToggleButton = document.getElementById("comments-toggle");
+  if (commentsToggleButton) {
+    commentsToggleButton.onclick = () => {
+      state.commentListExpanded = !state.commentListExpanded;
+      renderMain();
+    };
+  }
 }
 
 async function switchMode(mode, supported, message) {
   if (!supported && !confirm(`${message}，仍然切换吗？`)) return;
   state.mode = mode;
+  state.tagPicker = null;
   state.processed = state.page.data;
   const previous = state.form || {};
   state.form = {
@@ -579,6 +690,21 @@ function warnIcon() {
   return `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>`;
 }
 
+function swirlSpinnerIcon() {
+  return `
+    <img class="swirl-spin-img" src="../icons/loom-spiral.png" alt="LOOM loading">`;
+}
+
+function successMotionIcon() {
+  return `
+    <div class="success-motion-icon">
+      <svg viewBox="0 0 64 64" width="88" height="88" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle class="success-motion-ring" cx="32" cy="32" r="24" pathLength="100"></circle>
+        <path class="success-motion-check" d="M21 32.5L28.4 39.6L43 25.8" pathLength="100"></path>
+      </svg>
+    </div>`;
+}
+
 function buildDraft(mode, item) {
   if (mode === "product") {
     return {
@@ -613,6 +739,7 @@ function buildDraft(mode, item) {
     collects: Number(item?.collects || item?.favorites || 0),
     shares: Number(item?.shares || item?.reposts || item?.forwards || 0),
     comments: Number(item?.comments || 0),
+    visible_comments: mergeComments([], item?.visible_comments),
     innovation: cleanText(item?.innovation || item?.tags_innovation, "待分类"),
     scenarios: safeArray(item?.scenarios),
     painpoints: safeArray(item?.painpoints),
@@ -634,6 +761,97 @@ function setArrayField(key, value) {
     .map((item) => item.trim())
     .filter(Boolean);
   state.form = { ...(state.form || {}), [key]: list };
+}
+
+function normalizeComment(item) {
+  if (!item || typeof item !== "object") return null;
+  const content = cleanText(item.content, "");
+  if (!content) return null;
+  const userName = cleanText(item.user_name || item.username || item.author, "");
+  return {
+    id: cleanText(item.id, ""),
+    user_id: cleanText(item.user_id, ""),
+    user_name: userName === "未知用户" ? "" : userName,
+    content,
+    like_count: Number(item.like_count || item.likes || 0),
+    posted_at_text: cleanText(item.posted_at_text || item.time || item.date, ""),
+    location: cleanText(item.location, ""),
+    is_reply: Boolean(item.is_reply),
+  };
+}
+
+function mergeComments(current, incoming) {
+  const result = [];
+  const seen = new Set();
+  const indexByKey = new Map();
+  for (const raw of [...safeArray(current), ...safeArray(incoming)]) {
+    const item = normalizeComment(raw);
+    if (!item) continue;
+    const key = item.id || `${item.user_id || item.user_name}:${item.content}`;
+    if (seen.has(key)) {
+      const existingIndex = indexByKey.get(key);
+      const existing = result[existingIndex];
+      result[existingIndex] = {
+        ...existing,
+        ...item,
+        user_id: item.user_id || existing.user_id,
+        user_name: item.user_name || existing.user_name,
+        posted_at_text: item.posted_at_text || existing.posted_at_text,
+        location: item.location || existing.location,
+      };
+      continue;
+    }
+    seen.add(key);
+    indexByKey.set(key, result.length);
+    result.push(item);
+  }
+  return result;
+}
+
+async function collectVisibleComments({ silent = false } = {}) {
+  if (state.page?.platform !== "xiaohongshu" || !state.tab?.id) return;
+  try {
+    const result = await readInjectedPageData(state.tab.id, "xiaohongshu");
+    if (!result?.ok) throw new Error(result?.error || "评论读取失败");
+    const incoming = safeArray(result.data?.visible_comments);
+    const next = mergeComments(state.form?.visible_comments, incoming);
+    state.page = { ...state.page, data: { ...state.page.data, visible_comments: next } };
+    state.processed = { ...(state.processed || {}), visible_comments: next };
+    state.form = { ...(state.form || {}), visible_comments: next };
+    if (!silent) {
+      state.message = next.length
+        ? `已采集 ${next.length} 条当前可见评论。`
+        : "当前可见评论还没有读到，向下滚动评论区后再试。";
+    }
+    renderMain();
+  } catch (error) {
+    if (!silent) {
+      state.message = `评论采集失败：${error.message}`;
+      renderMain();
+    }
+  }
+}
+
+function stopCommentCollector() {
+  if (commentCollectorTimer) {
+    clearInterval(commentCollectorTimer);
+    commentCollectorTimer = null;
+  }
+  state.commentCollecting = false;
+  state.commentCollectStartedAt = 0;
+}
+
+function startCommentCollector() {
+  if (state.page?.platform !== "xiaohongshu") return;
+  state.commentCollecting = true;
+  state.commentCollectStartedAt = Date.now();
+  state.message = "已开始监听可见评论。请在左侧小红书评论区慢慢滚动，期间不要关闭面板。";
+  void collectVisibleComments({ silent: true });
+  if (commentCollectorTimer) clearInterval(commentCollectorTimer);
+  commentCollectorTimer = setInterval(() => {
+    void collectVisibleComments({ silent: true });
+  }, 1200);
+  renderMain();
 }
 
 async function openRelationPicker() {
@@ -801,26 +1019,15 @@ function demandView(item) {
       <textarea class="ghost-input full source-content-input" data-key="content" placeholder="采集到的原文正文">${escapeHtml(originalText)}</textarea>
     </div>
     <div class="cl-section">
-      <div class="cl-section-label">创新类型 · 多选</div>
-      <div class="tag-row">
-        <span class="tag accent">${escapeHtml(item.innovation || "待分类")}</span>
-        <button class="tag dashed" data-add-key="innovation">+ 添加</button>
-      </div>
+      ${fieldSelect("innovation", "创新类型", [item.innovation].filter(Boolean), "success", { single: true, groupKey: "innovation_types" })}
     </div>
     <div class="cl-section">
-      <div class="cl-section-label">使用场景 · 多选</div>
-      <div class="tag-row">
-        ${safeArray(item.scenarios).map((t) => `<span class="tag removable" data-tag-key="scenarios" data-tag-value="${escapeAttr(t)}">${escapeHtml(t)}<button type="button">×</button></span>`).join("")}
-        <button class="tag dashed" data-add-key="scenarios">+ 添加</button>
-      </div>
+      ${fieldSelect("scenarios", "使用场景", safeArray(item.scenarios), "accent")}
     </div>
     <div class="cl-section">
-      <div class="cl-section-label">用户痛点 · 多选</div>
-      <div class="tag-row">
-        ${safeArray(item.painpoints).map((t) => `<span class="tag danger removable" data-tag-key="painpoints" data-tag-value="${escapeAttr(t)}">${escapeHtml(t)}<button type="button">×</button></span>`).join("")}
-        <button class="tag dashed" data-add-key="painpoints">+ 添加</button>
-      </div>
+      ${fieldSelect("painpoints", "用户痛点", safeArray(item.painpoints), "danger")}
     </div>
+    ${state.page?.platform === "xiaohongshu" ? commentsCaptureView(item) : ""}
     <div class="cl-section">
       <div class="cl-section-label">备注</div>
       <textarea class="ghost-input full" data-key="note" placeholder="可选备注">${escapeHtml(item.note || "")}</textarea>
@@ -828,6 +1035,136 @@ function demandView(item) {
     <div class="cl-section">
       <div class="cl-section-label">来源链接</div>
       <div class="source-link mono">${escapeHtml(item.url || state.page?.data?.url || "")}</div>
+    </div>
+  `;
+}
+
+function commentsCaptureView(item) {
+  const comments = mergeComments([], item.visible_comments);
+  const collapsedLimit = 3;
+  const isExpanded = state.commentListExpanded;
+  const preview = comments.slice(0, isExpanded ? comments.length : collapsedLimit);
+  const hiddenCount = Math.max(comments.length - preview.length, 0);
+  return `
+    <div class="cl-section">
+      <div class="comments-card">
+        <div class="comments-card-head">
+          <div>
+            <div class="cl-section-label">可见评论</div>
+            <div class="comments-sub">${comments.length ? `已采集 ${comments.length} 条` : "会自动读取当前已加载评论"}</div>
+          </div>
+          <button class="btn sm comments-more-btn" type="button" id="collect-comments-more">
+            ${state.commentCollecting ? "监听中" : "采集更多"}
+          </button>
+        </div>
+        ${state.commentCollecting ? `<div class="comments-tip">请在左侧小红书评论区慢慢滚动，插件会持续收集新出现的评论；不要关闭面板。</div>` : ""}
+        <div class="comments-list ${preview.length ? "" : "empty"}">
+          ${preview.length ? preview.map(commentItemView).join("") : `<div class="comments-empty">当前页面还没有可见评论，滚到评论区后点“采集更多”。</div>`}
+        </div>
+        ${comments.length > collapsedLimit ? `
+          <button class="comments-toggle" type="button" id="comments-toggle">
+            ${isExpanded ? "收起" : `展开全部 ${hiddenCount} 条`}
+          </button>
+        ` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function commentItemView(comment) {
+  const meta = [
+    comment.posted_at_text,
+    comment.location && !String(comment.posted_at_text || "").includes(comment.location) ? comment.location : "",
+    `${Number(comment.like_count || 0)} 赞`,
+    comment.is_reply ? "回复" : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <div class="comment-row">
+      <div class="comment-row-head">
+        <span class="comment-user">${escapeHtml(comment.user_name || "未知用户")}</span>
+      </div>
+      <div class="comment-content">${escapeHtml(comment.content)}</div>
+      <div class="comment-meta">${escapeHtml(meta || "0 赞")}</div>
+    </div>
+  `;
+}
+
+function tagGroupByKey(key) {
+  const normalizedKey = key === "innovation" ? "innovation_types" : key;
+  return safeArray(state.tagGroups).find((group) => group.key === normalizedKey) ||
+    DEFAULT_TAG_GROUPS.find((group) => group.key === normalizedKey) ||
+    { key: normalizedKey, name: normalizedKey, tone: "outline", tags: [] };
+}
+
+function ensureTagOption(groupKey, value) {
+  const normalizedKey = groupKey === "innovation" ? "innovation_types" : groupKey;
+  const cleanValue = cleanText(value);
+  if (!cleanValue) return;
+  const groups = safeArray(state.tagGroups).length ? safeArray(state.tagGroups) : DEFAULT_TAG_GROUPS;
+  let changed = false;
+  state.tagGroups = groups.map((group) => {
+    if (group.key !== normalizedKey) return group;
+    if (safeArray(group.tags).includes(cleanValue)) return group;
+    changed = true;
+    return { ...group, tags: [...safeArray(group.tags), cleanValue] };
+  });
+  if (!changed) return;
+  api("/api/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ tag_groups: state.tagGroups }),
+  }).catch(() => {});
+}
+
+function fieldSelect(key, label, selectedValues, tone = "accent", options = {}) {
+  const group = tagGroupByKey(options.groupKey || key);
+  const selected = safeArray(selectedValues).filter(Boolean);
+  const active = state.tagPicker?.key === key;
+  return `
+    <div class="field-select ${active ? "open" : ""}" data-field-select="${escapeAttr(key)}">
+      <div class="field-select-head">
+        <div class="cl-section-label">${escapeHtml(label)}${options.single ? "" : " · 多选"}</div>
+        <button class="field-select-trigger" type="button" data-open-tag-picker="${escapeAttr(key)}">
+          选择
+        </button>
+      </div>
+      <div class="field-selected-row">
+        ${selected.length ? selected.map((item) => `
+          <span class="tag ${tone} removable" data-tag-key="${escapeAttr(key)}" data-tag-value="${escapeAttr(item)}">
+            ${escapeHtml(item)}<button type="button">×</button>
+          </span>
+        `).join("") : `<span class="field-empty">未选择</span>`}
+      </div>
+      ${active ? tagPickerPanel(key, group, selected, tone, options) : ""}
+    </div>
+  `;
+}
+
+function tagPickerPanel(key, group, selected, tone, options = {}) {
+  const query = String(state.tagPicker?.query || "").trim();
+  const allOptions = Array.from(new Set([...safeArray(group.tags), ...selected])).filter(Boolean);
+  const filtered = query ? allOptions.filter((item) => item.toLowerCase().includes(query.toLowerCase())) : allOptions;
+  const hasExact = query && allOptions.some((item) => item.toLowerCase() === query.toLowerCase());
+  return `
+    <div class="field-picker">
+      <input class="field-picker-search" data-tag-query="${escapeAttr(key)}" value="${escapeAttr(query)}" placeholder="搜索或新建选项" autofocus>
+      <div class="field-picker-list">
+        ${filtered.map((item) => {
+          const checked = selected.includes(item);
+          return `
+            <button class="field-option ${checked ? "selected" : ""}" type="button" data-toggle-tag="${escapeAttr(key)}" data-value="${escapeAttr(item)}" data-single="${options.single ? "1" : "0"}">
+              <span class="field-check">${checked ? "✓" : ""}</span>
+              <span class="tag ${tone}">${escapeHtml(item)}</span>
+              ${checked ? `<span class="field-option-x">×</span>` : ""}
+            </button>
+          `;
+        }).join("")}
+        ${query && !hasExact ? `
+          <button class="field-option create" type="button" data-toggle-tag="${escapeAttr(key)}" data-value="${escapeAttr(query)}" data-single="${options.single ? "1" : "0"}">
+            <span class="field-check">+</span>
+            <span>新建 “${escapeHtml(query)}”</span>
+          </button>
+        ` : ""}
+      </div>
     </div>
   `;
 }
@@ -925,6 +1262,20 @@ function bindHeader() {
   document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
   const reloadButton = document.getElementById("header-reload");
   if (reloadButton) reloadButton.onclick = () => reloadCurrentPage();
+  const logoutButton = document.getElementById("header-logout");
+  if (logoutButton) {
+    logoutButton.onclick = async () => {
+      try {
+        await fetch(`${state.apiBase}/api/auth/logout`, {
+          method: "POST",
+          headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
+        });
+      } catch {}
+      await removeSessionCookie();
+      await clearAuthState();
+      renderLoginWait("你已退出登录");
+    };
+  }
 }
 
 function handleGlobalClick(event) {
@@ -935,18 +1286,27 @@ function handleGlobalClick(event) {
     return;
   }
 
-  const addTag = event.target.closest("[data-add-key]");
-  if (addTag) {
-    const key = addTag.getAttribute("data-add-key");
-    const row = addTag.closest(".tag-row");
-    const input = row?.querySelector("input");
-    const value = String(input?.value || "").trim();
-    if (!value) return;
-    if (key === "innovation") {
-      state.form = { ...(state.form || {}), innovation: value };
+  const pickerTrigger = event.target.closest("[data-open-tag-picker]");
+  if (pickerTrigger) {
+    const key = pickerTrigger.getAttribute("data-open-tag-picker");
+    state.tagPicker = state.tagPicker?.key === key ? null : { key, query: "" };
+    renderMain();
+    return;
+  }
+
+  const toggleTag = event.target.closest("[data-toggle-tag]");
+  if (toggleTag) {
+    const key = toggleTag.getAttribute("data-toggle-tag");
+    const value = toggleTag.getAttribute("data-value");
+    const single = toggleTag.getAttribute("data-single") === "1";
+    if (!key || !value) return;
+    ensureTagOption(key, value);
+    if (single || key === "innovation") {
+      state.form = { ...(state.form || {}), [key]: value };
+      state.tagPicker = null;
     } else {
-      const next = safeArray(state.form?.[key]);
-      if (!next.includes(value)) next.push(value);
+      const current = safeArray(state.form?.[key]);
+      const next = current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
       state.form = { ...(state.form || {}), [key]: next };
     }
     renderMain();
@@ -958,7 +1318,16 @@ function handleGlobalClick(event) {
     const key = removable.getAttribute("data-tag-key");
     const value = removable.getAttribute("data-tag-value");
     if (!key || !value) return;
-    state.form = { ...(state.form || {}), [key]: safeArray(state.form?.[key]).filter((item) => item !== value) };
+    state.form = {
+      ...(state.form || {}),
+      [key]: key === "innovation" ? "待分类" : safeArray(state.form?.[key]).filter((item) => item !== value),
+    };
+    renderMain();
+    return;
+  }
+
+  if (state.tagPicker && !event.target.closest("[data-field-select]")) {
+    state.tagPicker = null;
     renderMain();
     return;
   }
@@ -991,6 +1360,12 @@ function handleGlobalClick(event) {
 document.addEventListener("input", (event) => {
   const el = event.target;
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return;
+  const tagQueryKey = el.getAttribute("data-tag-query");
+  if (tagQueryKey) {
+    state.tagPicker = { key: tagQueryKey, query: el.value };
+    renderMain();
+    return;
+  }
   const key = el.getAttribute("data-key");
   if (!key) return;
   if (key.startsWith("platforms.")) {
@@ -1069,6 +1444,7 @@ function demandPayload(item) {
     collects: Number(item.collects || 0),
     shares: Number(item.shares || 0),
     comments: Number(item.comments || 0),
+    visible_comments: mergeComments([], item.visible_comments),
     scenarios: safeArray(item.scenarios),
     painpoints: safeArray(item.painpoints),
     innovation: item.innovation || "待分类",
@@ -1103,6 +1479,7 @@ function renderSuccess(payload) {
     <div class="shell">
       ${headerHtml()}
       <div class="cl-body">
+        <div class="cl-success-hero" aria-hidden="true">${successMotionIcon()}</div>
         <div class="cl-hint">已保存到 ${state.mode === "product" ? "竞品库" : "需求管理"} · ${escapeHtml(payload.name || payload.title || "")}</div>
         <div class="cl-empty-hint">你可以继续抓取下一条页面，或者打开 Web 端查看结果。</div>
         <div class="cl-spacer"></div>
@@ -1130,11 +1507,13 @@ function headerHtml(options = {}) {
         </div>
       ` : `
         <div class="cl-brand">
+          <img class="cl-mark cl-mark-image" src="../icons/icon48.png" alt="LOOM extension logo">
           <div>
             <div class="cl-name">LOOM</div>
           </div>
         </div>
       `}
+      ${state.token ? `<button class="ico-btn" id="header-logout" aria-label="退出登录">${logoutIcon()}</button>` : ""}
       ${state.page ? `<button class="ico-btn" id="header-reload" aria-label="刷新">${refreshIcon()}</button>` : ""}
       <button class="ico-btn" id="open-options" aria-label="设置">${settingsIcon()}</button>
     </div>`;
@@ -1142,6 +1521,10 @@ function headerHtml(options = {}) {
 
 function settingsIcon() {
   return `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+}
+
+function logoutIcon() {
+  return `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>`;
 }
 
 function escapeHtml(value) {

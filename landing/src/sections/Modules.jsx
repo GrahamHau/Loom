@@ -23,7 +23,7 @@ const MODULES = [
     sub: "竞品库",
     icon: BoxesIcon,
     lede: "边看竞品，边完成信息整理 —— 不用事后再翻收藏夹。",
-    body: "浏览亚马逊 / 淘宝看 SmallRig、Ulanzi、Peak Design 时，用 Loom 浏览器插件一键采集图片、卖点、价格、规格、标签 —— 落到统一的结构化卡片。",
+    body: "浏览亚马逊 / 淘宝看 SmallRig、Ulanzi、Peak Design 时，用 LOOM 浏览器插件一键采集图片、卖点、价格、规格、标签 —— 落到统一的结构化卡片。",
     annotation: (
       <>
         <strong>纬线在哪里：</strong>
@@ -99,7 +99,7 @@ export default function Modules() {
         </div>
 
         <blockquote className="modules-closing-quote">
-          你每天本来就在看这些东西，Loom 只是让你看过的不白看、想过的不白想。
+          你每天本来就在看这些东西，LOOM 只是让你看过的不白看、想过的不白想。
         </blockquote>
       </div>
     </section>

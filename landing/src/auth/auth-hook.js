@@ -32,13 +32,16 @@
  *   }
  * ============================================================ */
 
-// TODO(codex): replace this placeholder with the real /api/auth/login call.
 export async function loginRequest({ username, password }) {
-  if (!username || !password) {
-    throw new Error("请输入用户名和密码");
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || `登录失败 (${res.status})`);
   }
-  // Simulate network latency so the loading state is visible.
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-  // Placeholder always fails. Remove this once Codex wires the real endpoint.
-  throw new Error("尚未接入认证后端 —— Codex 集成后即可登录");
+  window.location.href = "/app";
 }

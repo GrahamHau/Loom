@@ -30,6 +30,11 @@ function configuredSettings(userId) {
   return settings;
 }
 
+export function isLLMConfigured(userId) {
+  const settings = getSettings(userId);
+  return Boolean(settings.llm_api_url && settings.llm_model && settings.llm_api_key);
+}
+
 async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);

@@ -178,6 +178,15 @@ describe("repository", () => {
     expect(state.rssSources.some((source) => source.source_group === "sample-live")).toBe(true);
   });
 
+  it("initializes regular users with default official news sources", () => {
+    const user = repo.ensureLocalUser({ id: "regular-user", name: "Regular User", auth_provider: "feishu" });
+    const state = repo.bootstrap(user.id);
+
+    expect(state.onboarding.sampleWorkspace).toBeFalsy();
+    expect(state.rssSources.length).toBeGreaterThan(0);
+    expect(state.rssSources.some((source) => source.source_group === "official-default")).toBe(true);
+  });
+
   it("filters stale news in sample workspaces", () => {
     const visitor = repo.ensureLegacyWorkspace();
     repo.upsertNews(visitor.id, [
@@ -239,6 +248,7 @@ describe("repository", () => {
     expect(state.products).toEqual([]);
     expect(state.demands).toEqual([]);
     expect(state.research).toEqual([]);
+    expect(state.rssSources.some((source) => source.source_group === "official-default")).toBe(true);
   });
 
   it("updates product relation fields", () => {

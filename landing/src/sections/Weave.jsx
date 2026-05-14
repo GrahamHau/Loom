@@ -33,7 +33,7 @@ export default function Weave() {
         <div className="kicker">调研工坊</div>
         <h2 className="section-title">不是收集，是织造</h2>
         <p className="section-lead">
-          Weave 是 Loom 的飞轮中心。前三个模块沉淀的信息和判断，
+          Weave 是 LOOM 的飞轮中心。前三个模块沉淀的信息和判断，
           在这里被关联、交叉、重组 —— 变成结构化的产品洞察和意想不到的新方向。
         </p>
 

@@ -21,3 +21,6 @@ Thumbs.db
 playwright-report/
 test-results/
 .playwright/
+
+.codex-artifacts/
+.codex-tmp/

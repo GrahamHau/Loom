@@ -9,7 +9,7 @@ const DemandThumb = globalThis.DemandThumb;
 const PLATFORM_LABEL = globalThis.PLATFORM_LABEL;
 const PLATFORM_ICON = globalThis.PLATFORM_ICON;
 const PLATFORM_KEY = globalThis.PLATFORM_KEY;
-const { useState, useEffect, useMemo } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 
 function EmptyState({ icon = "sparkles", title, children, action }) {
   return (
@@ -24,6 +24,45 @@ function EmptyState({ icon = "sparkles", title, children, action }) {
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function clampPage(page, totalPages) {
+  return Math.min(Math.max(1, Number(page) || 1), Math.max(1, totalPages || 1));
+}
+
+function paginate(items, page, pageSize) {
+  const list = safeArray(items);
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+  const currentPage = clampPage(page, totalPages);
+  const start = (currentPage - 1) * pageSize;
+  return {
+    items: list.slice(start, start + pageSize),
+    totalPages,
+    currentPage,
+    start,
+    end: Math.min(start + pageSize, list.length),
+    total: list.length,
+  };
+}
+
+function PaginationBar({ page, total, pageSize, onPageChange, label = "条" }) {
+  if (total <= pageSize) return null;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const current = clampPage(page, totalPages);
+  const start = (current - 1) * pageSize + 1;
+  const end = Math.min(current * pageSize, total);
+  return (
+    <div className="pagination-bar">
+      <div className="pagination-summary">
+        显示 {start}-{end} / {total} {label}
+      </div>
+      <div className="pagination-controls">
+        <Btn size="sm" variant="ghost" icon="chevron-left" disabled={current <= 1} onClick={() => onPageChange(current - 1)}>上一页</Btn>
+        <span className="pagination-page">{current} / {totalPages}</span>
+        <Btn size="sm" variant="ghost" icon="chevron-right" disabled={current >= totalPages} onClick={() => onPageChange(current + 1)}>下一页</Btn>
+      </div>
+    </div>
+  );
 }
 
 function normalizeMonthlySales(value) {
@@ -65,6 +104,82 @@ function DemandImage({ demand, label, className = "", style }) {
 function demandMetricValue(value) {
   if (value === 0 || value) return value;
   return "—";
+}
+
+function tagGroupByKey(tagGroups, key) {
+  const normalizedKey = key === "innovation" ? "innovation_types" : key;
+  return safeArray(tagGroups).find((group) => group.key === normalizedKey) || { key: normalizedKey, name: normalizedKey, tone: "outline", tags: [] };
+}
+
+function MultiSelectField({ label, fieldKey, values, tagGroups, tone = "accent", single = false, onChange, onCreateOption }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef(null);
+  const selected = safeArray(values).filter(Boolean);
+  const group = tagGroupByKey(tagGroups, fieldKey);
+  const options = Array.from(new Set([...safeArray(group.tags), ...selected])).filter(Boolean);
+  const filtered = query ? options.filter((item) => item.toLowerCase().includes(query.toLowerCase())) : options;
+  const hasExact = query && options.some((item) => item.toLowerCase() === query.toLowerCase());
+  const toggle = (value) => {
+    if (!value) return;
+    if (!options.includes(value)) onCreateOption?.(group.key, value);
+    if (single) {
+      onChange?.([value]);
+      setOpen(false);
+      setQuery("");
+      return;
+    }
+    onChange?.(selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]);
+  };
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutside = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutside);
+    return () => document.removeEventListener("mousedown", closeOnOutside);
+  }, [open]);
+  return (
+    <div className={`multi-field ${open ? "open" : ""}`} ref={rootRef}>
+      <div className="multi-field-head">
+        <div className="detail-section-label">{label}{single ? "" : " · 多选"}</div>
+        <button className="multi-field-trigger" type="button" onClick={() => setOpen(!open)}>
+          选择
+        </button>
+      </div>
+      <div className="multi-field-values">
+        {selected.length ? selected.map((item) =>
+          <button className={`tag removable ${tone}`} type="button" key={item} onClick={() => toggle(item)}>
+            <span>{item}</span>
+            <Icon name="x" size={11} />
+          </button>
+        ) : <span className="multi-field-empty">未选择</span>}
+      </div>
+      {open &&
+        <div className="multi-picker">
+          <input className="multi-picker-search" autoFocus value={query} placeholder="搜索或新建选项" onChange={(e) => setQuery(e.target.value)} />
+          <div className="multi-picker-list">
+            {filtered.map((item) => {
+              const checked = selected.includes(item);
+              return (
+                <button className={`multi-option ${checked ? "selected" : ""}`} type="button" key={item} onClick={() => toggle(item)}>
+                  <span className="multi-check">{checked ? "✓" : ""}</span>
+                  <Tag tone={tone}>{item}</Tag>
+                  {checked && <span className="multi-option-x">×</span>}
+                </button>
+              );
+            })}
+            {query && !hasExact &&
+              <button className="multi-option create" type="button" onClick={() => toggle(query.trim())}>
+                <span className="multi-check">+</span>
+                <span>新建 “{query.trim()}”</span>
+              </button>
+            }
+          </div>
+        </div>
+      }
+    </div>
+  );
 }
 
 function DemandSourceCard({ demand }) {
@@ -393,6 +508,7 @@ window.LoginScreen = LoginScreen;
 // ============ NEWS ============
 function NewsScreen({ data, api, refreshData, navTarget }) {
   const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
   const [items, setItems] = useState(safeArray(data.news));
   const [counts, setCounts] = useState({
     all: safeArray(data.news).length,
@@ -417,7 +533,9 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     });
   }, [data.news]);
 
-  const grouped = items.reduce((acc, n) => {
+  const pageSize = 12;
+  const paged = paginate(items, page, pageSize);
+  const grouped = paged.items.reduce((acc, n) => {
     (acc[n.date] = acc[n.date] || []).push(n);return acc;
   }, {});
   const dates = Object.keys(grouped);
@@ -488,6 +606,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
 
   useEffect(() => {
     loadNews(tab).catch(() => {});
+    setPage(1);
   }, [tab]);
 
   useEffect(() => {
@@ -497,6 +616,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
 
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
+    setPage((current) => clampPage(current, Math.ceil(items.length / pageSize)));
   }, [items]);
   useEffect(() => {
     if (!selectMode) setSelectedIds([]);
@@ -632,6 +752,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
               })}
             </div>
           )}
+          <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条资讯" />
         </div>
       </div>
       {deleteTarget && <DeleteItemsConfirmModal entityLabel="资讯" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
@@ -813,6 +934,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const [selectedId, setSelectedId] = useState(products[0]?.id || null);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部");
+  const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
   const [priceCcy, setPriceCcy] = useState("native"); // unused (toggle removed)
 
@@ -833,8 +955,19 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   (categoryFilter === "全部" || p.category === categoryFilter) && (
   !query || String(p.name || "").toLowerCase().includes(query.toLowerCase()))
   );
+  const pageSize = 12;
+  const paged = paginate(filtered, page, pageSize);
   const selected = products.find((p) => p.id === selectedId);
   const selectedProducts = products.filter((item) => selectedIds.includes(item.id));
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, categoryFilter]);
+
+  useEffect(() => {
+    setPage((current) => clampPage(current, Math.ceil(filtered.length / pageSize)));
+  }, [filtered.length]);
+
   const syncProducts = async () => {
     setNotice("飞书同步中...");
     try {
@@ -917,13 +1050,13 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                 <label className="bulk-check">
                   <input
                     type="checkbox"
-                    checked={filtered.length > 0 && filtered.every((item) => selectedIds.includes(item.id))}
+                    checked={paged.items.length > 0 && paged.items.every((item) => selectedIds.includes(item.id))}
                     onChange={(event) => {
-                      const visibleIds = filtered.map((item) => item.id);
+                      const visibleIds = paged.items.map((item) => item.id);
                       setSelectedIds(event.target.checked ? Array.from(new Set([...selectedIds, ...visibleIds])) : selectedIds.filter((id) => !visibleIds.includes(id)));
                     }}
                   />
-                  <span>全选</span>
+                  <span>全选本页</span>
                 </label>
               </> :
             <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
@@ -940,7 +1073,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p) => {
+              {paged.items.map((p) => {
                 const platforms = safeArray(p.platforms);
                 const main = platforms[0] || {};
                 const reviews = Number(main.reviews);
@@ -997,6 +1130,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
             </tbody>
           </table>
         </div>
+        <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
       </div>
 
       {selected && !detailCollapsed &&
@@ -1302,6 +1436,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectMode, setSelectMode] = useState(false);
   const [viewMode, setViewMode] = useState("card");
+  const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -1312,6 +1447,8 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   (!filterScenario || safeArray(d.scenarios).includes(filterScenario)) && (
   !filterInnov || d.innovation === filterInnov)
   );
+  const pageSize = 12;
+  const paged = paginate(filtered, page, pageSize);
   const allScenarios = ["", ...Array.from(new Set(demands.flatMap((d) => safeArray(d.scenarios))))];
   const allInnov = ["", ...Array.from(new Set(demands.map((d) => d.innovation).filter(Boolean)))];
   const syncDemands = async () => {
@@ -1323,6 +1460,20 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
     } catch (error) {
       setNotice(error.message);
     }
+  };
+  const createTagOption = async (groupKey, value) => {
+    const cleanValue = String(value || "").trim();
+    if (!api || !cleanValue) return;
+    const groups = safeArray(data.settings?.tag_groups);
+    const nextGroups = groups.map((group) => {
+      if (group.key !== groupKey || safeArray(group.tags).includes(cleanValue)) return group;
+      return { ...group, tags: [...safeArray(group.tags), cleanValue] };
+    });
+    await api("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ tag_groups: nextGroups }),
+    });
+    await refreshData?.();
   };
 
   const openDeleteConfirm = (demand) => {
@@ -1337,6 +1488,12 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => demands.some((item) => item.id === id)));
   }, [demands]);
+  useEffect(() => {
+    setPage(1);
+  }, [filterScenario, filterInnov, viewMode]);
+  useEffect(() => {
+    setPage((current) => clampPage(current, Math.ceil(filtered.length / pageSize)));
+  }, [filtered.length]);
 
   const confirmDelete = async () => {
     if (!api || !deleteTarget) return;
@@ -1426,7 +1583,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
 
         {viewMode === "card" ?
         <div className="demands-grid">
-          {filtered.map((d) =>
+          {paged.items.map((d) =>
           <div className="demand-card" key={d.id} onClick={() => setSelectedId(d.id)} style={{ cursor: "pointer" }}>
               <div className="demand-thumb">
                 {selectMode && <label className="demand-card-check">
@@ -1494,7 +1651,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((d) =>
+              {paged.items.map((d) =>
               <tr key={d.id} className={selectedId === d.id ? "selected" : ""} onClick={() => setSelectedId(d.id)}>
                   {selectMode &&
                   <td onClick={(e) => e.stopPropagation()}>
@@ -1518,10 +1675,11 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           </table>
         </div>
         }
+        <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条灵感" />
       </div>
 
-      {showAdd && <AddDemandModal api={api} refreshData={refreshData} onClose={() => setShowAdd(false)} />}
-      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
+      {showAdd && <AddDemandModal api={api} refreshData={refreshData} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setShowAdd(false)} />}
+      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
       {deleteTarget && <DeleteDemandConfirmModal demand={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={confirmDelete} />}
       {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="需求" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={async () => { await deleteSelected(); setShowBulkDeleteConfirm(false); }} />}
     </div>);
@@ -1529,7 +1687,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
 }
 window.DemandsScreen = DemandsScreen;
 
-function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete }) {
+function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete, tagGroups = [], onCreateTagOption }) {
   const save = async (patch) => {
     if (api) {
       await api(`/api/demands/${demand.id}`, { method: "PATCH", body: JSON.stringify(patch) });
@@ -1562,27 +1720,39 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
           </div>
 
           <div className="detail-section">
-            <div className="detail-section-label">创新类型 · 多选</div>
-            <div className="tag-row">
-              <Tag tone="accent">{demand.innovation}</Tag>
-              <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
-            </div>
-          </div>
-
-          <div className="detail-section">
-            <div className="detail-section-label">使用场景 · 多选</div>
-            <DemandTagList
-              items={demand.scenarios}
-              onRemove={(value) => save({ scenarios: safeArray(demand.scenarios).filter((item) => item !== value) })}
+            <MultiSelectField
+              label="创新类型"
+              fieldKey="innovation"
+              values={[demand.innovation].filter(Boolean)}
+              tagGroups={tagGroups}
+              tone="success"
+              single
+              onChange={(values) => save({ innovation: values[0] || "待分类" })}
+              onCreateOption={onCreateTagOption}
             />
           </div>
 
           <div className="detail-section">
-            <div className="detail-section-label">用户痛点 · 多选</div>
-            <DemandTagList
-              items={demand.painpoints}
+            <MultiSelectField
+              label="使用场景"
+              fieldKey="scenarios"
+              values={demand.scenarios}
+              tagGroups={tagGroups}
+              tone="accent"
+              onChange={(values) => save({ scenarios: values })}
+              onCreateOption={onCreateTagOption}
+            />
+          </div>
+
+          <div className="detail-section">
+            <MultiSelectField
+              label="用户痛点"
+              fieldKey="painpoints"
+              values={demand.painpoints}
+              tagGroups={tagGroups}
               tone="danger"
-              onRemove={(value) => save({ painpoints: safeArray(demand.painpoints).filter((item) => item !== value) })}
+              onChange={(values) => save({ painpoints: values })}
+              onCreateOption={onCreateTagOption}
             />
           </div>
 
@@ -1694,7 +1864,7 @@ function ProductDetailDrawer({ product, onClose, api, refreshData }) {
 }
 window.ProductDetailDrawer = ProductDetailDrawer;
 
-function AddDemandModal({ onClose, api, refreshData }) {
+function AddDemandModal({ onClose, api, refreshData, tagGroups = [], onCreateTagOption }) {
   const [step, setStep] = useState("input");
   const [progress, setProgress] = useState(0);
   const [url, setUrl] = useState("");
@@ -1799,27 +1969,40 @@ function AddDemandModal({ onClose, api, refreshData }) {
               </div>
 
               <div className="detail-section">
-                <div className="detail-section-label">创新类型 · 多选</div>
-                <div className="tag-row">
-                  <Tag tone="accent">{preview?.innovation || "待分类"}</Tag>
-                  <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
-                </div>
+                <MultiSelectField
+                  label="创新类型"
+                  fieldKey="innovation"
+                  values={[preview?.innovation || "待分类"]}
+                  tagGroups={tagGroups}
+                  tone="success"
+                  single
+                  onChange={(values) => setPreview({ ...(preview || {}), innovation: values[0] || "待分类" })}
+                  onCreateOption={onCreateTagOption}
+                />
               </div>
 
               <div className="detail-section">
-                <div className="detail-section-label">使用场景 · 多选</div>
-                <div className="tag-row">
-                  {(preview?.scenarios || []).map((tag) => <Tag key={tag}>{tag}</Tag>)}
-                  <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
-                </div>
+                <MultiSelectField
+                  label="使用场景"
+                  fieldKey="scenarios"
+                  values={preview?.scenarios}
+                  tagGroups={tagGroups}
+                  tone="accent"
+                  onChange={(values) => setPreview({ ...(preview || {}), scenarios: values })}
+                  onCreateOption={onCreateTagOption}
+                />
               </div>
 
               <div className="detail-section">
-                <div className="detail-section-label">用户痛点 · 多选</div>
-                <div className="tag-row">
-                  {(preview?.painpoints || []).map((tag) => <Tag key={tag} tone="danger">{tag}</Tag>)}
-                  <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>+ 添加</button>
-                </div>
+                <MultiSelectField
+                  label="用户痛点"
+                  fieldKey="painpoints"
+                  values={preview?.painpoints}
+                  tagGroups={tagGroups}
+                  tone="danger"
+                  onChange={(values) => setPreview({ ...(preview || {}), painpoints: values })}
+                  onCreateOption={onCreateTagOption}
+                />
               </div>
 
               <div className="detail-section">
@@ -1858,13 +2041,17 @@ function ResearchScreen({ data, api, refreshData }) {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectMode, setSelectMode] = useState(false);
+  const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const items = safeArray(data.research);
+  const pageSize = 8;
+  const paged = paginate(items, page, pageSize);
 
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
+    setPage((current) => clampPage(current, Math.ceil(items.length / pageSize)));
   }, [items]);
   useEffect(() => {
     if (!selectMode) setSelectedIds([]);
@@ -1930,7 +2117,7 @@ function ResearchScreen({ data, api, refreshData }) {
         {selectMode && items.length > 0 && <div className="muted text-sm" style={{ marginBottom: 12 }}>{selectedIds.length} 条已选择</div>}
 
         <div className="research-list">
-          {items.map((r) =>
+          {paged.items.map((r) =>
           <div className="research-row" key={r.id} onClick={() => setActiveId(r.id)}>
               <div className="icon"><Icon name="compass" size={18} /></div>
               {selectMode && <input type="checkbox" checked={selectedIds.includes(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(r.id)} />}
@@ -1958,6 +2145,7 @@ function ResearchScreen({ data, api, refreshData }) {
             </EmptyState>
           }
         </div>
+        <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="个调研" />
         {showCreate && <CreateResearchModal api={api} refreshData={refreshData} onClose={() => setShowCreate(false)} />}
         {deleteTarget && <DeleteItemsConfirmModal entityLabel="调研" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
         {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="调研" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}

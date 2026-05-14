@@ -9,6 +9,7 @@ import Vision from "./sections/Vision.jsx";
 import Milestones from "./sections/Milestones.jsx";
 import FinalCTA from "./sections/FinalCTA.jsx";
 import Footer from "./sections/Footer.jsx";
+import ExtensionPage from "./sections/ExtensionPage.jsx";
 
 /**
  * Loom landing — single-page scroll.
@@ -20,6 +21,12 @@ import Footer from "./sections/Footer.jsx";
  */
 export default function App() {
   useScrollReveal();
+
+  const route = getLandingRoute();
+
+  if (route === "extension") {
+    return <ExtensionPage />;
+  }
 
   return (
     <>
@@ -37,6 +44,13 @@ export default function App() {
       <Footer />
     </>
   );
+}
+
+function getLandingRoute() {
+  if (typeof window === "undefined") return "home";
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (path === "/extension") return "extension";
+  return "home";
 }
 
 function useScrollReveal() {

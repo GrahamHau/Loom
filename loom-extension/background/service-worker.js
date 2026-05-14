@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE = "https://ulanzi-copilot.my1panelsite.xyz";
+const DEFAULT_API_BASE = "https://loom.my1panelsite.xyz";
 const DEFAULTS = {
   loom_api_base: DEFAULT_API_BASE,
   loom_default_mode: "auto",
