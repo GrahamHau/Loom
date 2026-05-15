@@ -23,6 +23,7 @@ import {
   validateAuthConfig,
 } from "./auth-service.js";
 import { parseDemandRaw, parseDemandUrl, parseProductRaw, parseProductUrl } from "./parsers.js";
+import { matchFieldKey, matchFieldOption, normalizeTagValues } from "./field-matcher.js";
 import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-service.js";
 import { analyzeResearch } from "./research-service.js";
 import { syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
@@ -755,6 +756,23 @@ app.get("/api/settings", requireAuth, (req, res) => res.json(bootstrap(currentUs
 app.patch("/api/settings", requireAuth, (req, res) => res.json(updateSettings(currentUserId(req), req.body || {})));
 app.get("/api/fields", requireAuth, (req, res) => res.json(listFields(currentUserId(req), String(req.query.entity || ""))));
 app.get("/api/fields/catalog", requireAuth, (req, res) => res.json(listFields(currentUserId(req))));
+app.post("/api/fields/match", requireAuth, (req, res) => {
+  const userId = currentUserId(req);
+  const fields = listFields(userId);
+  const body = req.body || {};
+  const fieldKey = String(body.fieldKey || body.key || "").trim();
+  if (body.tag_values && typeof body.tag_values === "object") {
+    return res.json({ tag_values: normalizeTagValues(body.tag_values, fields) });
+  }
+  const fieldMatch = fieldKey ? matchFieldKey(fieldKey, fields) : null;
+  const field = fieldMatch?.field || fields.find((item) => item.key === fieldKey || item.legacyKey === fieldKey);
+  if (!field) return res.status(404).json({ error: "field_not_found" });
+  const values = Array.isArray(body.values) ? body.values : [body.value ?? body.raw ?? ""];
+  res.json({
+    field,
+    values: values.map((value) => matchFieldOption(value, field)).filter(Boolean),
+  });
+});
 app.post("/api/fields", requireAuth, (req, res) => res.status(201).json(createField(currentUserId(req), req.body || {})));
 app.patch("/api/fields/:key", requireAuth, (req, res) => {
   const field = updateField(currentUserId(req), req.params.key, req.body || {});

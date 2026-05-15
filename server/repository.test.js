@@ -5,6 +5,7 @@ process.env.DATABASE_PATH = ":memory:";
 const dbModule = await import("./db.js");
 const repo = await import("./repository.js");
 const { fieldOptionsText } = await import("./field-config.js");
+const { matchFieldKey, matchFieldOption, normalizeTagValues } = await import("./field-matcher.js");
 
 beforeEach(() => {
   dbModule.migrate();
@@ -651,6 +652,51 @@ describe("repository", () => {
     ]));
   });
 
+  it("fuzzy matches field keys and tag options", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const fields = repo.bootstrap(legacyUserId).settings.fields;
+
+    expect(matchFieldKey("适配设备型号", fields)?.field.key).toBe("host");
+    expect(matchFieldOption("pocket3", fields.find((field) => field.key === "host"))?.value).toBe("Osmo Pocket 3");
+    expect(matchFieldOption("vlog 自拍", fields.find((field) => field.key === "scenarios"))?.value).toBe("Vlog/自拍");
+    expect(normalizeTagValues({ 主机: ["DJI Pocket 3"], 场景: ["vlog 自拍"] }, fields)).toEqual({
+      host: ["Osmo Pocket 3"],
+      scenarios: ["Vlog/自拍"],
+    });
+  });
+
+  it("normalizes fuzzy product tag values before saving", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const product = repo.createProduct(legacyUserId, {
+      name: "Pocket handle",
+      tag_values: {
+        主机: ["pocket3"],
+        品类: ["三脚架"],
+        custom_tags: ["小巧"],
+      },
+    });
+
+    expect(product.tag_values.host).toEqual(["Osmo Pocket 3"]);
+    expect(product.host).toBe("Osmo Pocket 3");
+    expect(product.tag_values.category).toEqual(["三脚架"]);
+    expect(product.category).toBe("三脚架");
+    expect(product.tags).toEqual(["小巧"]);
+  });
+
+  it("normalizes fuzzy demand tag values before saving", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const demand = repo.createDemand(legacyUserId, {
+      title: "旅行自拍支架",
+      scenarios: ["vlog 自拍"],
+      painpoints: ["太贵"],
+    });
+
+    expect(demand.tag_values.scenarios).toEqual(["Vlog/自拍"]);
+    expect(demand.scenarios).toEqual(["Vlog/自拍"]);
+    expect(demand.tag_values.painpoints).toEqual(["价格过高/性价比低"]);
+    expect(demand.painpoints).toEqual(["价格过高/性价比低"]);
+  });
+
   it("dual-writes product tag_values and legacy fields", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     const product = repo.createProduct(legacyUserId, {
@@ -664,12 +710,33 @@ describe("repository", () => {
     });
 
     expect(product.brand).toBe("DJI");
-    expect(product.host).toBe("DJI Osmo Pocket 3");
+    expect(product.host).toBe("Osmo Pocket 3");
     expect(product.category).toBe("稳定器");
     expect(product.tags).toEqual(["便携"]);
 
     const updated = repo.updateProduct(legacyUserId, product.id, { brand: "Ulanzi / SmallRig" });
     expect(updated.tag_values.brand).toEqual(["Ulanzi", "SmallRig"]);
+  });
+
+  it("normalizes field aliases without mixing brand host and category", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const product = repo.createProduct(legacyUserId, {
+      name: "Alias Product",
+      tag_values: {
+        品牌名: ["Ulanzi"],
+        适配主机: ["DJI Pocket 3"],
+        产品品类: ["三脚架"],
+      },
+    });
+
+    expect(product.brand).toBe("Ulanzi");
+    expect(product.host).toBe("Osmo Pocket 3");
+    expect(product.category).toBe("三脚架");
+    expect(product.tag_values).toMatchObject({
+      brand: ["Ulanzi"],
+      host: ["Osmo Pocket 3"],
+      category: ["三脚架"],
+    });
   });
 
   it("creates custom fields and can attach them to entities", () => {

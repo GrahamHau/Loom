@@ -231,11 +231,6 @@ export function normalizeSettingsFields(settings = {}) {
 
 export function fieldOptionsText(fields, key) {
   const normalized = normalizeFields(fields);
-  if (key === "brands") {
-    const brand = normalized.find((field) => field.key === "brand")?.options || [];
-    const host = normalized.find((field) => field.key === "host")?.options || [];
-    return JSON.stringify([...brand, ...host]);
-  }
   const field = normalized.find((item) => item.key === key || item.legacyKey === key);
   return JSON.stringify(field?.options || []);
 }

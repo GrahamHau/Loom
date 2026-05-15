@@ -14,6 +14,7 @@ import {
   saveUserState,
 } from "./db.js";
 import { DEFAULT_FIELDS, normalizeFields, normalizeSettingsFields } from "./field-config.js";
+import { normalizeDemandInputTags, normalizeProductInputTags } from "./field-matcher.js";
 import { buildEmptyState } from "./seed.js";
 import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
@@ -258,6 +259,18 @@ function demandTagValues(input = {}) {
   if (input.painpoints !== undefined && !tagValues.painpoints) tagValues.painpoints = cleanArray(input.painpoints);
   if (input.tags !== undefined && !tagValues.custom_tags) tagValues.custom_tags = cleanArray(input.tags);
   return tagValues;
+}
+
+function fieldSchemaForState(state) {
+  return normalizeFields(state?.settings?.fields, state?.settings?.tag_groups);
+}
+
+function productTagValuesForState(state, input = {}) {
+  return cleanTagValues(normalizeProductInputTags(input, fieldSchemaForState(state)));
+}
+
+function demandTagValuesForState(state, input = {}) {
+  return cleanTagValues(normalizeDemandInputTags(input, fieldSchemaForState(state)));
 }
 
 function syncLegacyProductFields(item) {
@@ -551,7 +564,7 @@ export function createProduct(userId, input) {
       host: cleanTitle(input.host, ""),
       category: cleanTitle(input.category, "未分类"),
       tags: cleanArray(input.tags),
-      tag_values: productTagValues(input),
+      tag_values: productTagValuesForState(state, input),
       status: cleanTitle(input.status, "新录入"),
       ai_summary: cleanSummary(input.ai_summary),
       selling_points: cleanArray(input.selling_points),
@@ -586,7 +599,7 @@ export function updateProduct(userId, id, patch) {
       ...(patch.brand !== undefined ? { brand: cleanTitle(patch.brand, item.brand || "") } : {}),
       ...(patch.host !== undefined ? { host: cleanTitle(patch.host, item.host || "") } : {}),
       ...(patch.category !== undefined ? { category: cleanTitle(patch.category, item.category) } : {}),
-      ...(patch.tag_values !== undefined ? { tag_values: { ...cleanTagValues(item.tag_values), ...cleanTagValues(patch.tag_values) } } : {}),
+      ...(patch.tag_values !== undefined ? { tag_values: { ...cleanTagValues(item.tag_values), ...productTagValuesForState(state, { tag_values: patch.tag_values }) } } : {}),
       ...(patch.status !== undefined ? { status: cleanTitle(patch.status, item.status) } : {}),
       ...(patch.emoji !== undefined ? { emoji: cleanText(patch.emoji, item.emoji) } : {}),
       ...(patch.ai_summary !== undefined ? { ai_summary: cleanSummary(patch.ai_summary, item.ai_summary) } : {}),
@@ -603,10 +616,11 @@ export function updateProduct(userId, id, patch) {
     };
     Object.assign(item, next);
     const tagValues = cleanTagValues(item.tag_values);
-    if (patch.brand !== undefined) tagValues.brand = splitTokenText(patch.brand);
-    if (patch.host !== undefined) tagValues.host = splitTokenText(patch.host);
-    if (patch.category !== undefined) tagValues.category = splitTokenText(patch.category);
-    if (patch.tags !== undefined) tagValues.custom_tags = cleanArray(patch.tags);
+    const normalizedPatchTags = productTagValuesForState(state, patch);
+    if (patch.brand !== undefined) tagValues.brand = normalizedPatchTags.brand || splitTokenText(patch.brand);
+    if (patch.host !== undefined) tagValues.host = normalizedPatchTags.host || splitTokenText(patch.host);
+    if (patch.category !== undefined) tagValues.category = normalizedPatchTags.category || splitTokenText(patch.category);
+    if (patch.tags !== undefined) tagValues.custom_tags = normalizedPatchTags.custom_tags || cleanArray(patch.tags);
     if (patch.brand !== undefined || patch.host !== undefined || patch.category !== undefined || patch.tags !== undefined || patch.tag_values !== undefined) {
       item.tag_values = tagValues;
     }
@@ -647,7 +661,7 @@ export function createDemand(userId, input) {
       scenarios: cleanArray(input.scenarios),
       painpoints: cleanArray(input.painpoints),
       tags: cleanArray(input.tags),
-      tag_values: demandTagValues(input),
+      tag_values: demandTagValuesForState(state, input),
       note: cleanSummary(input.note),
       sample: Boolean(input.sample),
       synced_at: null,
@@ -683,7 +697,7 @@ export function updateDemand(userId, id, patch) {
       ...(patch.thumbnail_url !== undefined ? { thumbnail_url: cleanText(patch.thumbnail_url, item.thumbnail_url || "") } : {}),
       ...(patch.image !== undefined ? { image: cleanText(patch.image, item.image || "") } : {}),
       ...(patch.innovation !== undefined ? { innovation: cleanTitle(patch.innovation, item.innovation) } : {}),
-      ...(patch.tag_values !== undefined ? { tag_values: { ...cleanTagValues(item.tag_values), ...cleanTagValues(patch.tag_values) } } : {}),
+      ...(patch.tag_values !== undefined ? { tag_values: { ...cleanTagValues(item.tag_values), ...demandTagValuesForState(state, { tag_values: patch.tag_values }) } } : {}),
       ...(patch.scenarios !== undefined ? { scenarios: cleanArray(patch.scenarios) } : {}),
       ...(patch.painpoints !== undefined ? { painpoints: cleanArray(patch.painpoints) } : {}),
       ...(patch.tags !== undefined ? { tags: cleanArray(patch.tags) } : {}),
@@ -692,10 +706,11 @@ export function updateDemand(userId, id, patch) {
     };
     Object.assign(item, next);
     const tagValues = cleanTagValues(item.tag_values);
-    if (patch.innovation !== undefined) tagValues.innovation = [cleanTitle(patch.innovation, "")].filter(Boolean);
-    if (patch.scenarios !== undefined) tagValues.scenarios = cleanArray(patch.scenarios);
-    if (patch.painpoints !== undefined) tagValues.painpoints = cleanArray(patch.painpoints);
-    if (patch.tags !== undefined) tagValues.custom_tags = cleanArray(patch.tags);
+    const normalizedPatchTags = demandTagValuesForState(state, patch);
+    if (patch.innovation !== undefined) tagValues.innovation = normalizedPatchTags.innovation || [cleanTitle(patch.innovation, "")].filter(Boolean);
+    if (patch.scenarios !== undefined) tagValues.scenarios = normalizedPatchTags.scenarios || cleanArray(patch.scenarios);
+    if (patch.painpoints !== undefined) tagValues.painpoints = normalizedPatchTags.painpoints || cleanArray(patch.painpoints);
+    if (patch.tags !== undefined) tagValues.custom_tags = normalizedPatchTags.custom_tags || cleanArray(patch.tags);
     if (patch.innovation !== undefined || patch.scenarios !== undefined || patch.painpoints !== undefined || patch.tags !== undefined || patch.tag_values !== undefined) {
       item.tag_values = tagValues;
     }
@@ -851,8 +866,8 @@ export function createField(userId, input = {}) {
       .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "_")
       .replace(/^_+|_+$/g, "")
       .slice(0, 40);
-    let key = input.key ? `u_${keyBase.replace(/^u_/, "")}` : `u_${nanoid(8)}`;
-    if (fields.some((field) => field.key === key)) key = `u_${nanoid(8)}`;
+    let key = input.key ? `u_${keyBase.replace(/^u_/, "")}` : `u_${nanoid(8).replace(/-/g, "_")}`;
+    if (fields.some((field) => field.key === key)) key = `u_${nanoid(8).replace(/-/g, "_")}`;
     const field = {
       key,
       legacyKey: key,
