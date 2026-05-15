@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>LOOM · Organic Star 动效预览</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../styles/design-tokens.css">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family:var(--font-sans);background:var(--bg);
+      min-height:100vh;display:flex;align-items:center;justify-content:center;
+      gap:40px;flex-wrap:wrap;padding:48px;
+    }
+
+    @keyframes gem-breathe{
+      0%,100%{transform:scale(.68);opacity:.55}
+      50%    {transform:scale(1.05);opacity:1}
+    }
+    .gem-host{display:grid;place-items:center;}
+    .gem-svg{
+      overflow:visible;
+      animation:gem-breathe 4.2s cubic-bezier(.4,0,.2,1) infinite;
+    }
+
+    .tile{
+      display:flex;flex-direction:column;align-items:center;gap:20px;
+      padding:32px 40px;border-radius:12px;
+      border:1px solid var(--border);background:var(--surface);
+      box-shadow:var(--shadow);
+    }
+    .tile.dark{background:oklch(0.13 0.018 252);border-color:oklch(0.22 0.025 252)}
+    .label{font-size:11px;font-weight:600;color:var(--text-4);text-transform:uppercase;letter-spacing:.08em}
+    .tile.dark .label{color:oklch(0.42 0.03 252)}
+
+    /* login mock */
+    .login-mock{
+      width:280px;display:flex;flex-direction:column;align-items:center;
+      gap:12px;padding:32px 24px;text-align:center;
+    }
+    .login-spinner-wrap{
+      width:64px;height:64px;display:grid;place-items:center;
+      transform:translateY(-8px);margin-bottom:-4px;
+    }
+    .login-title{font-size:26px;font-weight:800;letter-spacing:-.03em;color:var(--text)}
+    .login-sub{font-size:13.5px;line-height:1.6;color:var(--text-3);max-width:220px}
+    .btn-primary{
+      height:32px;padding:0 20px;border-radius:6px;border:none;
+      background:oklch(0.56 0.16 252);color:#fff;
+      font-family:var(--font-sans);font-size:13px;font-weight:500;cursor:pointer;margin-top:4px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- light bg -->
+<div class="tile">
+  <div class="label">亮色 · 52px</div>
+  <div class="gem-host" id="s-light"></div>
+</div>
+
+<!-- dark bg -->
+<div class="tile dark">
+  <div class="label">暗色 · 52px</div>
+  <div class="gem-host" id="s-dark"></div>
+</div>
+
+<!-- small -->
+<div class="tile">
+  <div class="label">小 · 36px</div>
+  <div class="gem-host" id="s-sm"></div>
+</div>
+
+<!-- login mock -->
+<div class="tile">
+  <div class="label">登录等待状态</div>
+  <div class="login-mock">
+    <div class="login-spinner-wrap">
+      <div class="gem-host" id="s-login"></div>
+    </div>
+    <div class="login-title">未登录</div>
+    <div class="login-sub">去 Web 端登录后，这里会自动同步</div>
+    <button class="btn-primary">现在登录</button>
+  </div>
+</div>
+
+<script>
+const PATH = "M32,6 C32,29 35,32 58,32 C35,32 32,35 32,58 C32,35 29,32 6,32 C29,32 32,29 32,6Z";
+
+function buildStar(host, displaySize) {
+  const uid = "gg" + displaySize;
+  host.innerHTML = `
+<svg class="gem-svg" viewBox="0 0 64 64" width="${displaySize}" height="${displaySize}">
+  <defs>
+    <linearGradient id="${uid}" gradientUnits="userSpaceOnUse" x1="10" y1="8" x2="54" y2="56">
+      <stop offset="0%"   stop-color="oklch(0.93 0.07 230)"/>
+      <stop offset="48%"  stop-color="oklch(0.62 0.16 252)"/>
+      <stop offset="100%" stop-color="oklch(0.40 0.20 268)"/>
+    </linearGradient>
+    <filter id="${uid}f" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g>
+    <animateTransform attributeName="transform" type="rotate"
+      from="0 32 32" to="360 32 32" dur="12s" repeatCount="indefinite"/>
+    <path fill="url(#${uid})" opacity="0.45" style="filter:blur(6px)" d="${PATH}"/>
+    <path fill="url(#${uid})" filter="url(#${uid}f)" d="${PATH}"/>
+  </g>
+</svg>`;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  buildStar(document.getElementById("s-light"), 64);
+  buildStar(document.getElementById("s-dark"),  64);
+  buildStar(document.getElementById("s-sm"),    42);
+  buildStar(document.getElementById("s-login"), 64);
+});
+</script>
+</body>
+</html>

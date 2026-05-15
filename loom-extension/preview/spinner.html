@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>LOOM Spinner 动效预览</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../styles/design-tokens.css">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family:var(--font-sans);background:var(--bg);
+      min-height:100vh;display:flex;align-items:center;justify-content:center;
+      gap:48px;flex-wrap:wrap;padding:48px;
+    }
+
+    /* ─── Spinner host ──────────────────────────────────────── */
+    .loom-spin-host{
+      position:relative;display:grid;place-items:center;
+      isolation:isolate;
+    }
+
+    /* ambient halo */
+    .loom-spin-halo{
+      position:absolute;inset:-24%;border-radius:50%;
+      background:radial-gradient(circle, oklch(0.82 0.08 252 / .55) 0%, transparent 68%);
+      animation:loom-halo-pulse 2.6s cubic-bezier(.4,0,.2,1) infinite;
+      pointer-events:none;z-index:-1;
+    }
+
+    /* SVG container breathes */
+    .loom-spin-svg{
+      animation:loom-breathe 2.6s cubic-bezier(.4,0,.2,1) infinite;
+      overflow:visible;
+      display:block;
+    }
+
+    /* spiral group rotates */
+    .loom-spin-g{
+      transform-origin:50% 50%;
+      animation:loom-spin-rot 2.6s linear infinite;
+    }
+
+    /* centre dot pulses */
+    .loom-spin-core{
+      transform-origin:50% 50%;
+      animation:loom-core-pulse 2.6s cubic-bezier(.4,0,.2,1) infinite;
+    }
+
+    @keyframes loom-halo-pulse{
+      0%,100%{transform:scale(.78);opacity:.4}
+      50%    {transform:scale(1.08);opacity:.9}
+    }
+    @keyframes loom-breathe{
+      0%,100%{transform:scale(.93)}
+      50%    {transform:scale(1)}
+    }
+    @keyframes loom-spin-rot{
+      to{transform:rotate(360deg)}
+    }
+    @keyframes loom-core-pulse{
+      0%,100%{opacity:.4;transform:scale(.7)}
+      50%    {opacity:1; transform:scale(1)}
+    }
+
+    /* ── demo tiles ── */
+    .tile{
+      display:flex;flex-direction:column;align-items:center;gap:20px;
+      padding:32px 40px;
+      border-radius:var(--radius-lg);
+      border:1px solid var(--border);
+      background:var(--surface);
+      box-shadow:var(--shadow);
+    }
+    .tile.dark{background:oklch(0.13 0.018 252);border-color:oklch(0.22 0.025 252)}
+    .tile-label{
+      font-size:11px;font-weight:600;color:var(--text-4);
+      text-transform:uppercase;letter-spacing:.08em;
+    }
+    .tile.dark .tile-label{color:oklch(0.48 0.03 252)}
+  </style>
+</head>
+<body>
+
+<!-- ① light bg, large -->
+<div class="tile">
+  <div class="tile-label">88px · 亮色背景</div>
+  <div class="loom-spin-host" id="s88"></div>
+</div>
+
+<!-- ② dark bg -->
+<div class="tile dark">
+  <div class="tile-label" style="color:oklch(0.48 0.03 252)">88px · 暗色背景</div>
+  <div class="loom-spin-host" id="s88d"></div>
+</div>
+
+<!-- ③ small -->
+<div class="tile">
+  <div class="tile-label">48px · 小尺寸</div>
+  <div class="loom-spin-host" id="s48"></div>
+</div>
+
+<!-- ④ 登录等待 mock -->
+<div class="tile" style="width:300px">
+  <div class="tile-label">登录等待状态</div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:16px 0;text-align:center">
+    <div class="loom-spin-host" id="s64"></div>
+    <div style="font-size:22px;font-weight:800;letter-spacing:-.03em;color:var(--text)">未登录</div>
+    <div style="font-size:13px;color:var(--text-3);line-height:1.6;max-width:220px">去 Web 端登录后，这里会自动同步</div>
+    <button style="height:32px;padding:0 20px;border-radius:var(--radius-sm);border:none;background:oklch(0.56 0.16 252);color:#fff;font-family:var(--font-sans);font-size:13px;font-weight:500;cursor:pointer;margin-top:4px">现在登录</button>
+  </div>
+</div>
+
+<script>
+/* ─── spiral path generator ──────────────────────────────── */
+function spiralD(cx, cy, r0, r1, turns, steps) {
+  const pts = [];
+  const tMax = turns * 2 * Math.PI;
+  for (let i = 0; i <= steps; i++) {
+    const t = (i / steps) * tMax - Math.PI / 2;   // start from top
+    const r = r0 - (r0 - r1) * (i / steps);       // outer → inner
+    const x = (cx + r * Math.cos(t)).toFixed(3);
+    const y = (cy + r * Math.sin(t)).toFixed(3);
+    pts.push((i === 0 ? 'M' : 'L') + x + ',' + y);
+  }
+  return pts.join(' ');
+}
+
+/* ─── build spinner SVG ─────────────────────────────────── */
+function buildSpinner(host, size) {
+  const cx = size / 2, cy = size / 2;
+  const r0 = size * 0.425;     // outer
+  const r1 = size * 0.048;     // inner
+  const d = spiralD(cx, cy, r0, r1, 3, 140);
+
+  /* SVG markup — paths filled by JS after mount */
+  host.innerHTML = `
+    <div class="loom-spin-halo"></div>
+    <svg class="loom-spin-svg"
+         viewBox="0 0 ${size} ${size}"
+         width="${size}" height="${size}">
+
+      <defs>
+        <!-- soft glow filter -->
+        <filter id="lgf${size}" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="${(size*0.034).toFixed(1)}" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <!-- tight glow -->
+        <filter id="tgf${size}" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="${(size*0.018).toFixed(1)}" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <g class="loom-spin-g">
+        <!-- 1. dim track -->
+        <path data-layer="track"
+              fill="none"
+              stroke="oklch(0.56 0.16 252)"
+              stroke-width="${(size*0.016).toFixed(1)}"
+              stroke-linecap="round"
+              opacity="0.09"
+              d="${d}"/>
+
+        <!-- 2. wide soft glow (long comet tail) -->
+        <path data-layer="glow-wide"
+              fill="none"
+              stroke="oklch(0.72 0.12 252)"
+              stroke-width="${(size*0.065).toFixed(1)}"
+              stroke-linecap="round"
+              opacity="0.22"
+              filter="url(#lgf${size})"
+              d="${d}"/>
+
+        <!-- 3. tight glow -->
+        <path data-layer="glow-tight"
+              fill="none"
+              stroke="oklch(0.62 0.15 252)"
+              stroke-width="${(size*0.038).toFixed(1)}"
+              stroke-linecap="round"
+              opacity="0.55"
+              filter="url(#tgf${size})"
+              d="${d}"/>
+
+        <!-- 4. crisp thread -->
+        <path data-layer="thread"
+              fill="none"
+              stroke="oklch(0.56 0.16 252)"
+              stroke-width="${(size*0.022).toFixed(1)}"
+              stroke-linecap="round"
+              d="${d}"/>
+
+        <!-- 5. bright spark tip -->
+        <path data-layer="spark"
+              fill="none"
+              stroke="oklch(0.88 0.08 252)"
+              stroke-width="${(size*0.028).toFixed(1)}"
+              stroke-linecap="round"
+              d="${d}"/>
+      </g>
+
+      <!-- centre core dot -->
+      <circle class="loom-spin-core"
+              cx="${cx}" cy="${cy}"
+              r="${(size*0.036).toFixed(1)}"
+              fill="oklch(0.56 0.16 252)"/>
+    </svg>`;
+
+  /* ── measure & animate ── */
+  requestAnimationFrame(() => {
+    const paths = host.querySelectorAll('path');
+    const track     = [...paths].find(p => p.dataset.layer === 'track');
+    const glowWide  = [...paths].find(p => p.dataset.layer === 'glow-wide');
+    const glowTight = [...paths].find(p => p.dataset.layer === 'glow-tight');
+    const thread    = [...paths].find(p => p.dataset.layer === 'thread');
+    const spark     = [...paths].find(p => p.dataset.layer === 'spark');
+    if (!thread) return;
+
+    const pLen    = thread.getTotalLength();
+    const head    = Math.round(pLen * 0.42);   // comet body length
+    const tail    = Math.round(pLen * 0.60);   // glow extends further back
+    const sparkL  = Math.round(size * 0.055);  // tiny bright tip
+    const gap     = pLen - head;
+    const gapTail = pLen - tail;
+    const gapSp   = pLen - sparkL;
+    const dur     = 1700;   // ms — one full lap
+    const offset  = `0 to -${pLen.toFixed(0)}`;
+
+    const id = `loom-anim-${size}`;
+    const css = `
+      @keyframes ${id} {
+        from { stroke-dashoffset:0 }
+        to   { stroke-dashoffset:${-pLen.toFixed(0)} }
+      }
+    `;
+
+    // apply dasharray + animation to each layer
+    function wire(el, dasharrayHead, dasharrayGap) {
+      el.style.strokeDasharray = `${dasharrayHead} ${dasharrayGap}`;
+      el.style.animation       = `${id} ${dur}ms linear infinite`;
+    }
+
+    wire(glowWide,  tail,   gapTail);
+    wire(glowTight, head,   gap);
+    wire(thread,    head,   gap);
+    wire(spark,     sparkL, gapSp);
+
+    const s = document.createElement('style');
+    s.textContent = css;
+    document.head.appendChild(s);
+
+    console.log(`[loom-${size}] pLen=${pLen.toFixed(1)} head=${head} tail=${tail}`);
+  });
+}
+
+/* ─── mount ─── */
+document.addEventListener('DOMContentLoaded', () => {
+  buildSpinner(document.getElementById('s88'),  88);
+  buildSpinner(document.getElementById('s88d'), 88);
+  buildSpinner(document.getElementById('s48'),  48);
+  buildSpinner(document.getElementById('s64'),  64);
+});
+</script>
+</body>
+</html>

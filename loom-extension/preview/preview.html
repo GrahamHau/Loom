@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LOOM 插件预览</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../styles/design-tokens.css">
+  <link rel="stylesheet" href="../sidepanel/sidepanel.css">
+  <style>
+    /* 并排展示多个状态 */
+    body { background: var(--bg); padding: 32px; display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+    .panel {
+      width: 380px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+      background: var(--surface);
+    }
+    .panel-label {
+      font-family: var(--font-sans);
+      font-size: 11px; font-weight: 600; color: var(--text-4);
+      text-transform: uppercase; letter-spacing: .08em;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ① 竞品采集主界面 -->
+<div>
+  <div class="panel-label">竞品采集 · 主界面</div>
+  <div class="panel">
+    <div id="app-product"></div>
+  </div>
+</div>
+
+<!-- ② 需求采集主界面 -->
+<div>
+  <div class="panel-label">需求采集 · 小红书</div>
+  <div class="panel">
+    <div id="app-demand"></div>
+  </div>
+</div>
+
+<!-- ③ 登录等待 -->
+<div>
+  <div class="panel-label">未登录状态</div>
+  <div class="panel" style="height:580px;overflow:hidden">
+    <div id="app-login"></div>
+  </div>
+</div>
+
+<!-- ④ Options page -->
+<div>
+  <div class="panel-label">设置页面</div>
+  <div class="panel" style="width:680px">
+    <div id="app-options"></div>
+  </div>
+</div>
+
+<script>
+/* ── helpers ── */
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+}
+function spinIcon() {
+  return `<svg class="spin" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
+}
+function settingsIcon() {
+  return `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+}
+function refreshIcon() {
+  return `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>`;
+}
+function logoutIcon() {
+  return `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>`;
+}
+
+/* ── field-select component ── */
+function fieldSelect(key, label, selected, tone, opts = {}) {
+  const isCustom = opts.official === false;
+  const count = selected.length;
+  return `
+    <div class="field-select" data-field-select="${key}">
+      <div class="field-select-head">
+        <div class="cl-section-label">
+          ${isCustom ? `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent);flex-shrink:0"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>` : ""}
+          ${esc(label)}
+          ${isCustom ? `<span class="field-custom-chip">自定义</span>` : ""}
+        </div>
+        <button class="field-select-trigger">${count ? count + " 项" : "选择"}</button>
+      </div>
+      <div class="field-selected-row">
+        ${count ? selected.map(v => `<span class="tag ${tone} removable" >${esc(v)}<button>×</button></span>`).join("") : `<span class="field-empty">未选择</span>`}
+      </div>
+    </div>`;
+}
+
+/* ── ① 竞品主界面 ── */
+document.getElementById("app-product").innerHTML = `
+  <div class="shell" style="min-height:auto">
+    <!-- header -->
+    <div class="cl-top">
+      <div class="cl-capture-status">
+        <span class="platform-pill amz">Amazon</span>
+        <span class="cl-top-status-title">Amazon · 竞品采集</span>
+      </div>
+      <button class="ico-btn">${logoutIcon()}</button>
+      <button class="ico-btn">${refreshIcon()}</button>
+      <button class="ico-btn">${settingsIcon()}</button>
+    </div>
+    <!-- action bar -->
+    <div class="cl-top-actions">
+      <button class="btn top-action">保存</button>
+      <button class="btn top-action">AI 整理</button>
+    </div>
+    <!-- tabs -->
+    <nav class="cl-tabs">
+      <button class="cl-tab active">竞品</button>
+      <button class="cl-tab">需求</button>
+    </nav>
+    <!-- body -->
+    <div class="cl-body" style="max-height:520px">
+      <!-- product card -->
+      <div class="product-capture-card source-capture-card">
+        <div class="source-card-media product-card-media" style="width:72px;height:72px;border-radius:var(--radius-sm);border:1px solid var(--border);overflow:hidden;background:var(--surface-3)">
+          <div class="ph" style="height:100%">PRODUCT<br>IMG</div>
+        </div>
+        <div class="product-capture-main">
+          <div class="product-capture-kicker">
+            <span class="platform-pill amz">Amazon</span>
+            <span class="product-capture-meta-price">$29.99</span>
+            <span class="product-capture-meta-rating"><span class="rating-star">★</span> 4.6 · 2,847</span>
+          </div>
+          <input class="ghost-input cl-detail-title-input product-title-input" value="Ulanzi F38 磁吸多功能冷靴配件" style="font-size:14px;font-weight:700">
+        </div>
+      </div>
+      <!-- 平台信息 -->
+      <div class="cl-section">
+        <div class="cl-section-label">平台信息 · 1 个</div>
+        <div class="platform-card compact">
+          <div class="platform-card-head">
+            <span class="platform-pill amz">Amazon</span>
+            <input class="platform-card-link mono" value="amazon.com/dp/B0C9X8K..." style="max-width:180px">
+          </div>
+          <div class="platform-card-grid">
+            <label class="metric">
+              <div class="metric-label">售价</div>
+              <div class="metric-input-wrap"><span class="metric-prefix">$</span><input class="metric-input" value="29.99"></div>
+            </label>
+            <label class="metric">
+              <div class="metric-label">参考成本</div>
+              <div class="metric-input-wrap"><span class="metric-prefix">¥</span><input class="metric-input" value="85"></div>
+            </label>
+            <label class="metric">
+              <div class="metric-label">评分</div>
+              <div class="metric-input-wrap"><span class="metric-prefix rating-star">★</span><input class="metric-input" value="4.6"></div>
+            </label>
+            <label class="metric">
+              <div class="metric-label">评论数</div>
+              <div class="metric-input-wrap"><input class="metric-input" value="2847"></div>
+            </label>
+            <label class="metric span-2">
+              <div class="metric-label">月销估算</div>
+              <div class="metric-input-wrap"><input class="metric-input" value="3,200+"><span class="metric-suffix">/月</span></div>
+            </label>
+          </div>
+        </div>
+      </div>
+      <!-- 标签字段 (taxonomy stack) -->
+      <div class="cl-section">
+        <div class="cl-section-label">标签字段</div>
+        <div class="product-taxonomy-stack">
+          ${fieldSelect("brand","品牌",["Ulanzi"],"outline",{official:true})}
+          ${fieldSelect("host","主机",["Osmo Pocket 3"],"outline",{official:true})}
+          ${fieldSelect("category","品类",["相机配件","稳定器"],"default",{official:true})}
+          ${fieldSelect("scenarios","使用场景",["Vlog/自拍","桌面俯拍"],"accent",{official:true})}
+          ${fieldSelect("painpoints","用户痛点",[],"danger",{official:true})}
+          ${fieldSelect("custom_tags","自定义标签",["磁吸","便携"],"outline",{official:false})}
+        </div>
+      </div>
+      <!-- AI 摘要 -->
+      <div class="cl-section">
+        <div class="cl-section-label">AI 摘要</div>
+        <textarea class="ghost-input ai-summary-input" style="min-height:72px">Ulanzi F38 为相机热靴设计的磁吸配件，支持快速拆装，适配 DJI Osmo Pocket 3 等主流设备…</textarea>
+      </div>
+      <div class="cl-spacer"></div>
+    </div>
+    <!-- footer -->
+    <div class="cl-foot">
+      <button class="btn ghost grow">重新抓取</button>
+      <button class="btn primary grow">关联同一产品</button>
+    </div>
+  </div>`;
+
+/* ── ② 需求采集主界面 ── */
+document.getElementById("app-demand").innerHTML = `
+  <div class="shell" style="min-height:auto">
+    <div class="cl-top">
+      <div class="cl-capture-status">
+        <span class="platform-pill xhs">小红书</span>
+        <span class="cl-top-status-title">小红书 · 需求采集</span>
+      </div>
+      <button class="ico-btn">${logoutIcon()}</button>
+      <button class="ico-btn">${refreshIcon()}</button>
+      <button class="ico-btn">${settingsIcon()}</button>
+    </div>
+    <div class="cl-top-actions">
+      <button class="btn top-action">保存</button>
+      <button class="btn top-action is-processing">
+        <span class="top-action-spinner">${spinIcon()}</span> AI 整理
+      </button>
+    </div>
+    <nav class="cl-tabs">
+      <button class="cl-tab">竞品</button>
+      <button class="cl-tab active">需求</button>
+    </nav>
+    <div class="cl-body" style="max-height:520px">
+      <!-- source card -->
+      <div class="source-capture-card">
+        <div class="source-card-media">
+          <div class="ph" style="height:100%;display:grid;place-items:center">XHS<br>IMG</div>
+        </div>
+        <div class="source-capture-main">
+          <div class="source-card-state"><span class="dot" style="background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)"></span>小红书 · 原文采集</div>
+          <div class="source-title-text">我的运动相机防水套装分享 | 超实用的几个配件</div>
+          <div class="source-author">@小红书用户_创作者</div>
+        </div>
+        <div class="source-metrics">
+          <div class="source-metric"><span class="source-metric-label">点赞</span><span class="source-metric-value">3,241</span></div>
+          <div class="source-metric"><span class="source-metric-label">收藏</span><span class="source-metric-value">891</span></div>
+          <div class="source-metric"><span class="source-metric-label">评论</span><span class="source-metric-value">126</span></div>
+        </div>
+      </div>
+      <!-- 标签字段 inspiration -->
+      <div class="cl-section">
+        <div class="cl-section-label">标签字段</div>
+        <div class="product-taxonomy-stack inspiration-taxonomy-stack">
+          ${fieldSelect("scenarios","使用场景",["户外旅拍","运动/极限拍摄"],"accent",{official:true})}
+          ${fieldSelect("painpoints","用户痛点",["防水不足","携带不便/太重"],"danger",{official:true})}
+          ${fieldSelect("innovation","创新类型",["形态创新"],"success",{official:true})}
+          ${fieldSelect("custom_tags","自定义标签",[],"outline",{official:false})}
+        </div>
+      </div>
+      <!-- 原文正文 -->
+      <div class="cl-section">
+        <div class="cl-section-label">原文正文</div>
+        <textarea class="ghost-input full source-content-input" style="min-height:80px">分享几个我用了快两年的运动相机配件，出门旅游必带！首先是防水壳，这个真的救了我好几次…</textarea>
+      </div>
+      <div class="cl-spacer"></div>
+    </div>
+    <div class="cl-foot">
+      <button class="btn ghost grow">重新抓取</button>
+    </div>
+  </div>`;
+
+/* ── ③ 登录等待 ── */
+document.getElementById("app-login").innerHTML = `
+  <div class="shell shell-login-minimal" style="min-height:580px">
+    <button class="icon-btn login-minimal-settings" style="position:absolute;top:12px;right:12px">${settingsIcon()}</button>
+    <div class="login-minimal">
+      <div class="login-minimal-spinner">
+        <img src="../icons/loom-spiral.png" class="swirl-spin-img" alt="LOOM" style="width:64px;height:64px" onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\'width:64px;height:64px;border-radius:50%;background:var(--accent-soft);display:grid;place-items:center;font-size:24px\'>🌀</div>'">
+      </div>
+      <div class="login-minimal-title">未登录</div>
+      <div class="login-minimal-sub">去 Web 端登录后，这里会自动同步</div>
+      <button class="btn primary login-minimal-btn">现在登录</button>
+      <div class="login-minimal-status">请先在 Web 端完成登录</div>
+    </div>
+  </div>`;
+
+/* ── ④ Options page ── */
+document.getElementById("app-options").innerHTML = `
+  <div style="font-family:var(--font-sans);font-size:13px;color:var(--text);background:var(--bg);padding:20px 22px;border-radius:var(--radius-lg)">
+    <!-- top bar -->
+    <div class="opt-top" style="margin:-20px -22px 20px;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+      <div class="brand" style="display:flex;align-items:center;gap:9px;flex:1;min-width:0">
+        <div class="logo">L</div>
+        <div>
+          <div class="cl-name">LOOM Clipper</div>
+          <div class="cl-conn"><span class="dot dot-ok"></span>已连接 · loom.my1panelsite.xyz</div>
+        </div>
+      </div>
+      <a class="btn" style="font-size:12px">打开 Web 端</a>
+    </div>
+    <!-- 连接卡片 -->
+    <div class="opt-card" style="margin-bottom:10px">
+      <div class="opt-card-head">
+        <h3 style="margin:0;font-size:13.5px;font-weight:600">连接</h3>
+        <span class="status-pill"><span class="dot dot-ok"></span>已连接</span>
+      </div>
+      <div class="opt-card-body">
+        <div class="opt-row">
+          <div><div class="opt-label">服务器地址</div><div class="opt-hint">API 服务器的完整 URL</div></div>
+          <input class="input mono" value="https://loom.my1panelsite.xyz" style="max-width:280px">
+          <div></div>
+        </div>
+        <div class="opt-row">
+          <div><div class="opt-label">登录方式</div><div class="opt-hint">跟随 Web 端自动同步</div></div>
+          <div class="user-cell"><div class="avatar">G</div>graham@example.com</div>
+          <div></div>
+        </div>
+      </div>
+    </div>
+    <!-- 采集策略 -->
+    <div class="opt-card">
+      <div class="opt-card-head"><h3 style="margin:0;font-size:13.5px;font-weight:600">采集策略</h3></div>
+      <div class="opt-card-body">
+        <div class="opt-row">
+          <div><div class="opt-label">AI 整理</div><div class="opt-hint">采集完成后是否自动整理</div></div>
+          <div class="seg" style="justify-self:end">
+            <button class="seg-btn active">自动开启</button>
+            <button class="seg-btn">手动触发</button>
+          </div>
+          <div></div>
+        </div>
+        <div class="opt-row">
+          <div><div class="opt-label">默认模式</div><div class="opt-hint">首次打开面板时的默认采集模式</div></div>
+          <div class="seg" style="justify-self:end">
+            <button class="seg-btn active">竞品</button>
+            <button class="seg-btn">需求</button>
+          </div>
+          <div></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+</script>
+</body>
+</html>

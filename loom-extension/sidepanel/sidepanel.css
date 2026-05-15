@@ -27,48 +27,31 @@ input,textarea,select{font-family:inherit;color:inherit}
 }
 
 /* ============================================================
-   动效母题 · 螺旋（loom-spiral.png）
-   ------------------------------------------------------------
-   • 旋转：1.6s ease-in-out（不是 linear，模拟丝线缠绕的节奏）
-   • 呼吸：缩放 0.94 ↔ 1.0，2.4s
-   • 柔光：径向脉冲 2s
+   动效母题 · 四角有机星形（Gemini 风格）
    ============================================================ */
 @keyframes loom-spin{
   to{transform:rotate(360deg)}
 }
-@keyframes loom-breathe{
-  0%,100%{transform:scale(.94)}
-  50%{transform:scale(1)}
-}
-@keyframes loom-glow{
-  0%,100%{opacity:0;transform:scale(.86)}
-  50%    {opacity:.55;transform:scale(1.08)}
+@keyframes gem-breathe{
+  0%,100%{transform:scale(.68);opacity:.55}
+  50%    {transform:scale(1.05);opacity:1}
 }
 
-.swirl-spin-img{
-  display:block;
-  width:100%;height:100%;
-  object-fit:contain;
-  transform-origin:50% 50%;
-  animation:loom-spin 1.6s var(--ease-in-out) infinite;
-  will-change:transform;
+/* ── 有机四角星 spinner ──────────────────────────────────────── */
+.gem-host{
+  display:grid;place-items:center;
 }
+.gem-svg{
+  overflow:visible;
+  animation:gem-breathe 4.2s cubic-bezier(.4,0,.2,1) infinite;
+}
+
+/* swirl-stage: neutral wrapper kept for layout sizing */
 .swirl-stage{
   position:relative;
   display:grid;place-items:center;
   isolation:isolate;
 }
-.swirl-stage::before{
-  content:"";
-  position:absolute;inset:-22%;
-  border-radius:var(--radius-full);
-  background:radial-gradient(circle, var(--accent-soft) 0%, transparent 62%);
-  animation:loom-glow 2.4s var(--ease-in-out) infinite;
-  z-index:-1;
-  pointer-events:none;
-}
-.swirl-stage{animation:loom-breathe 2.4s var(--ease-in-out) infinite}
-.swirl-stage > .swirl-spin-img{animation:loom-spin 1.6s var(--ease-in-out) infinite}
 
 /* tiny ai spinner used inside buttons */
 .spin{animation:loom-spin 1.05s var(--ease-in-out) infinite}
@@ -1049,28 +1032,11 @@ textarea.ghost-input{line-height:1.6;min-height:64px;resize:vertical;font-size:1
   gap:12px;padding:32px 24px;text-align:center;
 }
 .login-minimal-spinner{
-  position:relative;
-  width:88px;height:88px;
+  width:80px;height:80px;
   display:grid;place-items:center;
-  transform:translateY(-32px);
-  margin-bottom:-12px;
-  isolation:isolate;
+  transform:translateY(-20px);
+  margin-bottom:-8px;
 }
-.login-minimal-spinner::before{
-  content:"";
-  position:absolute;inset:-30%;
-  border-radius:var(--radius-full);
-  background:radial-gradient(circle, var(--accent-soft) 0%, transparent 62%);
-  animation:loom-glow 2.4s var(--ease-in-out) infinite;
-  z-index:-1;
-  pointer-events:none;
-}
-.login-minimal-spinner img,
-.swirl-spin-img{
-  display:block;width:64px;height:64px;
-  object-fit:contain;
-}
-.login-minimal-spinner .swirl-spin-img{animation:loom-spin 1.6s var(--ease-in-out) infinite}
 .login-minimal-title{
   font-size:26px;font-weight:800;letter-spacing:-.03em;
   color:var(--text);line-height:1.1;

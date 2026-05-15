@@ -14,6 +14,7 @@ const USER_KEY = "loom_user";
 const DEFAULT_MODE_KEY = "loom_default_mode";
 const AI_BEFORE_SAVE_KEY = "loom_ai_before_save";
 const LLM_NOTICE_DISMISSED_KEY = "loom_llm_notice_dismissed";
+const DRAFT_STATE_KEY = "loom_sidepanel_draft_state_v1";
 const LEGACY_KEY_MAP = {
   pmcopilot_api_base: API_BASE_KEY,
   pmcopilot_token: TOKEN_KEY,
@@ -118,6 +119,7 @@ let syncInFlight = null;
 let autoSyncBound = false;
 let storageStateBound = false;
 let successReturnTimer = null;
+let draftPersistTimer = null;
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -214,6 +216,78 @@ function isEditingForm() {
   return Boolean(document.activeElement?.matches?.("[data-tag-query], .ghost-input, .metric-input, .platform-card-link, textarea, input"));
 }
 
+function currentCaptureUrl() {
+  return cleanText(state.page?.data?.url || state.lastSeenUrl || "");
+}
+
+function currentDraftSnapshot() {
+  const url = currentCaptureUrl();
+  if (!url || !state.page || !state.form) return null;
+  return {
+    url,
+    platform: cleanText(state.page?.platform || ""),
+    mode: cleanText(state.mode || ""),
+    pageSignature: cleanText(state.pageSignature || ""),
+    processed: state.processed || null,
+    form: state.form || null,
+    formDirty: Boolean(state.formDirty),
+    processingAi: Boolean(state.processingAi),
+    message: cleanText(state.message || ""),
+    savedAt: Date.now(),
+  };
+}
+
+async function persistDraftState() {
+  try {
+    const snapshot = currentDraftSnapshot();
+    if (!snapshot) return;
+    await chrome.storage.local.set({ [DRAFT_STATE_KEY]: snapshot });
+  } catch {
+    // Best-effort only.
+  }
+}
+
+function schedulePersistDraftState(delayMs = 120) {
+  if (draftPersistTimer) clearTimeout(draftPersistTimer);
+  draftPersistTimer = setTimeout(() => {
+    draftPersistTimer = null;
+    void persistDraftState();
+  }, delayMs);
+}
+
+async function clearPersistedDraftState() {
+  if (draftPersistTimer) {
+    clearTimeout(draftPersistTimer);
+    draftPersistTimer = null;
+  }
+  try {
+    await chrome.storage.local.remove(DRAFT_STATE_KEY);
+  } catch {
+    // Ignore cleanup failure.
+  }
+}
+
+async function restoreDraftState(result, mode) {
+  try {
+    const stored = await chrome.storage.local.get(DRAFT_STATE_KEY);
+    const snapshot = stored?.[DRAFT_STATE_KEY];
+    const url = cleanText(result?.data?.url || "");
+    if (!snapshot || !url) return false;
+    if (snapshot.url !== url) return false;
+    if (snapshot.platform !== cleanText(result?.platform || "")) return false;
+    if (snapshot.mode !== cleanText(mode || "")) return false;
+    state.processed = snapshot.processed || { ...result.data, __loom_ai_processed: false };
+    state.form = snapshot.form || buildDraft(mode, state.processed);
+    state.formDirty = Boolean(snapshot.formDirty);
+    state.message = snapshot.processingAi
+      ? "页面刚刚刷新，已恢复上一版草稿；请重新点一次 AI 整理。"
+      : cleanText(snapshot.message || state.message, state.message || "");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 document.addEventListener("DOMContentLoaded", init);
 document.addEventListener("click", handleGlobalClick);
 window.addEventListener("focus", () => {
@@ -279,6 +353,7 @@ async function loadCurrentPage(defaultMode = "auto") {
   state.reloading = false;
   try {
     if (!(await ensureAuthenticatedForPanel({ silent: false }))) return;
+    const stored = await getStoredSettings();
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     state.tab = tab;
     state.lastSeenTabId = tab?.id || null;
@@ -302,14 +377,17 @@ async function loadCurrentPage(defaultMode = "auto") {
     }
     state.page = result;
     state.message = "";
-    state.mode = modeForPlatform(result.platform, defaultMode);
+    state.mode = modeForPlatform(result.platform, defaultMode || stored[DEFAULT_MODE_KEY] || "auto");
     state.tagPicker = null;
     stopCommentCollector();
-    state.processed = { ...result.data, __loom_ai_processed: false };
-    state.form = buildDraft(state.mode, state.processed);
-    state.formDirty = false;
     state.pageSignature = pageDataSignature(result);
-    state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
+    const restored = await restoreDraftState(result, state.mode);
+    if (!restored) {
+      state.processed = { ...result.data, __loom_ai_processed: false };
+      state.form = buildDraft(state.mode, state.processed);
+      state.formDirty = false;
+      state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
+    }
     debugEvent("collect:read-ok", {
       platform: result.platform,
       mode: state.mode,
@@ -318,6 +396,7 @@ async function loadCurrentPage(defaultMode = "auto") {
     });
     renderMain();
     requestAnimationFrame(syncAutosizeTextareas);
+    await maybeAutoProcessAfterCapture(stored);
   } catch (error) {
     state.page = null;
     debugEvent("collect:read-error", { error: error.message || "waiting_for_collect" });
@@ -517,13 +596,21 @@ async function processRaw() {
       state.llmNoticeDismissed = false;
       await chrome.storage.local.set({ [LLM_NOTICE_DISMISSED_KEY]: false });
       state.message = "还没有配置 AI 模型，暂时不能使用 AI 整理。请先到设置里填写 LLM。";
+      schedulePersistDraftState(0);
       return;
     }
     state.message = `AI 处理失败，已保留原始字段：${error.message}`;
+  } finally {
+    schedulePersistDraftState(0);
   }
 }
 
 async function reloadCurrentPage() {
+  if (state.busy || state.processingAi) {
+    state.message = "AI 整理中，请稍候再刷新。";
+    renderMain();
+    return;
+  }
   state.reloading = true;
   debugEvent("collect:reload-start", { url: state.tab?.url || state.lastSeenUrl || "" });
   if (state.page || state.form) {
@@ -548,18 +635,22 @@ async function reloadCurrentPage() {
     const stored = await getStoredSettings();
     state.page = result;
     state.mode = modeForPlatform(result.platform, stored[DEFAULT_MODE_KEY] || "auto");
-    state.processed = { ...result.data, __loom_ai_processed: false };
     stopCommentCollector();
-    state.form = buildDraft(state.mode, state.processed);
-    state.formDirty = false;
     state.pageSignature = pageDataSignature(result);
-    state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
+    const restored = await restoreDraftState(result, state.mode);
+    if (!restored) {
+      state.processed = { ...result.data, __loom_ai_processed: false };
+      state.form = buildDraft(state.mode, state.processed);
+      state.formDirty = false;
+      state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
+    }
     debugEvent("collect:reload-ok", {
       platform: result.platform,
       title: result.data?.title || result.data?.name || "",
       hasImage: Boolean(result.data?.image || result.data?.thumbnail_url),
     });
     renderMain();
+    await maybeAutoProcessAfterCapture(stored);
   } catch (error) {
     state.reloading = false;
     debugEvent("collect:reload-error", { error: error.message || "waiting_for_collect" });
@@ -644,7 +735,7 @@ async function scheduleQuietRefresh(delayMs = 500) {
 }
 
 async function quietRefreshCurrentPage() {
-  if (state.busy || state.reloading || !state.page || state.formDirty || isEditingForm()) return;
+  if (state.busy || state.processingAi || state.reloading || !state.page || state.formDirty || isEditingForm()) return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || tab.id !== state.lastSeenTabId || (tab.url || "") !== state.lastSeenUrl) {
     await scheduleAutoSync(0);
@@ -657,10 +748,13 @@ async function quietRefreshCurrentPage() {
     if (nextSignature === state.pageSignature) return;
     state.page = result;
     state.pageSignature = nextSignature;
-    state.processed = { ...result.data, __loom_ai_processed: false };
-    state.form = buildDraft(state.mode, state.processed);
-    state.formDirty = false;
-    state.message = "页面内容已更新，可继续编辑或保存。";
+    const restored = await restoreDraftState(result, state.mode);
+    if (!restored) {
+      state.processed = { ...result.data, __loom_ai_processed: false };
+      state.form = buildDraft(state.mode, state.processed);
+      state.formDirty = false;
+      state.message = "页面内容已更新，可继续编辑或保存。";
+    }
     renderMain();
   } catch {
     // Quiet refresh is a best-effort freshness path; manual reload remains available.
@@ -806,7 +900,24 @@ async function clearAuthState() {
   state.formDirty = false;
   state.pageSignature = "";
   state.message = "";
-  await chrome.storage.local.remove([TOKEN_KEY, USER_KEY, "pmcopilot_token", "pmcopilot_user"]);
+  await chrome.storage.local.remove([TOKEN_KEY, USER_KEY, DRAFT_STATE_KEY, "pmcopilot_token", "pmcopilot_user"]);
+}
+
+async function maybeAutoProcessAfterCapture(storedSettings = null) {
+  const settings = storedSettings || await getStoredSettings();
+  if (settings?.[AI_BEFORE_SAVE_KEY] === false) return;
+  if (!state.page?.data || !state.form) return;
+  if (!state.llmConfigured || state.processingAi || state.busy) return;
+  if (state.formDirty) return;
+  if (state.processed?.__loom_ai_processed) return;
+  state.busy = true;
+  state.processingAi = true;
+  state.message = "正在自动执行 AI 整理…";
+  renderMain();
+  await processRaw();
+  state.processingAi = false;
+  state.busy = false;
+  renderMain();
 }
 
 async function applyExtensionSession(data, sessionCookie = "") {
@@ -1031,6 +1142,7 @@ function renderLoginWait(statusText = "请先在 Web 端登录 LOOM") {
         <div class="login-minimal-status">${escapeHtml(statusText)}</div>
       </div>
     </div>`;
+
   document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
   document.getElementById("open-web-login").onclick = () => chrome.tabs.create({ url: `${state.apiBase}/app?login=1` });
 }
@@ -1106,6 +1218,7 @@ function renderCollectionWait(reason = "waiting_for_collect") {
         <div class="login-minimal-status">${escapeHtml(hint)}</div>
       </div>
     </div>`;
+
   document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
   document.getElementById("refresh").onclick = () => loadCurrentPage();
 }
@@ -1136,6 +1249,7 @@ function renderWaitingForDetail() {
         <div class="login-minimal-status">${escapeHtml(hint)}</div>
       </div>
     </div>`;
+
   document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
   document.getElementById("retry-detect").onclick = () => loadCurrentPage();
 }
@@ -1175,7 +1289,7 @@ function renderMain() {
       </div>
 
       <div class="cl-foot${state.mode === "product" && isCommercePlatform(platform) ? " with-relation" : ""}">
-        <button class="btn ghost grow" id="refresh-bottom" type="button">重新抓取</button>
+        <button class="btn ghost grow" id="refresh-bottom" type="button" ${state.busy ? "disabled" : ""}>重新抓取</button>
         ${state.mode === "product" && isCommercePlatform(platform) ? `<button class="btn primary grow" id="open-relation" type="button">${item.related_product_name ? "重新关联" : "关联同一产品"}</button>` : ""}
       </div>
       ${state.relationPickerOpen ? `<div class="relation-layer">${relationPickerView()}</div>` : ""}
@@ -1249,6 +1363,7 @@ function renderMain() {
       renderMain();
     };
   }
+  schedulePersistDraftState();
   requestAnimationFrame(syncAutosizeTextareas);
 }
 
@@ -1266,6 +1381,7 @@ async function switchMode(mode, supported, message) {
   state.formDirty = false;
   state.message = "模式已切换，可直接保存；如需摘要和标签，再点 AI 整理。";
   renderMain();
+  schedulePersistDraftState(0);
 }
 
 function bannerClass(platform) {
@@ -1304,11 +1420,46 @@ function warnIcon() {
   return `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>`;
 }
 
+/* ── Organic 4-pointed star spinner (Gemini-inspired) ────────
+   Pure SVG + SMIL: no JS post-processing needed.
+   Shape: 4 cubic-bezier curves with control points pulled
+   near the centre → deep concave waists, sharp cusp tips.
+   The gradient is fixed in userSpace; as the <g> rotates
+   (SMIL animateTransform) different tips catch the light,
+   creating the organic shimmer effect.
+   ─────────────────────────────────────────────────────────── */
+
 function swirlSpinnerIcon() {
+  // 64×64 viewBox; tips at top/right/bottom/left (radius 26px from centre).
+  // Control points pulled ~90% toward centre → deep concave waists, sharp cusps.
+  // gradient is fixed in userSpaceOnUse; SMIL rotates the shape around it
+  // so different tips catch the light as it turns — the Gemini shimmer.
+  const d = "M32,6 C32,29 35,32 58,32 C35,32 32,35 32,58 C32,35 29,32 6,32 C29,32 32,29 32,6Z";
   return `
-    <span class="swirl-stage">
-      <img class="swirl-spin-img" src="../icons/loom-spiral.png" alt="LOOM loading">
-    </span>`;
+<div class="gem-host">
+  <svg class="gem-svg" viewBox="0 0 64 64" width="64" height="64">
+    <defs>
+      <linearGradient id="gem-grad" gradientUnits="userSpaceOnUse"
+                      x1="10" y1="8" x2="54" y2="56">
+        <stop offset="0%"   stop-color="oklch(0.93 0.07 230)"/>
+        <stop offset="48%"  stop-color="oklch(0.62 0.16 252)"/>
+        <stop offset="100%" stop-color="oklch(0.40 0.20 268)"/>
+      </linearGradient>
+      <filter id="gem-glow" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <g>
+      <animateTransform attributeName="transform" type="rotate"
+        from="0 32 32" to="360 32 32" dur="12s" repeatCount="indefinite"/>
+      <!-- soft ambient glow -->
+      <path fill="url(#gem-grad)" opacity="0.45" style="filter:blur(6px)" d="${d}"/>
+      <!-- crisp star with tight edge glow -->
+      <path fill="url(#gem-grad)" filter="url(#gem-glow)" d="${d}"/>
+    </g>
+  </svg>
+</div>`;
 }
 
 function successMotionIcon() {
@@ -2025,7 +2176,16 @@ function platformClass(platform) {
 function bindHeader() {
   document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
   const reloadButton = document.getElementById("header-reload");
-  if (reloadButton) reloadButton.onclick = () => reloadCurrentPage();
+  if (reloadButton) {
+    reloadButton.onclick = () => {
+      if (state.busy || state.processingAi) {
+        state.message = "AI 整理中，请稍候再刷新。";
+        renderMain();
+        return;
+      }
+      reloadCurrentPage();
+    };
+  }
   const logoutButton = document.getElementById("header-logout");
   if (logoutButton) {
     logoutButton.onclick = async () => {
@@ -2048,11 +2208,15 @@ function bindHeader() {
 function autosizeTextarea(el) {
   if (!(el instanceof HTMLTextAreaElement)) return;
   el.style.height = "auto";
-  el.style.height = `${Math.max(el.scrollHeight, 128)}px`;
+  const minHeight = el.classList.contains("source-content-input") ? 180 : 96;
+  el.style.height = `${Math.max(el.scrollHeight, minHeight)}px`;
 }
 
 function syncAutosizeTextareas(root = document) {
-  root.querySelectorAll("textarea.source-content-input").forEach(autosizeTextarea);
+  const textareas = Array.from(root.querySelectorAll("textarea.ghost-input"));
+  textareas.forEach(autosizeTextarea);
+  if (!textareas.length) return;
+  requestAnimationFrame(() => textareas.forEach(autosizeTextarea));
 }
 
 function handleGlobalClick(event) {
@@ -2145,7 +2309,7 @@ document.addEventListener("input", (event) => {
   }
   const key = el.getAttribute("data-key");
   if (!key) return;
-  if (el.classList.contains("source-content-input")) autosizeTextarea(el);
+  if (el instanceof HTMLTextAreaElement && el.classList.contains("ghost-input")) autosizeTextarea(el);
   if (key.startsWith("platforms.")) {
     const [, indexStr, field] = key.split(".");
     const index = Number(indexStr);
@@ -2297,6 +2461,7 @@ async function saveCurrent() {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    await clearPersistedDraftState();
     state.message = "保存成功";
     state.formDirty = false;
     debugEvent("save:ok", { mode: state.mode, title: payload.name || payload.title || "" });
