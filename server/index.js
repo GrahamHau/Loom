@@ -60,6 +60,7 @@ import {
   resetRegularUsersToSampleWorkspace,
   syncOfficialNewsToAllUsers,
   syncOfficialNewsToUser,
+  ensureOfficialNewsCache,
   touchUserLogin,
   updateDemand,
   updateNews,
@@ -541,7 +542,7 @@ app.post("/api/auth/extension/session-token", asyncHandler(async (req, res) => {
 app.get("/api/bootstrap", requireAuth, (req, res) => {
   const userId = currentUserId(req);
   refreshSampleWorkspaceNews(userId);
-  syncOfficialNewsToUser(userId);
+  ensureOfficialNewsCache(userId);
   res.json(bootstrap(userId));
 });
 
@@ -621,6 +622,7 @@ app.get("/api/stats/today", requireAuth, (req, res) => {
 
 app.get("/api/news", requireAuth, (req, res) => {
   const userId = currentUserId(req);
+  ensureOfficialNewsCache(userId);
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
   const offset = (page - 1) * limit;

@@ -368,6 +368,29 @@ describe("repository", () => {
     expect(state.news.map((item) => item.original_url)).toContain("https://shared.test/official-news");
   });
 
+  it("reports official stream cache status for regular users", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const user = repo.ensureLocalUser({ id: "cache-user", name: "Cache User", auth_provider: "feishu" });
+    repo.upsertNews(legacyUserId, [{
+      source_id: "default-news-google-camera-launches",
+      source: "主机品牌新品 - Google News",
+      original_url: "https://shared.test/cached-official-news",
+      original_title: "Official cached news",
+      titleZh: "官方缓存资讯",
+      summary: "后端缓存给用户的官方资讯。",
+      contentZh: "后端缓存给用户的官方资讯。",
+      type: "新品发布",
+      published_at: "2026-05-14T12:00:00.000Z",
+      llmProcessed: true,
+      classification: { source_group: "official-default" },
+    }]);
+
+    const ensured = repo.ensureOfficialNewsCache(user.id);
+    expect(ensured.inserted.length + ensured.updated.length).toBeGreaterThan(0);
+    expect(ensured.status.visible).toBeGreaterThan(0);
+    expect(ensured.status.latestPublishedAt).toBe("2026-05-14T12:00:00.000Z");
+  });
+
   it("does not sync stale official news to regular users", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     const user = repo.ensureLocalUser({ id: "stale-shared-news-user", name: "Stale User", auth_provider: "feishu" });

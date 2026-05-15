@@ -757,6 +757,32 @@ export function officialNewsItems() {
   return listNews(getLegacyUserId()).filter((item) => isOfficialNewsItem(item) && isVisibleNewsItem(item));
 }
 
+export function officialNewsCacheStatus(userId) {
+  const items = listNews(userId).filter((item) => isOfficialNewsItem(item));
+  const visible = items.filter((item) => isVisibleNewsItem(item));
+  const latestPublishedAt = visible
+    .map((item) => item.published_at || item.date || "")
+    .filter(Boolean)
+    .sort()
+    .at(-1) || "";
+  return {
+    total: items.length,
+    visible: visible.length,
+    latestPublishedAt,
+  };
+}
+
+export function ensureOfficialNewsCache(userId) {
+  if (!userId || userId === getLegacyUserId()) {
+    return { inserted: [], updated: [], status: officialNewsCacheStatus(userId || getLegacyUserId()) };
+  }
+  const result = syncOfficialNewsToUser(userId);
+  return {
+    ...result,
+    status: officialNewsCacheStatus(userId),
+  };
+}
+
 export function syncOfficialNewsToUser(userId) {
   if (!userId || userId === getLegacyUserId()) return { inserted: [], updated: [] };
   pruneNewsOlderThan(userId, { sourceGroups: ["official-default", "sample-live", "wechat-exporter"], olderThanDays: STREAM_NEWS_MAX_AGE_DAYS });
