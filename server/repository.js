@@ -15,6 +15,7 @@ import {
 } from "./db.js";
 import { DEFAULT_FIELDS, normalizeFields, normalizeSettingsFields } from "./field-config.js";
 import { normalizeDemandInputTags, normalizeProductInputTags } from "./field-matcher.js";
+import { isCrossSourceNewsStoryKey, isSpecificNewsStoryKey, withNewsDedupeKeys } from "./news-dedupe.js";
 import { buildEmptyState } from "./seed.js";
 import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
@@ -348,6 +349,36 @@ function parseIsoTime(value) {
   if (!value) return 0;
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : 0;
+}
+
+function parseJsonObject(value) {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function appendUniqueText(list, value, limit = 5) {
+  const next = cleanText(value);
+  const current = Array.isArray(list) ? list.map((item) => cleanText(item)).filter(Boolean) : [];
+  return Array.from(new Set([...current, next].filter(Boolean))).slice(-limit);
+}
+
+function streamWindowStartIso() {
+  const date = new Date(Date.now() - STREAM_NEWS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000);
+  date.setUTCHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
+function isWechatNewsRecord(record = {}, classification = undefined) {
+  const meta = classification || record.classification || parseJsonObject(record.classification_json);
+  return String(meta.source_type || "").toLowerCase().includes("wechat") ||
+    String(meta.source_group || "").toLowerCase() === "wechat-exporter" ||
+    String(record.original_url || "").includes("mp.weixin.qq.com") ||
+    String(record.source || record.source_name || "").includes("公众号");
 }
 
 function isOfficialSourceGroup(value) {
@@ -1159,12 +1190,42 @@ export function upsertNews(userId, items) {
   const inserted = [];
   const updated = [];
   const selectStmt = db.prepare("SELECT * FROM news_items WHERE user_id = ? AND original_url = ?");
+  const selectNearDuplicateStmt = db.prepare(`
+    SELECT *
+    FROM news_items
+    WHERE user_id = ?
+      AND datetime(COALESCE(published_at, created_at)) >= datetime(?)
+      AND (
+        (
+          ? <> ''
+          AND COALESCE(json_extract(classification_json, '$.near_merge_key'), '') = ?
+          AND COALESCE(json_extract(classification_json, '$.host_key'), '') <> ''
+        )
+        OR (
+          ? <> ''
+          AND title_zh = ?
+          AND source_name = ?
+        )
+        OR (
+          ? <> ''
+          AND source_name = ?
+          AND COALESCE(json_extract(classification_json, '$.story_key'), '') = ?
+        )
+        OR (
+          ? <> ''
+          AND COALESCE(json_extract(classification_json, '$.story_key'), '') = ?
+        )
+      )
+    ORDER BY published_at DESC, updated_at DESC
+    LIMIT 1
+  `);
   const updateExistingStmt = db.prepare(`
     UPDATE news_items
     SET source_id = ?,
         source_name = ?,
         source_authority = ?,
         original_title = ?,
+        original_url = ?,
         original_summary = ?,
         original_content = ?,
         title_zh = ?,
@@ -1190,19 +1251,43 @@ export function upsertNews(userId, items) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   db.transaction((records) => {
-    for (const input of records) {
+    for (const rawInput of records) {
+      const input = withNewsDedupeKeys(rawInput);
       if (!input.original_url) continue;
-      const current = selectStmt.get(userId, input.original_url);
+      const inputClassification = input.classification || {};
+      const inputNearMergeKey = cleanText(inputClassification.near_merge_key);
+      const inputTitle = cleanText(input.titleZh || input.original_title);
+      const inputSource = cleanText(input.source);
+      const inputStoryKey = isSpecificNewsStoryKey(inputClassification.story_key)
+        ? cleanText(inputClassification.story_key)
+        : "";
+      const inputCrossSourceStoryKey = isCrossSourceNewsStoryKey(inputStoryKey) ? inputStoryKey : "";
+      const inputNearMergeKeyForLookup = inputStoryKey && inputStoryKey !== "generic" ? inputNearMergeKey : "";
+      const currentByUrl = selectStmt.get(userId, input.original_url);
+      const current = currentByUrl || selectNearDuplicateStmt.get(
+        userId,
+        streamWindowStartIso(),
+        inputNearMergeKeyForLookup, inputNearMergeKeyForLookup,
+        inputTitle, inputTitle, inputSource,
+        inputStoryKey, inputSource, inputStoryKey,
+        inputCrossSourceStoryKey, inputCrossSourceStoryKey
+      );
       if (current) {
         const currentPublishedAt = parseIsoTime(current.published_at);
         const nextPublishedAt = parseIsoTime(input.published_at || input.date);
         const mergedPublishedAt = nextPublishedAt >= currentPublishedAt
           ? (input.published_at || input.date || current.published_at || nowIso())
           : (current.published_at || input.published_at || input.date || nowIso());
-        const currentClassification = current.classification_json ? JSON.parse(current.classification_json) : {};
+        const currentClassification = parseJsonObject(current.classification_json);
+        const preferInputPrimary = !currentByUrl && isWechatNewsRecord(input, inputClassification) && !isWechatNewsRecord(current, currentClassification);
+        const duplicateUrl = preferInputPrimary ? current.original_url : input.original_url;
+        const duplicateUrls = current.original_url !== input.original_url
+          ? appendUniqueText(currentClassification.duplicate_urls, duplicateUrl)
+          : currentClassification.duplicate_urls;
         const mergedClassification = {
           ...currentClassification,
           ...(input.classification || {}),
+          ...(duplicateUrls?.length ? { duplicate_urls: duplicateUrls } : {}),
         };
         const nextType = input.type ?? current.type;
         const nextThumbnail = input.thumbnail_url || current.thumbnail_url || "";
@@ -1211,15 +1296,16 @@ export function upsertNews(userId, items) {
           ? (input.llmProcessed ? 1 : 0)
           : (nextType ? 1 : current.llm_processed);
         const nextPayload = {
-          source_id: input.source_id || current.source_id,
-          source_name: input.source || current.source_name,
+          source_id: (currentByUrl || preferInputPrimary) ? (input.source_id || current.source_id) : current.source_id,
+          source_name: (currentByUrl || preferInputPrimary) ? (input.source || current.source_name) : current.source_name,
           source_authority: input.source_authority || input.classification?.authority || current.source_authority || "watchlist",
-          original_title: input.original_title || current.original_title,
-          original_summary: input.summary || current.original_summary || "",
-          original_content: input.original_content || current.original_content || "",
-          title_zh: input.titleZh || current.title_zh || input.original_title || current.original_title,
-          summary_zh: input.summary || current.summary_zh || current.original_summary || "",
-          content_zh: input.contentZh || current.content_zh || "",
+          original_title: (currentByUrl || preferInputPrimary) ? (input.original_title || current.original_title) : current.original_title,
+          original_url: preferInputPrimary ? input.original_url : current.original_url,
+          original_summary: (currentByUrl || preferInputPrimary) ? (input.summary || current.original_summary || "") : (current.original_summary || input.summary || ""),
+          original_content: (currentByUrl || preferInputPrimary) ? (input.original_content || current.original_content || "") : (current.original_content || input.original_content || ""),
+          title_zh: (currentByUrl || preferInputPrimary) ? (input.titleZh || current.title_zh || input.original_title || current.original_title) : (current.title_zh || input.titleZh || current.original_title),
+          summary_zh: (currentByUrl || preferInputPrimary) ? (input.summary || current.summary_zh || current.original_summary || "") : (current.summary_zh || input.summary || current.original_summary || ""),
+          content_zh: (currentByUrl || preferInputPrimary) ? (input.contentZh || current.content_zh || "") : (current.content_zh || input.contentZh || ""),
           type: nextType,
           thumbnail_url: nextThumbnail,
           thumb_hue: Number(input.thumbHue ?? current.thumb_hue ?? 40),
@@ -1234,6 +1320,7 @@ export function upsertNews(userId, items) {
           nextPayload.source_name !== current.source_name ||
           nextPayload.source_authority !== current.source_authority ||
           nextPayload.original_title !== current.original_title ||
+          nextPayload.original_url !== current.original_url ||
           nextPayload.original_summary !== (current.original_summary || "") ||
           nextPayload.original_content !== (current.original_content || "") ||
           nextPayload.title_zh !== (current.title_zh || "") ||
@@ -1254,6 +1341,7 @@ export function upsertNews(userId, items) {
             nextPayload.source_name,
             nextPayload.source_authority,
             nextPayload.original_title,
+            nextPayload.original_url,
             nextPayload.original_summary,
             nextPayload.original_content,
             nextPayload.title_zh,

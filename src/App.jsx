@@ -185,7 +185,10 @@ async function api(path, options = {}) {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.message || body.error || `Request failed: ${response.status}`);
+    const error = new Error(body.message || body.error || `Request failed: ${response.status}`);
+    error.status = response.status;
+    error.code = body.error || "";
+    throw error;
   }
   return response.json();
 }
@@ -427,9 +430,15 @@ function PMCTweaks({ t, setTweak }) {
 }
 
 function App() {
-  const [active, setActive] = useState("news");
+  const initialScreen = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const screen = params.get("screen");
+    return ["news", "products", "demands", "research", "settings"].includes(screen) ? screen : "news";
+  })();
+  const [active, setActive] = useState(initialScreen);
   const [me, setMe] = useState(null);
   const [data, setData] = useState(null);
+  const [bootstrapped, setBootstrapped] = useState(false);
   const [providers, setProviders] = useState({ password: true, feishu: false });
   const [error, setError] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -441,33 +450,92 @@ function App() {
   const [t, setTweak] = useTweaks({ theme: "feishu", mode: "light", showLogin: false });
   const prevSampleWorkspaceRef = useRef(false);
   const prevUserIdRef = useRef("");
+  const meRef = useRef(null);
+  const dataRef = useRef(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", t.theme);
     document.documentElement.setAttribute("data-mode", t.mode);
   }, [t.theme, t.mode]);
 
-  const loadBootstrap = async () => {
-    const [meResponse, bootstrap, providerResponse] = await Promise.all([
-      api("/api/me").catch(() => null),
-      api("/api/bootstrap").catch(() => null),
-      api("/api/auth/providers").catch(() => ({ password: true, feishu: false })),
-    ]);
-    setMe(meResponse?.user || null);
-    setData(normalizeData(bootstrap));
+  useEffect(() => {
+    meRef.current = me;
+    dataRef.current = data;
+  }, [me, data]);
+
+  const loadBootstrap = async ({ background = false } = {}) => {
+    const providerResponse = await api("/api/auth/providers").catch(() => ({ password: true, feishu: false }));
     setProviders({
       password: providerResponse?.password !== false,
       feishu: Boolean(providerResponse?.feishu),
     });
+
+    let meResponse = null;
+    try {
+      meResponse = await api("/api/me");
+    } catch (err) {
+      if (background && meRef.current) {
+        setBootstrapped(true);
+        return;
+      }
+      setMe(null);
+      setData(null);
+      setBootstrapped(true);
+      return;
+    }
+
+    const user = meResponse?.user || null;
+    if (!user) {
+      setMe(null);
+      setData(null);
+      setBootstrapped(true);
+      return;
+    }
+
+    setMe(user);
+
+    let nextBootstrap = null;
+    let bootstrapError = null;
+    const retryDelays = [0, 180, 400];
+    for (const delayMs of retryDelays) {
+      if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      try {
+        nextBootstrap = await api("/api/bootstrap");
+        bootstrapError = null;
+        break;
+      } catch (err) {
+        bootstrapError = err;
+        if (err?.status && err.status !== 401 && err.status < 500) break;
+      }
+    }
+
+    if (!nextBootstrap) {
+      if (background && dataRef.current) {
+        setBootstrapped(true);
+        return;
+      }
+      if (bootstrapError) {
+        setError(bootstrapError.message || "工作区加载失败");
+      }
+      setBootstrapped(true);
+      return;
+    }
+
+    setError("");
+    setData(normalizeData(nextBootstrap));
+    setBootstrapped(true);
   };
 
   useEffect(() => {
-    loadBootstrap().catch((err) => setError(err.message));
+    loadBootstrap().catch((err) => {
+      setError(err.message);
+      setBootstrapped(true);
+    });
   }, []);
 
   useEffect(() => {
     const resyncAuth = () => {
-      loadBootstrap().catch((err) => setError(err.message));
+      loadBootstrap({ background: true }).catch((err) => setError(err.message));
     };
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") resyncAuth();
@@ -542,7 +610,8 @@ function App() {
     setError("");
     await api("/api/auth/logout", { method: "POST" });
     setMe(null);
-    setData(normalizeData(null));
+    setData(null);
+    setBootstrapped(true);
     setSearchOpen(false);
     setNotificationsOpen(false);
   };
@@ -559,11 +628,11 @@ function App() {
     prevUserIdRef.current = data.user?.id || me.id || "visitor";
   }, [me, data]);
 
-  if (!data) {
+  if (!bootstrapped || (me && !data)) {
     return (
       <div className="login-stage">
         <div className="login-card">
-          <div className="login-brand"><div><div className="name">LOOM</div><div className="sub">正在加载本地数据</div></div></div>
+          <div className="login-brand"><div><div className="name">LOOM</div><div className="sub">{me ? "正在恢复你的工作区" : "正在加载本地数据"}</div></div></div>
           {error && <div className="ai-block" style={{ color: "var(--danger)" }}>{error}</div>}
         </div>
       </div>

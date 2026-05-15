@@ -100,6 +100,18 @@
         "展开",
         "收起",
       ]);
+      const profileNoisePatterns = [
+        /^IP\s*属地[:：]/i,
+        /^年龄[:：]/,
+        /^地区[:：]/,
+        /^简介[:：]/,
+        /^个性签名[:：]/,
+        /^签名[:：]/,
+        /^小红书号[:：]/,
+        /^获赞与收藏/,
+        /^关注\s*\d*/,
+        /^粉丝\s*\d*/,
+      ];
       const seen = new Set();
       return decodeHtml(value)
         .replace(/\u00a0/g, " ")
@@ -112,6 +124,7 @@
           seen.add(line);
           if (line === titleText || line === authorText) return false;
           if (blockedLines.has(line)) return false;
+          if (profileNoisePatterns.some((pattern) => pattern.test(line))) return false;
           if (/^(点赞|收藏|转发|分享|评论|更多|举报)$/.test(line)) return false;
           if (/^共\s*\d+\s*条评论$/.test(line)) return false;
           if (/^展开\s*\d+\s*条回复$/.test(line)) return false;
@@ -965,6 +978,27 @@
           .replace(/\s*-\s*Xiaohongshu\s*$/i, "")
       );
     };
+    const looksLikeProfileSignature = (value) => {
+      const clean = String(value || "").replace(/\s+/g, " ").trim();
+      if (!clean) return true;
+      const profileHits = [
+        /IP\s*属地[:：]/i,
+        /小红书号[:：]/,
+        /个性签名[:：]/,
+        /获赞与收藏/,
+        /关注\s*\d+.*粉丝\s*\d+/,
+        /粉丝\s*\d+.*获赞/,
+        /简介[:：]/,
+      ].filter((pattern) => pattern.test(clean)).length;
+      if (profileHits >= 1 && clean.length < 180) return true;
+      if (profileHits >= 2) return true;
+      return false;
+    };
+    const validNoteContent = (value, titleText = "", authorText = "") => {
+      const clean = normalizeNoteText(value, titleText, authorText);
+      if (!clean || looksLikeProfileSignature(clean)) return "";
+      return clean;
+    };
     const contentFromJsonLd = () => {
       const scripts = Array.from(document.querySelectorAll("script[type='application/ld+json']"));
       for (const script of scripts) {
@@ -973,7 +1007,7 @@
           const items = Array.isArray(data) ? data : [data];
           for (const item of items) {
             const value = item?.articleBody || item?.description || item?.caption || item?.text;
-            const clean = normalizeNoteText(value);
+            const clean = validNoteContent(value);
             if (clean) return clean;
           }
         } catch {
@@ -982,16 +1016,38 @@
       }
       return "";
     };
-    const contentFromHydration = () => normalizeNoteText(valueFromScriptPattern([
-      /"desc"\s*:\s*"((?:\\.|[^"\\])*)"/,
-      /"description"\s*:\s*"((?:\\.|[^"\\])*)"/,
-      /"content"\s*:\s*"((?:\\.|[^"\\])*)"/,
-      /"noteContent"\s*:\s*"((?:\\.|[^"\\])*)"/,
-      /"articleBody"\s*:\s*"((?:\\.|[^"\\])*)"/,
-    ]));
+    const contentFromHydration = (titleText = "", authorText = "") => {
+      const patterns = [
+        /"desc"\s*:\s*"((?:\\.|[^"\\])*)"/g,
+        /"description"\s*:\s*"((?:\\.|[^"\\])*)"/g,
+        /"content"\s*:\s*"((?:\\.|[^"\\])*)"/g,
+        /"noteContent"\s*:\s*"((?:\\.|[^"\\])*)"/g,
+        /"articleBody"\s*:\s*"((?:\\.|[^"\\])*)"/g,
+      ];
+      const candidates = [];
+      for (const scriptContent of scriptTextCandidates()) {
+        const noteIndex = currentNoteId ? scriptContent.indexOf(currentNoteId) : -1;
+        for (const pattern of patterns) {
+          pattern.lastIndex = 0;
+          let match = pattern.exec(scriptContent);
+          while (match) {
+            const raw = match[1] || "";
+            const clean = validNoteContent(decodeScriptString(raw), titleText, authorText);
+            if (clean) {
+              const distance = noteIndex >= 0 ? Math.abs(match.index - noteIndex) : 999999;
+              candidates.push({ value: clean, score: contentCandidateScore(clean) - Math.min(distance / 120, 800) });
+            }
+            match = pattern.exec(scriptContent);
+          }
+        }
+      }
+      candidates.sort((a, b) => b.score - a.score);
+      return candidates[0]?.value || "";
+    };
     const contentCandidateScore = (value) => {
       const clean = String(value || "").trim();
       if (clean.length < 2) return 0;
+      if (looksLikeProfileSignature(clean)) return 0;
       let score = clean.length;
       if (/[，。！？；：,.!?]/.test(clean)) score += 80;
       if (clean.includes("\n")) score += Math.min(clean.split("\n").length * 30, 180);
@@ -1028,7 +1084,7 @@
         root.querySelectorAll(selector).forEach((node) => {
           if (!(node instanceof Element)) return;
           if (isContentNoiseNode(node)) return;
-          const value = normalizeNoteText(node.innerText || node.textContent || "", titleText, authorText);
+          const value = validNoteContent(node.innerText || node.textContent || "", titleText, authorText);
           const score = contentCandidateScore(value);
           if (score > 0) candidates.push({ value, score });
         });
@@ -1036,25 +1092,33 @@
       candidates.sort((a, b) => b.score - a.score);
       return candidates[0]?.value || "";
     };
+    const contentFromDetailDesc = (titleText, authorText) => {
+      const root = document.querySelector("#noteContainer");
+      const node = root?.querySelector("#detail-desc .note-text, #detail-desc");
+      return validNoteContent(node?.innerText || node?.textContent || "", titleText, authorText);
+    };
     const extractDetailContent = () => {
       const titleText = bootstrapTitleNode?.textContent?.trim() || "";
       const authorText = scopedText(["[class*='username']", ".author-name", "a[href*='/user/profile/']"], detailRoot) || "";
+      const directDetail = contentFromDetailDesc(titleText, authorText);
+      if (directDetail) return directDetail.slice(0, 2000);
+      if (document.querySelector("#noteContainer")) return "";
       const primarySelectors = [
         "#detail-desc",
         "[data-testid*='detail-desc']",
         "[class*='detail-desc']",
         "[class*='detailDesc']",
-        "[class*='desc']",
       ];
       const primaryRoot = document.querySelector("#noteContainer") || detailRoot || scopedRoot;
       const primary = bestContentCandidate(primarySelectors, primaryRoot, titleText, authorText);
       if (primary) return primary.slice(0, 2000);
-      const structured = contentFromJsonLd() || contentFromHydration() || contentFromMeta();
-      if (structured) return normalizeNoteText(structured, titleText, authorText).slice(0, 2000);
+      const structured = contentFromJsonLd() || contentFromHydration(titleText, authorText) || validNoteContent(contentFromMeta(), titleText, authorText);
+      if (structured) return structured.slice(0, 2000);
       const fallbackSelectors = [
         "[class*='note-content']",
         "[class*='noteContent']",
         "[class*='note-text']",
+        "[class*='desc']",
       ];
       const fallback = bestContentCandidate(fallbackSelectors, detailRoot || scopedRoot, titleText, authorText);
       if (fallback) return fallback.slice(0, 2000);

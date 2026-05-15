@@ -85,6 +85,10 @@ let visionLlmTesting = false;
 
 document.addEventListener("DOMContentLoaded", load);
 
+function currentApiBaseFromForm(fallback = DEFAULTS.loom_api_base) {
+  return normalizeApiBase(document.getElementById("api-base")?.value.trim() || fallback);
+}
+
 function normalizeApiBase(value) {
   const raw = String(value || "").trim().replace(/\/$/, "");
   if (!raw) return DEFAULT_API_BASE;
@@ -100,6 +104,7 @@ function normalizeApiBase(value) {
 async function load() {
   const data = await getSettings();
   document.getElementById("api-base").value = data.loom_api_base || DEFAULTS.loom_api_base;
+  syncWebLinks(data.loom_api_base || DEFAULTS.loom_api_base);
   document.getElementById("default-mode").value = data.loom_default_mode || "auto";
   document.getElementById("ai-before-save").value = data.loom_ai_before_save === false ? "false" : "true";
   document.querySelectorAll("[data-platform]").forEach((input) => {
@@ -136,10 +141,8 @@ async function getSettings() {
 }
 
 function bind() {
-  document.getElementById("open-web").onclick = async () => {
-    const apiBase = normalizeApiBase(document.getElementById("api-base").value.trim() || DEFAULTS.loom_api_base);
-    chrome.tabs.create({ url: apiBase });
-  };
+  const apiBaseInput = document.getElementById("api-base");
+  apiBaseInput.addEventListener("input", () => syncWebLinks());
   document.getElementById("open-web-login").onclick = openWebLogin;
   document.getElementById("test-connection").onclick = testConnection;
   document.getElementById("logout").onclick = logout;
@@ -156,9 +159,16 @@ function bind() {
   document.getElementById("test-vision-llm").onclick = testVisionLlmSettings;
 }
 
+function syncWebLinks(fallback = DEFAULTS.loom_api_base) {
+  const apiBase = currentApiBaseFromForm(fallback);
+  const openWeb = document.getElementById("open-web");
+  if (openWeb) openWeb.href = `${apiBase}/app`;
+  const fieldSettingsLink = document.getElementById("open-web-field-settings");
+  if (fieldSettingsLink) fieldSettingsLink.href = `${apiBase}/app?screen=settings&tab=tags`;
+}
+
 function openWebLogin() {
-  const apiBase = normalizeApiBase(document.getElementById("api-base").value.trim() || DEFAULTS.loom_api_base);
-  chrome.tabs.create({ url: `${apiBase}/app?login=1` });
+  window.open(`${currentApiBaseFromForm()}/app?login=1`, "_blank", "noopener");
 }
 
 async function testConnection() {
@@ -175,10 +185,14 @@ async function logout() {
       credentials: "include",
       headers: stored.loom_token ? { Authorization: `Bearer ${stored.loom_token}` } : {},
     });
-  } catch {}
+  } catch {
+    // Logout is best effort; local extension auth state is still cleared.
+  }
   try {
     await chrome.cookies.remove({ url: apiBase, name: "connect.sid" });
-  } catch {}
+  } catch {
+    // Cookie removal can fail when the browser owns the session.
+  }
   await chrome.storage.local.remove(["loom_token", "loom_user", "pmcopilot_token", "pmcopilot_user"]);
   currentLlmSettings = null;
   currentVisionLlmSettings = null;

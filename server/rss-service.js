@@ -1,6 +1,7 @@
 import Parser from "rss-parser";
 import { callLLM } from "./ai-service.js";
 import { fetchPageImage, resolvePageUrl } from "./content-fetcher.js";
+import { withNewsDedupeKeys } from "./news-dedupe.js";
 import { findReusableNewsThumbnail, listNews, listPendingNewsForLlm, updateNews, upsertNews, updateNewsSource } from "./repository.js";
 
 const parser = new Parser({
@@ -43,7 +44,10 @@ const NEWS_LLM_SYSTEM_PROMPT = `你是一个信息筛选助手，服务于摄影
   "type": "new_product" | "trend" | null,
   "title_zh": "中文标题，15字以内，直接说是什么（例：神牛发布ML100Bi II双色温灯）",
   "summary_zh": "80字以内中文摘要，提炼核心信息。",
-  "content_zh": "中文正文，保留原文关键信息，120-300字。"
+  "content_zh": "中文正文，保留原文关键信息，120-300字。",
+  "story_key": "同一新闻事件的短英文key，格式 brand-product-event，例如 sony-a7r-vi-launch；不确定则为空",
+  "story_event": "launch|review|leak|poll|preorder|firmware|price|trend|other",
+  "dedupe_confidence": 0 到 1
 }`;
 
 const NEWS_LLM_INPUT_LIMIT = 1600;
@@ -251,7 +255,7 @@ function canonicalTitleKey(item = {}) {
 }
 
 async function annotateMergedItems(items = []) {
-  return items.map((item) => ({
+  return items.map((item) => withNewsDedupeKeys({
     ...item,
     classification: {
       ...(item.classification || {}),
@@ -580,13 +584,14 @@ async function collectWechatExporterSource(userId, source) {
     .filter(Boolean);
 
   await enrichWechatImages(newsItems);
-  const upserted = upsertNews(userId, newsItems);
+  const mergedNewsItems = await annotateMergedItems(newsItems);
+  const upserted = upsertNews(userId, mergedNewsItems);
   updateNewsSource(userId, source.id, {
     last_fetched_at: new Date().toISOString(),
     last_item_count: items.length,
     last_error: null,
   });
-  return { source_id: source.id, source: source.name, fetched: items.length, kept: newsItems.length, ...upserted };
+  return { source_id: source.id, source: source.name, fetched: items.length, kept: mergedNewsItems.length, ...upserted };
 }
 
 async function enrichWechatImages(newsItems) {
@@ -797,6 +802,25 @@ export async function processNewsWithLlm(userId, limit = 20) {
         maxTokens: NEWS_LLM_MAX_TOKENS,
       });
       if (result?.keep) {
+        const llmClassification = {
+          reason: "manual_llm",
+          ...(result.story_event ? { story_event: String(result.story_event).slice(0, 32) } : {}),
+          ...(Number.isFinite(Number(result.dedupe_confidence)) ? { dedupe_confidence: Number(result.dedupe_confidence) } : {}),
+        };
+        const keyed = withNewsDedupeKeys({
+          ...item,
+          titleZh: result.title_zh || item.titleZh,
+          summary: result.summary_zh || item.summary,
+          contentZh: result.content_zh || item.contentZh || "",
+          type: mapType(result.type) || "行业趋势",
+          classification: {
+            ...(item.classification || {}),
+            ...llmClassification,
+          },
+        }, {
+          force: true,
+          storyKeyHint: Number(result.dedupe_confidence) >= 0.78 ? result.story_key : "",
+        });
         updateNews(userId, item.id, {
           type: mapType(result.type) || "行业趋势",
           titleZh: result.title_zh || item.titleZh,
@@ -805,7 +829,7 @@ export async function processNewsWithLlm(userId, limit = 20) {
           is_kept: 1,
           llm_processed: 1,
           needsTranslation: false,
-          classification: { reason: "manual_llm" },
+          classification: keyed.classification,
         });
         kept += 1;
       } else {

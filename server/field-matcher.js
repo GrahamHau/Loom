@@ -11,17 +11,26 @@ const FIELD_ALIASES = {
 };
 
 const OPTION_ALIASES = {
+  DJI: ["大疆", "大疆创新", "DJI大疆"],
+  Insta360: ["影石", "影石Insta360", "Insta"],
   "Osmo Pocket 3": ["DJI Osmo Pocket 3", "DJI Pocket 3", "Pocket 3", "pocket3", "大疆 Pocket 3"],
   "Osmo Action 5 Pro": ["DJI Osmo Action 5 Pro", "Action 5 Pro", "action5pro", "大疆 Action 5 Pro"],
   "Osmo Action 4": ["DJI Osmo Action 4", "Action 4", "action4", "大疆 Action 4"],
   "Osmo Mobile 7P": ["DJI Osmo Mobile 7P", "OM 7P", "OM7P", "Mobile 7P"],
   "Osmo Mobile 7": ["DJI Osmo Mobile 7", "OM 7", "OM7", "Mobile 7"],
+  "DJI Mini 4 Pro": ["Mini 4 Pro", "大疆 Mini 4 Pro", "DJI Mini4 Pro"],
+  "DJI Air 3S": ["Air 3S", "大疆 Air 3S"],
+  "DJI Flip": ["大疆 Flip"],
+  "DJI Neo": ["大疆 Neo"],
   "Insta360 Ace Pro 2": ["Ace Pro 2", "影石 Ace Pro 2", "Insta Ace Pro 2"],
   "Insta360 Ace Pro": ["Ace Pro", "影石 Ace Pro", "Insta Ace Pro"],
   "Insta360 GO 3S": ["GO 3S", "Go3S", "影石 GO 3S"],
   "Insta360 GO 3": ["GO 3", "Go3", "影石 GO 3"],
   "Insta360 X5": ["X5", "影石 X5"],
   "Insta360 X4": ["X4", "影石 X4"],
+  "Insta360 Flow 2 Pro": ["Flow 2 Pro", "影石 Flow 2 Pro"],
+  "Insta360 Flow 2": ["Flow 2", "影石 Flow 2"],
+  "Insta360 Flow Pro": ["Flow Pro", "影石 Flow Pro"],
   "Vlog/自拍": ["vlog", "自拍", "自拍拍摄", "Vlog 自拍", "vlog自拍"],
   "直播/带货": ["直播", "带货", "直播带货"],
   "短视频创作": ["短视频", "内容创作", "创作"],
@@ -127,6 +136,26 @@ export function matchFieldOption(rawValue, field = {}, options = {}) {
   const threshold = options.threshold ?? (field.multi === false ? 0.86 : 0.82);
   if (best && best.confidence >= threshold) return { ...best, method: "fuzzy" };
   return options.keepUnmatched === false ? null : { value, raw: value, confidence: 0, method: "raw" };
+}
+
+export function matchFieldOptionInText(rawText, field = {}, options = {}) {
+  const text = cleanText(rawText);
+  const haystack = compact(text);
+  if (!haystack) return null;
+  const minLength = options.minCandidateLength ?? 3;
+  const choices = uniqueList(field.options);
+  let best = null;
+  for (const option of choices) {
+    for (const candidate of candidatesFor(option)) {
+      const needle = compact(candidate);
+      if (!needle || needle.length < minLength || !haystack.includes(needle)) continue;
+      const score = 0.9 + Math.min(needle.length, 30) / 300;
+      if (!best || score > best.confidence) {
+        best = { value: option, raw: text, confidence: score, matched: candidate, method: "text" };
+      }
+    }
+  }
+  return best;
 }
 
 export function normalizeTagValues(tagValues = {}, fields = [], options = {}) {

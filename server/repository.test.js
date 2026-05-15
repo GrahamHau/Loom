@@ -5,7 +5,7 @@ process.env.DATABASE_PATH = ":memory:";
 const dbModule = await import("./db.js");
 const repo = await import("./repository.js");
 const { fieldOptionsText } = await import("./field-config.js");
-const { matchFieldKey, matchFieldOption, normalizeTagValues } = await import("./field-matcher.js");
+const { matchFieldKey, matchFieldOption, matchFieldOptionInText, normalizeTagValues } = await import("./field-matcher.js");
 
 beforeEach(() => {
   dbModule.migrate();
@@ -281,7 +281,7 @@ describe("repository", () => {
     expect(pending.map((item) => item.original_url)).toContain("https://a.test/needs-zh");
   });
 
-  it("dedupes by original url per user", () => {
+  it("dedupes by original url or same-source title per user", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     const secondUser = repo.ensureLocalUser({ id: "user-b", name: "User B", auth_provider: "feishu" });
     repo.upsertNews(legacyUserId, [
@@ -293,8 +293,259 @@ describe("repository", () => {
     ]);
     const legacyMatches = repo.listNews(legacyUserId).filter((item) => item.original_title === "Tilta launches filter kit");
     const secondMatches = repo.listNews(secondUser.id).filter((item) => item.original_title === "Tilta launches filter kit");
-    expect(legacyMatches).toHaveLength(2);
+    expect(legacyMatches).toHaveLength(1);
     expect(secondMatches).toHaveLength(1);
+    expect(legacyMatches[0].classification.duplicate_urls).toContain("https://news.google.com/rss/b");
+  });
+
+  it("near-dedupes news by brand and host even when urls differ", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [
+      {
+        source_id: "google",
+        source: "Google News",
+        original_url: "https://news.google.com/rss/articles/insta-go-3s-a",
+        titleZh: "Insta360 GO 3S 复古套装发布",
+        original_title: "Insta360 GO 3S retro bundle launches",
+        type: "新品发布",
+        date: "2026-05-10",
+      },
+      {
+        source_id: "google",
+        source: "Google News",
+        original_url: "https://news.google.com/rss/articles/insta-go-3s-b",
+        titleZh: "影石 GO 3S 复古版推出",
+        original_title: "Insta360 GO 3S vintage kit announced",
+        thumbnail_url: "https://cdn.test/go-3s.jpg",
+        type: "新品发布",
+        date: "2026-05-11",
+      },
+    ]);
+
+    const matches = repo.listNews(legacyUserId).filter((item) => item.titleZh.includes("GO 3S"));
+    expect(matches).toHaveLength(1);
+    expect(matches[0].original_url).toBe("https://news.google.com/rss/articles/insta-go-3s-a");
+    expect(matches[0].thumbnail_url).toBe("https://cdn.test/go-3s.jpg");
+    expect(matches[0].classification).toMatchObject({
+      brand: "Insta360",
+      host: "Insta360 GO 3S",
+      host_key: "insta360go3s",
+    });
+    expect(matches[0].classification.duplicate_urls).toContain("https://news.google.com/rss/articles/insta-go-3s-b");
+  });
+
+  it("does not cross-source merge generic host stories", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [
+      {
+        source_id: "source-a",
+        source: "Source A",
+        original_url: "https://example.com/mobile-7-review",
+        titleZh: "DJI Osmo Mobile 7P 评测",
+        original_title: "DJI Osmo Mobile 7P review",
+        type: "行业趋势",
+        date: "2026-05-10",
+      },
+      {
+        source_id: "source-b",
+        source: "Source B",
+        original_url: "https://example.com/mobile-7-launch",
+        titleZh: "DJI Osmo Mobile 7P 发布",
+        original_title: "DJI Osmo Mobile 7P launches",
+        type: "新品发布",
+        date: "2026-05-11",
+      },
+    ]);
+
+    expect(repo.listNews(legacyUserId).filter((item) => item.titleZh.includes("Osmo Mobile 7P"))).toHaveLength(2);
+  });
+
+  it("near-dedupes same-source normalized story wording without brand or host", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [
+      {
+        source_id: "dcw",
+        source: "Digital Camera World",
+        original_url: "https://example.com/canon-c2pa-image",
+        titleZh: "佳能推C2PA图像验证",
+        original_title: "Canon launches C2PA image verification",
+        type: "行业趋势",
+        date: "2026-05-10",
+      },
+      {
+        source_id: "dcw",
+        source: "Digital Camera World",
+        original_url: "https://example.com/canon-c2pa-photo",
+        titleZh: "佳能推C2PA影像验证",
+        original_title: "Canon launches C2PA photo verification",
+        thumbnail_url: "https://cdn.test/c2pa.jpg",
+        type: "行业趋势",
+        date: "2026-05-11",
+      },
+      {
+        source_id: "other",
+        source: "Other Source",
+        original_url: "https://example.com/other-c2pa-photo",
+        titleZh: "佳能推C2PA影像验证",
+        original_title: "Canon launches C2PA photo verification",
+        type: "行业趋势",
+        date: "2026-05-11",
+      },
+    ]);
+
+    const c2paMatches = repo.listNews(legacyUserId).filter((item) => item.classification?.story_key === "canon-c2pa-image-verify");
+    const otherMatches = repo.listNews(legacyUserId).filter((item) => item.source === "Other Source");
+    expect(c2paMatches).toHaveLength(1);
+    expect(otherMatches).toHaveLength(0);
+    expect(c2paMatches[0].source).toBe("Digital Camera World");
+    expect(c2paMatches[0].thumbnail_url).toBe("https://cdn.test/c2pa.jpg");
+    expect(c2paMatches[0].classification.duplicate_urls).toContain("https://example.com/other-c2pa-photo");
+  });
+
+  it("near-dedupes canonical launch stories across sources", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [
+      {
+        source_id: "gadgetguy",
+        source: "GadgetGuy",
+        original_url: "https://example.com/sony-alpha-a",
+        titleZh: "索尼发布Alpha 7R VI",
+        original_title: "Sony Alpha 7R VI launches",
+        type: "新品发布",
+        date: "2026-05-10",
+      },
+      {
+        source_id: "google",
+        source: "Google News",
+        original_url: "https://example.com/sony-a7r-b",
+        titleZh: "索尼A7R VI新机曝光",
+        original_title: "New high-res Sony Alpha 7R VI uses autofocus tech",
+        thumbnail_url: "https://cdn.test/sony-a7r.jpg",
+        type: "新品发布",
+        date: "2026-05-11",
+      },
+      {
+        source_id: "review",
+        source: "Review Source",
+        original_url: "https://example.com/sony-a7r-review",
+        titleZh: "索尼a7R高速版评测",
+        original_title: "Sony A7R VI review",
+        type: "行业趋势",
+        date: "2026-05-11",
+      },
+    ]);
+
+    const launchMatches = repo.listNews(legacyUserId).filter((item) => item.classification?.story_key === "sony-a7r-vi-launch");
+    const reviewMatches = repo.listNews(legacyUserId).filter((item) => item.classification?.story_key === "sony-a7r-vi-review");
+    expect(launchMatches).toHaveLength(1);
+    expect(reviewMatches).toHaveLength(1);
+    expect(launchMatches[0].thumbnail_url).toBe("https://cdn.test/sony-a7r.jpg");
+    expect(launchMatches[0].classification.duplicate_urls).toContain("https://example.com/sony-a7r-b");
+  });
+
+  it("prefers WeChat as the primary row when near-deduping cross-source stories", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [
+      {
+        source_id: "google",
+        source: "主机新品 - Google News",
+        original_url: "https://news.google.com/rss/articles/sony-a7r-vi",
+        titleZh: "索尼发布Alpha 7R VI",
+        original_title: "Sony Alpha 7R VI launches",
+        summary: "Google summary",
+        type: "新品发布",
+        date: "2026-05-10",
+      },
+      {
+        source_id: "wechat-sony",
+        source: "索尼中国",
+        original_url: "https://mp.weixin.qq.com/s/sony-a7r-vi",
+        titleZh: "新品发布丨Alpha 7R VI索尼新一代全画幅微单发布",
+        original_title: "新品发布丨Alpha 7R VI索尼新一代全画幅微单发布",
+        summary: "WeChat summary",
+        thumbnail_url: "https://cdn.test/wechat.jpg",
+        type: "新品发布",
+        classification: {
+          source_type: "wechat_exporter",
+          source_group: "wechat-exporter",
+        },
+        date: "2026-05-10",
+      },
+    ]);
+
+    const matches = repo.listNews(legacyUserId).filter((item) => item.classification?.story_key === "sony-a7r-vi-launch");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].source).toBe("索尼中国");
+    expect(matches[0].original_url).toBe("https://mp.weixin.qq.com/s/sony-a7r-vi");
+    expect(matches[0].summary).toBe("WeChat summary");
+    expect(matches[0].thumbnail_url).toBe("https://cdn.test/wechat.jpg");
+    expect(matches[0].classification.duplicate_urls).toContain("https://news.google.com/rss/articles/sony-a7r-vi");
+  });
+
+  it("does not classify publisher names containing review as Sony A7R VI review events", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [
+      {
+        source_id: "photo-review",
+        source: "Google News",
+        original_url: "https://example.com/photo-review-launch",
+        titleZh: "Sony unveils 66.8-megapixel Alpha 7R VI camera - Photo Review",
+        original_title: "Sony unveils 66.8-megapixel Alpha 7R VI camera - Photo Review",
+        type: "新品发布",
+        date: "2026-05-10",
+      },
+      {
+        source_id: "review",
+        source: "Google News",
+        original_url: "https://example.com/petapixel-review",
+        titleZh: "Sony a7R VI Review: The High-Resolution Camera to Rule Them All - PetaPixel",
+        original_title: "Sony a7R VI Review: The High-Resolution Camera to Rule Them All - PetaPixel",
+        type: "行业趋势",
+        date: "2026-05-10",
+      },
+    ]);
+
+    const all = repo.listNews(legacyUserId);
+    expect(all.find((item) => item.original_url === "https://example.com/photo-review-launch")?.classification?.story_key).toBe("sony-a7r-vi-launch");
+    expect(all.find((item) => item.original_url === "https://example.com/petapixel-review")?.classification?.story_key).toBe("sony-a7r-vi-review");
+  });
+
+  it("does not fold Sony A7R VII or non-launch A7R VI stories into the A7R VI launch key", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [
+      {
+        source_id: "launch",
+        source: "Launch Source",
+        original_url: "https://example.com/sony-a7r-vi-launch",
+        titleZh: "索尼发布Alpha 7R VI",
+        original_title: "Sony Alpha 7R VI launches",
+        type: "新品发布",
+        date: "2026-05-10",
+      },
+      {
+        source_id: "leak",
+        source: "Leak Source",
+        original_url: "https://example.com/sony-a7r-vi-leak",
+        titleZh: "索尼A7R VI新图泄露",
+        original_title: "New leaked Sony A7R VI images",
+        type: "行业趋势",
+        date: "2026-05-11",
+      },
+      {
+        source_id: "vii",
+        source: "Rumor Source",
+        original_url: "https://example.com/sony-a7r-vii-rumor",
+        titleZh: "索尼A7R VII传闻",
+        original_title: "Sony A7R VII rumors",
+        type: "行业趋势",
+        date: "2026-05-11",
+      },
+    ]);
+
+    const all = repo.listNews(legacyUserId);
+    expect(all.filter((item) => item.classification?.story_key === "sony-a7r-vi-launch")).toHaveLength(1);
+    expect(all.filter((item) => item.classification?.story_key === "sony-a7r-vi-leak")).toHaveLength(1);
+    expect(all.some((item) => item.original_url === "https://example.com/sony-a7r-vii-rumor")).toBe(true);
   });
 
   it("creates and reports news source health fields", () => {
@@ -658,6 +909,7 @@ describe("repository", () => {
 
     expect(matchFieldKey("适配设备型号", fields)?.field.key).toBe("host");
     expect(matchFieldOption("pocket3", fields.find((field) => field.key === "host"))?.value).toBe("Osmo Pocket 3");
+    expect(matchFieldOptionInText("Insta360 GO 3S 复古套装发布", fields.find((field) => field.key === "host"))?.value).toBe("Insta360 GO 3S");
     expect(matchFieldOption("vlog 自拍", fields.find((field) => field.key === "scenarios"))?.value).toBe("Vlog/自拍");
     expect(normalizeTagValues({ 主机: ["DJI Pocket 3"], 场景: ["vlog 自拍"] }, fields)).toEqual({
       host: ["Osmo Pocket 3"],

@@ -75,6 +75,7 @@ const state = {
   sessionCookie: "",
   syncedSessionCookie: "",
   tab: null,
+  lastSeenTabId: null,
   lastSeenUrl: "",
   page: null,
   mode: "product",
@@ -267,11 +268,17 @@ async function loadCurrentPage(defaultMode = "auto") {
     if (!(await ensureAuthenticatedForPanel({ silent: false }))) return;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     state.tab = tab;
+    state.lastSeenTabId = tab?.id || null;
     state.lastSeenUrl = tab?.url || "";
     debugEvent("collect:read-start", { url: state.lastSeenUrl, defaultMode });
     const result = await readPageData(tab);
+    if (await activeTabChangedSince(tab)) {
+      debugEvent("collect:read-stale", { url: tab?.url || "" });
+      await scheduleAutoSync(0);
+      return;
+    }
     if (!result?.ok) {
-      state.page = null;
+      clearCapturedPageState();
       debugEvent("collect:wait", {
         url: state.lastSeenUrl,
         platform: result?.platform || "",
@@ -295,6 +302,7 @@ async function loadCurrentPage(defaultMode = "auto") {
       hasImage: Boolean(result.data?.image || result.data?.thumbnail_url),
     });
     renderMain();
+    requestAnimationFrame(syncAutosizeTextareas);
   } catch (error) {
     state.page = null;
     debugEvent("collect:read-error", { error: error.message || "waiting_for_collect" });
@@ -336,14 +344,14 @@ function wait(ms) {
 }
 
 async function readInjectedPageData(tabId, platform) {
-  const attempts = platform === "xiaohongshu" ? 4 : 1;
+  const attempts = platform === "xiaohongshu" ? 8 : 1;
   let lastResult = null;
   for (let index = 0; index < attempts; index += 1) {
     const result = await chrome.tabs.sendMessage(tabId, { type: "LOOM_GET_PAGE_DATA" });
     lastResult = result;
     const content = cleanText(result?.data?.content || result?.data?.original_content || result?.data?.summary, "");
     if (platform !== "xiaohongshu" || content.length >= 2) return result;
-    await wait(450);
+    await wait(350);
   }
   return lastResult;
 }
@@ -423,6 +431,30 @@ function clearSuccessReturnTimer() {
   successReturnTimer = null;
 }
 
+function clearCapturedPageState() {
+  state.page = null;
+  state.processed = null;
+  state.form = null;
+  state.message = "";
+  state.tagPicker = null;
+  state.relationPickerOpen = false;
+  state.relationPickerLoading = false;
+  state.relationPickerItems = [];
+  state.relationPickerQuery = "";
+  state.relationPickerError = "";
+  stopCommentCollector();
+}
+
+async function activeTabChangedSince(tab) {
+  if (!tab?.id) return false;
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return !activeTab?.id || activeTab.id !== tab.id || (activeTab.url || "") !== (tab.url || "");
+  } catch {
+    return false;
+  }
+}
+
 async function resyncAuthWhenIdle(payload = {}) {
   if (state.busy || state.reloading || syncInFlight) return;
   debugEvent("auth:resync-request", payload);
@@ -474,8 +506,14 @@ async function reloadCurrentPage() {
     if (!(await ensureAuthenticatedForPanel({ silent: false }))) return;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) state.tab = tab;
+    state.lastSeenTabId = state.tab?.id || null;
     state.lastSeenUrl = state.tab?.url || state.lastSeenUrl;
     const result = await readPageData(state.tab);
+    if (await activeTabChangedSince(state.tab)) {
+      debugEvent("collect:reload-stale", { url: state.tab?.url || "" });
+      pendingUrlSync = true;
+      return;
+    }
     if (!result?.ok) throw new Error(result?.error || "重新抓取失败");
     const stored = await getStoredSettings();
     state.page = result;
@@ -507,20 +545,25 @@ function bindAutoSync() {
   if (autoSyncBound) return;
   autoSyncBound = true;
   chrome.tabs.onActivated.addListener(async () => {
-    await scheduleAutoSync();
+    await scheduleAutoSync(0);
   });
 
   chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     if (!changeInfo.url && changeInfo.status !== "complete") return;
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!activeTab?.id || activeTab.id !== tabId) return;
-    await scheduleAutoSync();
+    await scheduleAutoSync(changeInfo.url ? 0 : 80);
+  });
+
+  chrome.windows?.onFocusChanged?.addListener(async (windowId) => {
+    if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+    await scheduleAutoSync(0);
   });
 
   if (!autoSyncPoller) {
     autoSyncPoller = setInterval(() => {
       void scheduleAutoSync();
-    }, 800);
+    }, 500);
   }
 }
 
@@ -559,12 +602,12 @@ function bindStorageStateSync() {
   });
 }
 
-async function scheduleAutoSync() {
+async function scheduleAutoSync(delayMs = 120) {
   if (autoSyncTimer) clearTimeout(autoSyncTimer);
   autoSyncTimer = setTimeout(async () => {
     autoSyncTimer = null;
     await syncIfUrlChanged();
-  }, 250);
+  }, delayMs);
 }
 
 async function syncIfUrlChanged() {
@@ -575,17 +618,25 @@ async function syncIfUrlChanged() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
   const nextUrl = tab.url || "";
-  if (!nextUrl || nextUrl === state.lastSeenUrl) return;
+  const nextTabId = tab.id || null;
+  const tabChanged = nextTabId !== state.lastSeenTabId;
+  const urlChanged = nextUrl !== state.lastSeenUrl;
+  if (!nextUrl || (!tabChanged && !urlChanged)) return;
   if (!shouldAutoSyncUrl(nextUrl)) {
     state.tab = tab;
+    state.lastSeenTabId = nextTabId;
     state.lastSeenUrl = nextUrl;
+    clearCapturedPageState();
+    renderCollectionWait(isLoomWebUrl(nextUrl) ? "loom_web_page" : "unsupported_page");
     return;
   }
   state.tab = tab;
+  state.lastSeenTabId = nextTabId;
   state.lastSeenUrl = nextUrl;
   const detection = detectPageTarget(nextUrl);
   if (detection.platform && !detection.detail) {
     debugEvent("collect:detail-wait", { platform: detection.platform, url: nextUrl });
+    clearCapturedPageState();
     renderWaitingForDetail();
     return;
   }
@@ -1091,6 +1142,7 @@ function renderMain() {
       renderMain();
     };
   }
+  requestAnimationFrame(syncAutosizeTextareas);
 }
 
 async function switchMode(mode, supported, message) {
@@ -1146,7 +1198,9 @@ function warnIcon() {
 
 function swirlSpinnerIcon() {
   return `
-    <img class="swirl-spin-img" src="../icons/loom-spiral.png" alt="LOOM loading">`;
+    <span class="swirl-stage">
+      <img class="swirl-spin-img" src="../icons/loom-spiral.png" alt="LOOM loading">
+    </span>`;
 }
 
 function successMotionIcon() {
@@ -1269,16 +1323,18 @@ function fieldValues(item, field) {
 function schemaFieldsView(entity, item) {
   const fields = fieldsForEntity(entity);
   if (!fields.length) return "";
+  const isCompetitor = entity === "competitor";
   return `
-    <div class="cl-grid-2 product-taxonomy-grid">
+    <div class="cl-section">
+      <div class="cl-section-label">标签字段</div>
+      <div class="${isCompetitor ? "product-taxonomy-stack" : "product-taxonomy-stack inspiration-taxonomy-stack"}">
       ${fields.map((field) => `
-        <div class="cl-section">
-          ${fieldSelect(field.key, field.name, fieldValues(item, field), field.tone || "outline", {
-            single: field.multi === false,
-            groupKey: field.legacyKey || field.key,
-          })}
-        </div>
+        ${fieldSelect(field.key, field.name, fieldValues(item, field), field.tone || "outline", {
+          single: field.multi === false,
+          groupKey: field.legacyKey || field.key,
+        })}
       `).join("")}
+      </div>
     </div>
   `;
 }
@@ -1851,6 +1907,16 @@ function bindHeader() {
   }
 }
 
+function autosizeTextarea(el) {
+  if (!(el instanceof HTMLTextAreaElement)) return;
+  el.style.height = "auto";
+  el.style.height = `${Math.max(el.scrollHeight, 128)}px`;
+}
+
+function syncAutosizeTextareas(root = document) {
+  root.querySelectorAll("textarea.source-content-input").forEach(autosizeTextarea);
+}
+
 function handleGlobalClick(event) {
   const tab = event.target.closest(".cl-tab");
   if (tab) {
@@ -1939,6 +2005,7 @@ document.addEventListener("input", (event) => {
   }
   const key = el.getAttribute("data-key");
   if (!key) return;
+  if (el.classList.contains("source-content-input")) autosizeTextarea(el);
   if (key.startsWith("platforms.")) {
     const [, indexStr, field] = key.split(".");
     const index = Number(indexStr);

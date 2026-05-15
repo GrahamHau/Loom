@@ -45,6 +45,7 @@
   "permissions": [
     "storage",
     "activeTab",
+    "tabs",
     "scripting",
     "sidePanel",
     "cookies"

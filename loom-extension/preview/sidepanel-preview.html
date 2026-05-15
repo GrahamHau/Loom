@@ -3,80 +3,153 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LOOM Clipper States</title>
+  <title>LOOM · 状态画板</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../styles/design-tokens.css">
   <link rel="stylesheet" href="../sidepanel/sidepanel.css">
   <style>
     body.preview-board {
       min-height: 100vh;
       margin: 0;
-      padding: 24px;
-      background: var(--bg);
+      padding: 24px 24px 48px;
+      background:
+        radial-gradient(1200px 800px at 8% -4%, var(--accent-soft) 0%, transparent 55%),
+        var(--bg);
       color: var(--text);
+      font-family: var(--font-sans);
     }
 
     .board-shell {
-      max-width: 1680px;
+      max-width: 1760px;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 22px;
     }
 
     .board-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 14px 16px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      padding: 18px 20px;
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: var(--radius-lg);
       background: var(--surface);
       box-shadow: var(--shadow-sm);
+      align-items: center;
     }
-
-    .board-title-row {
+    .board-head-brand {
       display: flex;
-      flex-direction: column;
-      gap: 4px;
+      align-items: center;
+      gap: 14px;
       min-width: 0;
     }
-
+    .board-mark {
+      width: 44px;
+      height: 44px;
+      flex-shrink: 0;
+      animation: loom-breathe 2.4s var(--ease-in-out) infinite;
+    }
+    .board-mark img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      animation: loom-spin 1.6s var(--ease-in-out) infinite;
+    }
+    .board-title-block { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .board-kicker {
       font-size: 10.5px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
+      font-weight: 600;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--text-4);
     }
-
     .board-title {
-      font-size: 15px;
-      font-weight: 800;
-      letter-spacing: -0.04em;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
       line-height: 1.1;
     }
-
     .board-sub {
       color: var(--text-3);
-      font-size: 12px;
-      line-height: 1.5;
+      font-size: 12.5px;
+      line-height: 1.55;
+      max-width: 60ch;
     }
 
     .board-legend {
       display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    .board-legend-row {
+      display: flex;
+      gap: 6px;
       flex-wrap: wrap;
       justify-content: flex-end;
+    }
+    .legend-pill {
+      display: inline-flex;
+      align-items: center;
       gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .legend-pill .swatch {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+    .legend-pill .swatch.neutral { background: var(--text-4); }
+    .legend-pill .swatch.muted   { background: var(--border-strong); }
+    .legend-pill code {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--text-3);
+    }
+
+    .board-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .board-group-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 0 4px;
+    }
+    .board-group-kicker {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+    .board-group-count {
+      font-size: 11px;
+      color: var(--text-4);
+      font-family: var(--font-mono);
+    }
+    .board-group-rule {
+      flex: 1;
+      height: 1px;
+      background: var(--border-soft);
     }
 
     .board-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, 390px);
-      gap: 16px;
+      gap: 18px;
       align-items: start;
       justify-content: start;
     }
@@ -84,15 +157,16 @@
     .state-card {
       width: 390px;
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: var(--radius-lg);
       background: var(--surface);
       box-shadow: var(--shadow-sm);
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
-
     .state-card-head {
-      min-height: 38px;
-      padding: 8px 10px;
+      min-height: 44px;
+      padding: 9px 12px;
       border-bottom: 1px solid var(--border-soft);
       display: flex;
       align-items: center;
@@ -100,23 +174,45 @@
       gap: 10px;
       background: var(--surface);
     }
-
+    .state-card-meta { min-width: 0; }
     .state-card-title {
-      font-size: 13px;
-      font-weight: 700;
+      font-size: 12.5px;
+      font-weight: 600;
       line-height: 1.2;
+      color: var(--text);
     }
-
     .state-card-note {
-      margin-top: 2px;
+      margin-top: 3px;
       font-size: 10.5px;
       color: var(--text-4);
       font-family: var(--font-mono);
+      letter-spacing: 0.02em;
+    }
+    .state-card-tag {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-3);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      background: var(--surface-2);
+      white-space: nowrap;
+    }
+    .state-card-tag.accent {
+      color: var(--accent-text);
+      border-color: color-mix(in oklab, var(--accent) 22%, var(--border));
+      background: var(--accent-soft);
+    }
+    .state-card-tag.muted {
+      color: var(--text-4);
+      border-style: dashed;
     }
 
     .state-frame {
       width: 390px;
-      height: 780px;
+      height: 760px;
       display: block;
       border: 0;
       background: var(--surface);
@@ -126,40 +222,25 @@
       margin: 0;
       background: var(--surface);
     }
-
     body.preview-frame #app {
       width: 100vw;
-      height: 780px;
+      height: 760px;
       min-height: 0;
       border: 0;
       border-radius: 0;
       box-shadow: none;
       overflow: hidden;
     }
+    body.preview-frame .shell,
+    body.preview-frame .shell-login-minimal { min-height: 100%; height: 100%; }
+    body.preview-frame .login-minimal { min-height: 100%; }
 
-    body.preview-frame .shell {
-      min-height: 100%;
-      height: 100%;
-    }
-
-    @media (max-width: 760px) {
-      body.preview-board {
-        padding: 14px;
-      }
-
-      .board-head {
-        align-items: flex-start;
-        flex-direction: column;
-      }
-
-      .board-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .state-card,
-      .state-frame {
-        width: 100%;
-      }
+    @media (max-width: 880px) {
+      body.preview-board { padding: 16px; }
+      .board-head { grid-template-columns: 1fr; }
+      .board-legend { align-items: flex-start; }
+      .board-grid { grid-template-columns: 1fr; }
+      .state-card, .state-frame { width: 100%; }
     }
   </style>
 </head>
@@ -169,54 +250,74 @@
     const isFrame = query.get("frame") === "1";
     const stateKey = query.get("state") || "board";
 
+    // -----------------------------------------------------------------
+    // scenarios
+    // -----------------------------------------------------------------
+    const amazonPage = {
+      ok: true,
+      platform: "amazon",
+      data: {
+        name: "Orbitkey Nest Portable Desk Organizer",
+        brand: "Orbitkey",
+        category: "Desk accessories",
+        price: "$109.90",
+        rating: "4.6",
+        review_count: "1,248",
+        monthly_sales: "3k+",
+        image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80",
+        url: "https://www.amazon.com/dp/B08PREVIEW",
+        selling_points: ["无线充电收纳层", "模块化隔板", "适合差旅办公"],
+        ai_summary: "一款面向移动办公人群的桌面收纳盒，把充电、线材、随身小物和临时工作台组织在一起。",
+        platforms: [{
+          platform: "amazon",
+          url: "https://www.amazon.com/dp/B08PREVIEW",
+          price: "$109.90",
+          cost: "¥218",
+          rating: "4.6",
+          reviews: "1,248",
+          sales: "3k+",
+        }],
+      },
+    };
+
     const scenarios = {
+      // ── 基础状态 ──────────────────────────────────────────
       login: {
-        label: "登录",
-        note: "auth",
+        label: "未登录",
+        note: "renderLoginWait",
         group: "基础状态",
-        store: { pmcopilot_token: "", pmcopilot_user: null },
+        tag: { text: "auth", kind: "muted" },
+        store: { loom_token: "", loom_user: null, pmcopilot_token: "", pmcopilot_user: null },
+      },
+      detectWait: {
+        label: "待采集 · 等待详情页",
+        note: "renderCollectionWait",
+        group: "基础状态",
+        tag: { text: "wait", kind: "muted" },
+        tabUrl: "https://www.amazon.com/",
+        page: { ok: false, platform: "amazon", error: "waiting_for_detail_page" },
       },
       settings: {
-        label: "设置",
+        label: "设置 · 插件 Options 入口",
         note: "options",
         group: "基础状态",
+        tag: { text: "settings", kind: "" },
         type: "settings",
       },
+
+      // ── 核心采集 ──────────────────────────────────────────
       amazon: {
-        label: "Amazon 采集",
-        note: "product",
+        label: "Amazon · 竞品采集",
+        note: "renderMain · mode=product",
         group: "核心采集",
-        page: {
-          ok: true,
-          platform: "amazon",
-          data: {
-            name: "Orbitkey Nest Portable Desk Organizer",
-            brand: "Orbitkey",
-            category: "Desk accessories",
-            price: "$109.90",
-            rating: "4.6",
-            review_count: "1,248",
-            monthly_sales: "3k+",
-            image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80",
-            url: "https://www.amazon.com/dp/B08PREVIEW",
-            selling_points: ["无线充电收纳层", "模块化隔板", "适合差旅办公"],
-            ai_summary: "一款面向移动办公人群的桌面收纳盒，把充电、线材、随身小物和临时工作台组织在一起。",
-            platforms: [{
-              platform: "amazon",
-              url: "https://www.amazon.com/dp/B08PREVIEW",
-              price: "$109.90",
-              cost: "¥218",
-              rating: "4.6",
-              reviews: "1,248",
-              sales: "3k+",
-            }],
-          },
-        },
+        tag: { text: "product", kind: "accent" },
+        page: amazonPage,
       },
       taobao: {
-        label: "淘宝采集",
-        note: "product",
+        label: "淘宝 · 竞品采集",
+        note: "renderMain · mode=product",
         group: "核心采集",
+        tag: { text: "product", kind: "accent" },
         page: {
           ok: true,
           platform: "taobao",
@@ -227,12 +328,12 @@
             price: "¥129",
             monthly_sales: "2万+",
             image: "https://images.unsplash.com/photo-1512790182412-b19e6d62bc39?auto=format&fit=crop&w=900&q=80",
-            url: "https://item.taobao.com/item.htm?id=PREVIEW",
+            url: "https://item.taobao.com/item.htm?id=701234567890",
             selling_points: ["轻量便携", "冷靴扩展", "直播拍摄两用"],
             ai_summary: "淘宝商品更偏交易转化信息，重点看价格带、月销、卖点表达和品类归属。",
             platforms: [{
               platform: "taobao",
-              url: "https://item.taobao.com/item.htm?id=PREVIEW",
+              url: "https://item.taobao.com/item.htm?id=701234567890",
               price: "¥129",
               cost: "¥42",
               sales: "2万+",
@@ -241,9 +342,10 @@
         },
       },
       xiaohongshu: {
-        label: "小红书采集",
-        note: "demand",
+        label: "小红书 · 需求采集",
+        note: "renderMain · mode=demand",
         group: "核心采集",
+        tag: { text: "demand", kind: "accent" },
         page: {
           ok: true,
           platform: "xiaohongshu",
@@ -261,13 +363,19 @@
             painpoints: ["设备太多", "收纳麻烦", "切换角度慢"],
             thumbnail_url: "https://images.unsplash.com/photo-1522199755839-a2bacb67c546?auto=format&fit=crop&w=900&q=80",
             url: "https://www.xiaohongshu.com/explore/PREVIEW",
+            visible_comments: [
+              { id: "c1", user_name: "蓉蓉拍拍",  content: "刚好最近也在选三脚架，看到这个直接心动！", like_count: 24, posted_at_text: "12-13 09:42" },
+              { id: "c2", user_name: "Linda 出走中", content: "求链接，正好想给 vlog 拍俯拍",        like_count: 9,  posted_at_text: "12-13 10:08" },
+              { id: "c3", user_name: "PocketDad", content: "试过类似产品，关键是要看冷靴稳不稳",   like_count: 4,  posted_at_text: "12-14 02:21" },
+            ],
           },
         },
       },
       kickstarter: {
-        label: "Kickstarter 采集",
-        note: "product",
-        group: "扩展采集",
+        label: "Kickstarter · 竞品采集",
+        note: "renderMain · mode=product",
+        group: "核心采集",
+        tag: { text: "product", kind: "accent" },
         page: {
           ok: true,
           platform: "kickstarter",
@@ -289,59 +397,120 @@
               rating: "",
               reviews: "",
               sales: "3,420 backers",
+              creator: "IndieCam Lab",
+              pledged_amount: "$184k",
+              goal_amount: "$120k",
+              backers: "3,420",
             }],
           },
         },
       },
+
+      // ── 流程变体 ──────────────────────────────────────────
+      amazonAi: {
+        label: "AI 整理中",
+        note: "state.processingAi = true",
+        group: "流程变体",
+        tag: { text: "ai", kind: "accent" },
+        page: amazonPage,
+        postInit: { kind: "ai-processing" },
+      },
+      amazonSaved: {
+        label: "保存成功",
+        note: "renderSuccess",
+        group: "流程变体",
+        tag: { text: "saved", kind: "accent" },
+        page: amazonPage,
+        postInit: { kind: "saved" },
+      },
+
+      // ── 待接入 ──────────────────────────────────────────
       youtube: {
-        label: "YouTube 采集",
-        note: "todo",
+        label: "YouTube · 待接入",
+        note: "renderCollectionWait",
         group: "待接入",
+        tag: { text: "todo", kind: "muted" },
         page: { ok: false, error: "YouTube 采集器尚未接入，当前 manifest 也未声明 YouTube host 权限。" },
       },
       bilibili: {
-        label: "哔哩哔哩采集",
-        note: "todo",
+        label: "哔哩哔哩 · 待接入",
+        note: "renderCollectionWait",
         group: "待接入",
+        tag: { text: "todo", kind: "muted" },
         page: { ok: false, error: "哔哩哔哩采集器尚未接入，当前 manifest 也未声明 bilibili host 权限。" },
       },
     };
 
-    const boardOrder = ["login", "settings", "amazon", "taobao", "xiaohongshu", "kickstarter", "youtube", "bilibili"];
+    const boardSections = [
+      { id: "auth",   label: "基础状态", items: ["login", "detectWait", "settings"] },
+      { id: "core",   label: "核心采集", items: ["amazon", "taobao", "xiaohongshu", "kickstarter"] },
+      { id: "flow",   label: "流程变体", items: ["amazonAi", "amazonSaved"] },
+      { id: "todo",   label: "待接入",   items: ["youtube", "bilibili"] },
+    ];
 
+    // -----------------------------------------------------------------
+    // board render
+    // -----------------------------------------------------------------
     if (!isFrame) {
       document.body.className = "preview-board";
       document.body.innerHTML = `
         <div class="board-shell">
           <header class="board-head">
-            <div class="board-title-row">
-              <div class="board-kicker">LOOM Clipper</div>
-              <div class="board-title">状态画板</div>
-              <div class="board-sub">把所有侧边栏状态一次性铺开，方便直接在 Codex 内置浏览器里评论。</div>
+            <div class="board-head-brand">
+              <div class="board-mark"><img src="../icons/loom-spiral.png" alt=""></div>
+              <div class="board-title-block">
+                <div class="board-kicker">LOOM · Clipper</div>
+                <div class="board-title">状态画板</div>
+                <div class="board-sub">11 个真实状态平铺，全部沿用 sidepanel.css；可直接在 Codex 内置浏览器里逐个评论。</div>
+              </div>
             </div>
             <div class="board-legend">
-              <span class="tag outline">基础状态</span>
-              <span class="tag outline">核心采集</span>
-              <span class="tag dashed">待接入</span>
+              <div class="board-legend-row">
+                <span class="legend-pill"><span class="swatch"></span>品牌蓝 <code>oklch(.56 .16 252)</code></span>
+                <span class="legend-pill"><span class="swatch neutral"></span>中性 hue 250</span>
+                <span class="legend-pill"><span class="swatch muted"></span>状态色仅作信息层</span>
+              </div>
+              <div class="board-legend-row">
+                <span class="legend-pill">动效母题: 螺旋 · ease-in-out · 1.6s</span>
+                <span class="legend-pill">面板宽度: <code>390px</code></span>
+              </div>
             </div>
           </header>
-          <main class="board-grid">
-            ${boardOrder.map((key) => `
-              <section class="state-card">
-                <div class="state-card-head">
-                  <div>
-                    <div class="state-card-title">${scenarios[key].label}</div>
-                    <div class="state-card-note">${scenarios[key].group}</div>
-                  </div>
-                  <span class="tag ${scenarios[key].note === "todo" ? "dashed" : "outline"}">${scenarios[key].note}</span>
-                </div>
-                <iframe class="state-frame" title="${scenarios[key].label}" src="?frame=1&state=${key}"></iframe>
-              </section>
-            `).join("")}
-          </main>
+
+          ${boardSections.map((section) => `
+            <div class="board-group">
+              <div class="board-group-head">
+                <div class="board-group-kicker">${section.label}</div>
+                <div class="board-group-rule"></div>
+                <div class="board-group-count">${section.items.length} state${section.items.length > 1 ? "s" : ""}</div>
+              </div>
+              <div class="board-grid">
+                ${section.items.map((key) => {
+                  const sc = scenarios[key];
+                  if (!sc) return "";
+                  const tagKind = sc.tag?.kind ? ` ${sc.tag.kind}` : "";
+                  return `
+                    <section class="state-card">
+                      <div class="state-card-head">
+                        <div class="state-card-meta">
+                          <div class="state-card-title">${sc.label}</div>
+                          <div class="state-card-note">${sc.note}</div>
+                        </div>
+                        <span class="state-card-tag${tagKind}">${sc.tag?.text || ""}</span>
+                      </div>
+                      <iframe class="state-frame" title="${sc.label}" src="?frame=1&state=${key}"></iframe>
+                    </section>
+                  `;
+                }).join("")}
+              </div>
+            </div>
+          `).join("")}
         </div>
       `;
     } else {
+      // -----------------------------------------------------------------
+      // single-frame render (per scenario)
+      // -----------------------------------------------------------------
       document.body.className = "preview-frame";
       document.body.innerHTML = `<div id="app"></div>`;
       const activeScenario = scenarios[stateKey] || scenarios.amazon;
@@ -358,17 +527,21 @@
         pmcopilot_ai_before_save: true,
         ...(activeScenario.store || {}),
       };
-      let previewPageData = activeScenario.page || scenarios.amazon.page;
+      const previewPageData = activeScenario.page || scenarios.amazon.page;
+      const previewTabUrl = activeScenario.tabUrl ||
+        previewPageData?.data?.url ||
+        "https://preview.local/unsupported";
 
+      // ---- settings preview (renders its own static markup) -----------
       function renderSettingsPreview() {
         document.getElementById("app").innerHTML = `
           <div class="shell">
-            <div class="header">
-              <div class="brand">
-                <div class="logo">L</div>
+            <div class="cl-top">
+              <div class="cl-brand">
+                <img class="cl-mark cl-mark-image" src="../icons/icon48.png" alt="">
                 <div>
-                  <div class="title">LOOM</div>
-                  <div class="sub">插件设置</div>
+                  <div class="cl-name">LOOM</div>
+                  <div class="cl-conn"><span class="dot dot-ok"></span>插件设置 · Options</div>
                 </div>
               </div>
             </div>
@@ -399,48 +572,41 @@
                 </div>
               </div>
               <div class="cl-section">
-                <div class="cl-section-label">字段映射</div>
+                <div class="cl-section-label">兼容字段映射</div>
                 <div class="cl-grid-2">
                   <input class="ghost-input" value="name">
                   <input class="ghost-input" value="brand">
                   <input class="ghost-input" value="category">
                   <input class="ghost-input" value="summary">
                 </div>
+                <div class="cl-hint">字段 schema 已迁移至 Web 端 Settings · 此处仅作旧字段兼容</div>
               </div>
             </div>
             <div class="cl-foot">
               <button class="btn ghost grow" type="button">恢复默认</button>
-              <button class="btn grow" type="button">保存设置</button>
+              <button class="btn primary grow" type="button">保存设置</button>
             </div>
           </div>
         `;
       }
 
+      // ---- chrome.* mocks --------------------------------------------
       window.chrome = {
         runtime: {
-          sendMessage() {
-            return Promise.resolve({ ok: true });
-          },
-          openOptionsPage() {
-            location.href = "?frame=1&state=settings";
-          },
+          sendMessage() { return Promise.resolve({ ok: true }); },
+          openOptionsPage() { location.href = "?frame=1&state=settings"; },
         },
         storage: {
           local: {
             async get(keys) {
               if (!keys) return { ...previewStore };
               if (Array.isArray(keys)) {
-                return keys.reduce((result, key) => {
-                  result[key] = previewStore[key];
-                  return result;
-                }, {});
+                return keys.reduce((result, key) => { result[key] = previewStore[key]; return result; }, {});
               }
               if (typeof keys === "string") return { [keys]: previewStore[keys] };
               return { ...keys, ...previewStore };
             },
-            async set(values) {
-              Object.assign(previewStore, values);
-            },
+            async set(values) { Object.assign(previewStore, values); },
             async remove(keys) {
               for (const key of Array.isArray(keys) ? keys : [keys]) delete previewStore[key];
             },
@@ -448,77 +614,63 @@
           onChanged: { addListener() {} },
         },
         cookies: {
-          async get() {
-            return { value: "preview-session" };
-          },
-          async remove() {
-            return { ok: true };
-          },
+          async get() { return { value: "preview-session" }; },
+          async remove() { return { ok: true }; },
           onChanged: { addListener() {} },
         },
         tabs: {
           async query() {
-            const data = previewPageData.data || {};
-            return [{ id: 1, url: data.url || "https://preview.local/unsupported", title: data.name || data.title || activeScenario.label }];
+            const data = previewPageData?.data || {};
+            return [{ id: 1, url: previewTabUrl, title: data.name || data.title || activeScenario.label }];
           },
-          async sendMessage() {
-            return structuredClone(previewPageData);
-          },
-          create({ url }) {
-            window.open(url, "_blank");
-          },
+          async sendMessage() { return structuredClone(previewPageData); },
+          create({ url }) { window.open(url, "_blank"); },
           onActivated: { addListener() {} },
           onUpdated: { addListener() {} },
         },
-        scripting: {
-          async executeScript() {},
-        },
+        scripting: { async executeScript() {} },
       };
 
-      const originalFetch = window.fetch.bind(window);
+      // ---- fetch mocks ------------------------------------------------
       const previewTagGroups = [
         { key: "competitor_brands", name: "竞品品牌", tone: "outline", tags: ["Ulanzi", "DJI", "Insta360", "SmallRig", "NEEWER"] },
-        { key: "product_categories", name: "产品品类", tone: "default", tags: ["摄影配件", "三脚架", "稳定器", "运动相机", "灯光"] },
-        { key: "scenarios", name: "使用场景", tone: "accent", tags: ["Vlog/自拍", "直播/带货", "短视频创作", "户外旅拍", "桌面俯拍", "产品摄影"] },
-        { key: "painpoints", name: "用户痛点", tone: "danger", tags: ["携带不便/太重", "操作复杂/学习成本高", "安装固定麻烦", "收纳困难", "价格过高/性价比低"] },
-        { key: "innovation_types", name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] },
-        { key: "custom_tags", name: "自定义标签", tone: "outline", tags: ["便携", "模块化", "磁吸", "手机摄影"] },
+        { key: "camera_brands",     name: "主机品牌", tone: "outline", tags: ["DJI Osmo Pocket 3", "Insta360 Ace Pro", "GoPro HERO 12", "Sony ZV-1", "iPhone 15 Pro"] },
+        { key: "product_categories",name: "产品品类", tone: "default", tags: ["摄影配件", "三脚架", "稳定器", "运动相机", "灯光"] },
+        { key: "scenarios",         name: "使用场景", tone: "accent",  tags: ["Vlog/自拍", "直播/带货", "短视频创作", "户外旅拍", "桌面俯拍", "产品摄影"] },
+        { key: "painpoints",        name: "用户痛点", tone: "danger",  tags: ["携带不便/太重", "操作复杂/学习成本高", "安装固定麻烦", "收纳困难", "价格过高/性价比低"] },
+        { key: "innovation_types",  name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] },
+        { key: "custom_tags",       name: "自定义标签", tone: "outline",tags: ["便携", "模块化", "磁吸", "手机摄影"] },
       ];
+
+      const isAiProcessingScenario = activeScenario.postInit?.kind === "ai-processing";
+
+      const originalFetch = window.fetch.bind(window);
       window.fetch = async (url, options = {}) => {
         const target = String(url);
         if (target.includes("/api/health")) return Response.json({ ok: true });
+        if (target.includes("/api/auth/extension/session-token")) {
+          if (!previewStore.loom_token) {
+            return new Response(JSON.stringify({ error: "please_login", message: "请在 Web 端完成登录后回到这里。" }), { status: 401, headers: { "Content-Type": "application/json" } });
+          }
+          return Response.json({ token: previewStore.loom_token, user: previewStore.loom_user });
+        }
         if (target.includes("/api/me")) {
           return Response.json({ user: { id: "preview-user", name: "Graham" } });
         }
-        if (target.includes("/api/bootstrap")) return Response.json({ settings: { tag_groups: previewTagGroups, llm_configured: true } });
+        if (target.includes("/api/bootstrap")) {
+          return Response.json({ settings: { tag_groups: previewTagGroups, llm_configured: true } });
+        }
         if (target.includes("/api/products/parse-raw")) {
+          if (isAiProcessingScenario) {
+            // freeze on "AI 整理中" state
+            return new Promise(() => {});
+          }
           return Response.json({
             tags: ["travel desk", "charging", "organizer"],
             selling_points: ["磁吸收纳结构", "内置无线充电区", "适配移动办公场景"],
             ai_summary: "AI 已将原始商品信息整理为更适合竞品库沉淀的卖点、标签和摘要。",
           });
         }
-        if (target.endsWith("/api/products") && (!options.method || String(options.method).toUpperCase() === "GET")) {
-          return Response.json([
-            {
-              id: "preview-product-1",
-              name: "Orbitkey Nest Portable Desk Organizer",
-              brand: "Orbitkey",
-              category: "Desk accessories",
-              tags: ["travel", "organizer"],
-              platforms: [{ platform: "amazon", url: "https://www.amazon.com/dp/B08PREVIEW", price: "$109.90" }],
-            },
-            {
-              id: "preview-product-2",
-              name: "Ulanzi MT-44 伸缩三脚架自拍杆",
-              brand: "Ulanzi",
-              category: "摄影配件",
-              tags: ["tripod", "creator"],
-              platforms: [{ platform: "taobao", url: "https://item.taobao.com/item.htm?id=PREVIEW", price: "¥129" }],
-            },
-          ]);
-        }
-        if (target.endsWith("/api/products")) return Response.json({ ok: true, id: "preview-product" });
         if (target.includes("/api/demands/parse-raw")) {
           return Response.json({
             title: "移动办公桌面收纳需求",
@@ -528,19 +680,54 @@
             innovation: "场景整合",
           });
         }
-        if (target.endsWith("/api/demands")) return Response.json({ ok: true, id: "preview-demand" });
+        if (target.endsWith("/api/products") && (!options.method || String(options.method).toUpperCase() === "GET")) {
+          return Response.json([
+            { id: "preview-product-1", name: "Orbitkey Nest Portable Desk Organizer", brand: "Orbitkey", category: "Desk accessories", tags: ["travel", "organizer"], platforms: [{ platform: "amazon", url: "https://www.amazon.com/dp/B08PREVIEW", price: "$109.90" }] },
+            { id: "preview-product-2", name: "Ulanzi MT-44 伸缩三脚架自拍杆",      brand: "Ulanzi",   category: "摄影配件",         tags: ["tripod", "creator"],  platforms: [{ platform: "taobao", url: "https://item.taobao.com/item.htm?id=PREVIEW", price: "¥129" }] },
+          ]);
+        }
+        if (target.endsWith("/api/products")) return Response.json({ ok: true, id: "preview-product" });
+        if (target.endsWith("/api/demands"))  return Response.json({ ok: true, id: "preview-demand" });
         return originalFetch(url, options);
       };
 
+      // ---- mount ------------------------------------------------------
       if (activeScenario.type === "settings") {
         renderSettingsPreview();
       } else {
         const script = document.createElement("script");
-        script.src = "../sidepanel/sidepanel.js";
-        script.onload = () => {
-          if (typeof window.init === "function") void window.init();
+        script.src = `../sidepanel/sidepanel.js?v=${Date.now()}`;
+        script.onload = async () => {
+          if (typeof window.init !== "function") return;
+          await window.init();
+          await runPostInit(activeScenario.postInit);
         };
         document.body.appendChild(script);
+      }
+
+      async function runPostInit(post) {
+        if (!post) return;
+        // small settle delay so #process-top / #save-top are mounted
+        await new Promise((r) => setTimeout(r, 120));
+        if (post.kind === "ai-processing") {
+          const btn = document.getElementById("process-top");
+          if (btn) btn.click(); // fetch is suspended → freezes AI整理中
+          return;
+        }
+        if (post.kind === "saved") {
+          // suppress the 1800ms auto-return so the success state stays visible
+          const origSetTimeout = window.setTimeout;
+          window.setTimeout = function (fn, ms, ...rest) {
+            if (ms === 1800) return -1;
+            return origSetTimeout(fn, ms, ...rest);
+          };
+          // call renderSuccess directly — bypasses the save→render race
+          if (typeof window.renderSuccess === "function") {
+            window.renderSuccess({
+              name: previewPageData?.data?.name || "Saved item",
+            });
+          }
+        }
       }
     }
   </script>

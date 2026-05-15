@@ -34,7 +34,7 @@ function safeArray(value) {
 
 function splitTokenText(value) {
   return String(value || "")
-    .split(/\s*[\/·,，;；]\s*/)
+    .split(/\s*[/·,，;；]\s*/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -272,6 +272,18 @@ function trimBrandPrefix(value = "", brand = "") {
 }
 
 function newsMergeKey(item = {}, tagGroups = []) {
+  const nearMergeKey = String(item?.classification?.near_merge_key || "").trim();
+  if (nearMergeKey && !nearMergeKey.endsWith("::generic")) return `near::${nearMergeKey}`;
+  const storyKey = String(item?.classification?.story_key || "").trim();
+  if (storyKey && storyKey !== "generic") {
+    const sourceKey = String(item?.source || "").trim().toLowerCase() || newsSourceHost(item) || "unknown";
+    const crossSourceStoryKeys = new Set([
+      "canon-c2pa-image-verify",
+      "sony-a7r-vi-launch",
+      "sony-a7r-vi-review",
+    ]);
+    return crossSourceStoryKeys.has(storyKey) ? `story::${storyKey}` : `story::${sourceKey}::${storyKey}`;
+  }
   const normalizedTitle = normalizeNewsMergeTitle(item?.titleZh || item?.original_title || "");
   const titleTokens = newsMergeTitleTokens(item?.titleZh || item?.original_title || "");
   const detectedBrandToken = detectNewsBrandToken(normalizedTitle, tagGroups);
@@ -1034,7 +1046,7 @@ window.LoginScreen = LoginScreen;
 
 // ============ NEWS ============
 function NewsScreen({ data, api, refreshData, navTarget }) {
-  const [tab, setTab] = useState("all");
+  const [tab, setTab] = useState("微信公众号");
   const [items, setItems] = useState([]);
   const [counts, setCounts] = useState(data.newsCounts || { all: 0, wechat: 0, trend: 0, starred: 0 });
   const [busy, setBusy] = useState(false);
@@ -1049,10 +1061,13 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   const initialBatchSize = 18;
   const [visibleCount, setVisibleCount] = useState(initialBatchSize);
   useEffect(() => {
-    const groups = buildNewsGroups(data.news, data.settings?.tag_groups);
-    setItems(groups);
-    setCounts(newsGroupCounts(groups));
-  }, [data.news, data.settings?.tag_groups]);
+    setCounts(data.newsCounts || { all: 0, wechat: 0, trend: 0, starred: 0 });
+    if (!api) {
+      const groups = buildNewsGroups(data.news, data.settings?.tag_groups);
+      setItems(groups);
+      setCounts(newsGroupCounts(groups));
+    }
+  }, [api, data.news, data.newsCounts, data.settings?.tag_groups]);
 
   const visibleItems = items.slice(0, visibleCount);
   const grouped = visibleItems.reduce((acc, n) => {
@@ -1139,7 +1154,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
 
   useEffect(() => {
     if (!navTarget || navTarget.screen !== "news") return;
-    setTab("all");
+    setTab("微信公众号");
   }, [navTarget]);
 
   useEffect(() => {
@@ -1204,10 +1219,10 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     <>
       <div className="news-tabs">
         {[
-        ["all", "全部", counts.all],
         ["微信公众号", "微信公众号", counts.wechat],
         ["Google News", "Google News", counts.trend],
-        ["starred", "已收藏", counts.starred]].
+        ["starred", "已收藏", counts.starred],
+        ["all", "全部", counts.all]].
         map(([k, label, count]) =>
         <div key={k} className={`news-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
             {label} <span style={{ color: "var(--text-4)", marginLeft: 4 }}>{count}</span>
@@ -1228,7 +1243,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
       </div>
 
       <div className="viewport">
-        <div className="page" style={{ paddingTop: 8 }}>
+        <div className="page page-fluid" style={{ paddingTop: 8 }}>
           {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
           {sampleWorkspace && tab !== "starred" && (
             <div className="live-sample-note">
@@ -3148,11 +3163,15 @@ function PickerModal({ title, items, excludeIds = [], onClose, onPick, renderIte
 
 // ============ SETTINGS ============
 function SettingsScreen({ data, api, refreshData }) {
+  const initialSettingsTab = (() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("tab") === "tags" ? "tags" : "general";
+  })();
   const [sources, setSources] = useState(data.rssSources);
   const [officialSources, setOfficialSources] = useState(data.officialRssSources || []);
   const [settings, setSettings] = useState(data.settings || {});
   const [notice, setNotice] = useState("");
-  const [settingsTab, setSettingsTab] = useState("general");
+  const [settingsTab, setSettingsTab] = useState(initialSettingsTab);
   const [newSource, setNewSource] = useState({ name: "", url: "", interval: 60 });
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [deleteSourceTarget, setDeleteSourceTarget] = useState(null);

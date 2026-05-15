@@ -4,7 +4,7 @@ process.env.DATABASE_PATH = ":memory:";
 
 const dbModule = await import("./db.js");
 const repo = await import("./repository.js");
-const { __rssTestUtils, collectSource, extractRssThumbnail, heuristicClassifyNews, shouldCollectSource, shouldEnrichSourceImages } = await import("./rss-service.js");
+const { __rssTestUtils, collectSource, extractRssThumbnail, heuristicClassifyNews, processNewsWithLlm, shouldCollectSource, shouldEnrichSourceImages } = await import("./rss-service.js");
 
 afterEach(() => {
   delete globalThis.fetch;
@@ -66,6 +66,78 @@ describe("rss-service classification", () => {
     });
     expect(result.type).toBe("行业趋势");
     expect(result.classification.reason).toBe("heuristic_trend");
+  });
+
+  it("refreshes dedupe keys from high-confidence LLM story keys", async () => {
+    dbModule.migrate();
+    dbModule.db.prepare("DELETE FROM news_items").run();
+    dbModule.db.prepare("DELETE FROM users").run();
+    dbModule.db.prepare("DELETE FROM app_data").run();
+    dbModule.ensureSeed({
+      user: { name: "Graham", role: "管理员", initials: "GR" },
+      products: [],
+      demands: [],
+      news: [],
+      research: [],
+      rssSources: [],
+      settings: {
+        llm_api_url: "https://llm.test/v1",
+        llm_model: "gpt-test",
+        llm_api_key: "secret",
+      },
+    });
+    const userId = dbModule.getLegacyUserId();
+    repo.upsertNews(userId, [{
+      source_id: "google",
+      source: "GadgetGuy",
+      original_url: "https://example.com/sony-a7r-vi",
+      original_title: "Sony Alpha 7R VI launches",
+      titleZh: "Sony Alpha 7R VI launches",
+      summary: "A new full-frame camera launches.",
+      llmProcessed: false,
+      needsTranslation: true,
+      date: "2026-05-15T00:00:00.000Z",
+    }]);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, options = {}) => {
+      const body = JSON.parse(options.body);
+      expect(body.messages[0].content).toContain("story_key");
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                keep: true,
+                type: "new_product",
+                title_zh: "索尼发布Alpha 7R VI",
+                summary_zh: "索尼发布新款高像素全画幅相机。",
+                content_zh: "索尼发布Alpha 7R VI，主打高像素和新的自动对焦能力。",
+                story_key: "sony-a7r-vi-launch",
+                story_event: "launch",
+                dedupe_confidence: 0.91,
+              }),
+            },
+          }],
+        }),
+      };
+    };
+
+    try {
+      const result = await processNewsWithLlm(userId, 1);
+      expect(result.kept).toBe(1);
+      const saved = repo.listNews(userId).find((item) => item.original_url === "https://example.com/sony-a7r-vi");
+      expect(saved?.classification).toMatchObject({
+        reason: "manual_llm",
+        story_key: "sony-a7r-vi-launch",
+        near_merge_key: "unknown::generic::sony-a7r-vi-launch",
+        story_event: "launch",
+        dedupe_confidence: 0.91,
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("marks ambiguous updates for llm review", () => {

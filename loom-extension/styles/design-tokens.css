@@ -1,30 +1,59 @@
+/* ============================================================
+   LOOM · design tokens
+   Cool neutral + single blue brand (matches spiral mark)
+   ============================================================ */
 :root {
-  --bg: oklch(0.985 0.003 80);
-  --surface: oklch(1 0 0);
-  --surface-2: oklch(0.975 0.004 80);
-  --surface-3: oklch(0.955 0.005 80);
-  --hover: oklch(0.96 0.005 80);
-  --border: oklch(0.92 0.005 80);
-  --border-strong: oklch(0.86 0.006 80);
-  --text: oklch(0.22 0.008 80);
-  --text-2: oklch(0.42 0.008 80);
-  --text-3: oklch(0.6 0.008 80);
-  --text-4: oklch(0.72 0.006 80);
-  --accent: oklch(0.55 0.13 258);
-  --accent-soft: oklch(0.95 0.03 258);
-  --accent-text: oklch(0.4 0.13 258);
-  --success: oklch(0.62 0.13 155);
-  --success-soft: oklch(0.95 0.04 155);
-  --warn: oklch(0.7 0.13 75);
-  --warn-soft: oklch(0.96 0.05 75);
-  --danger: oklch(0.6 0.18 25);
-  --danger-soft: oklch(0.96 0.04 25);
-  --radius-sm: 6px;
-  --radius: 8px;
-  --radius-lg: 12px;
-  --shadow-sm: 0 1px 2px rgba(15, 17, 22, 0.04);
-  --shadow: 0 1px 3px rgba(15, 17, 22, 0.06), 0 4px 12px rgba(15, 17, 22, 0.04);
-  --shadow-lg: 0 8px 24px rgba(15, 17, 22, 0.08), 0 2px 6px rgba(15, 17, 22, 0.04);
-  --font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  /* --- surface ladder (cool neutral, hue 250) --- */
+  --bg:           oklch(0.985 0.003 250);
+  --surface:      oklch(1     0     0  );
+  --surface-2:    oklch(0.976 0.004 250);
+  --surface-3:    oklch(0.96  0.005 250);
+  --hover:        oklch(0.955 0.006 250);
+
+  /* --- borders --- */
+  --border:        oklch(0.918 0.006 250);
+  --border-soft:   oklch(0.945 0.005 250);
+  --border-strong: oklch(0.84  0.009 250);
+
+  /* --- text ladder --- */
+  --text:    oklch(0.2  0.012 250);
+  --text-2:  oklch(0.42 0.01  250);
+  --text-3:  oklch(0.58 0.009 250);
+  --text-4:  oklch(0.72 0.007 250);
+
+  /* --- brand (single blue, matches loom-spiral.png) --- */
+  --accent:        oklch(0.56 0.16 252);
+  --accent-soft:   oklch(0.96 0.025 252);
+  --accent-text:   oklch(0.46 0.16 252);
+  --accent-strong: oklch(0.48 0.18 252);
+
+  /* --- information colors (low saturation, used as state hints not decoration) --- */
+  --success:       oklch(0.6  0.1  165);
+  --success-soft:  oklch(0.965 0.03 165);
+  --warn:          oklch(0.66 0.11 75);
+  --warn-soft:     oklch(0.97 0.04 75);
+  --danger:        oklch(0.58 0.16 25);
+  --danger-soft:   oklch(0.965 0.035 25);
+
+  /* --- radii (tightened, more instrument-like) --- */
+  --radius-xs: 4px;
+  --radius-sm: 5px;
+  --radius:    6px;
+  --radius-lg: 10px;
+
+  /* --- shadows (hairline-first; shadow used sparingly) --- */
+  --shadow-sm: 0 1px 0 rgba(15, 19, 36, 0.025);
+  --shadow:    0 1px 2px rgba(15, 19, 36, 0.04), 0 1px 0 rgba(15, 19, 36, 0.025);
+  --shadow-lg: 0 8px 24px rgba(15, 19, 36, 0.08), 0 1px 2px rgba(15, 19, 36, 0.04);
+
+  /* --- type --- */
+  --font-sans: 'Geist', 'Manrope', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+  /* --- motion --- */
+  --ease-out: cubic-bezier(.22, .84, .36, 1);
+  --ease-in-out: cubic-bezier(.4, 0, .2, 1);
+  --dur-fast: 120ms;
+  --dur:      180ms;
+  --dur-slow: 260ms;
 }

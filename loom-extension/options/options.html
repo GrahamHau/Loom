@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LOOM 设置</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../styles/design-tokens.css">
   <link rel="stylesheet" href="options.css">
 </head>
@@ -17,7 +20,7 @@
           <p>配置采集插件的服务器、登录状态、平台和字段映射。</p>
         </div>
       </div>
-      <button id="open-web" class="btn">打开 Web 端</button>
+      <a id="open-web" class="btn" href="https://loom.my1panelsite.xyz/app" target="_blank" rel="noreferrer">打开 Web 端</a>
     </header>
 
     <section class="section">
@@ -118,7 +121,11 @@
 
     <section class="section">
       <div class="section-head">
-        <h2>字段映射</h2>
+        <div>
+          <h2>兼容字段映射</h2>
+          <div class="section-sub">仅作为旧字段名兼容入口。新版的标签 / 字段 schema 管理已迁移到 Web 端 Settings。</div>
+        </div>
+        <a id="open-web-field-settings" class="btn" href="https://loom.my1panelsite.xyz/app?screen=settings&tab=tags" target="_blank" rel="noreferrer">打开 Web 字段设置</a>
       </div>
       <div class="form-grid">
         <label>商品名称字段<input id="map-product-name" type="text"></label>
@@ -127,8 +134,11 @@
         <label>需求标题字段<input id="map-demand-title" type="text"></label>
         <label>需求摘要字段<input id="map-demand-summary" type="text"></label>
       </div>
+      <div class="section-note muted-note">
+        标签 schema 的字段（品牌 brand / 主机 host / 品类 category / 使用场景 scenarios / 用户痛点 painpoints / 创新类型 innovation 等）在 Web 端 <strong>Settings → 标签与字段管理</strong> 里统一维护，插件会通过 <code>/api/fields</code> 自动同步。
+      </div>
       <div class="actions">
-        <button id="save-settings" class="btn primary">保存设置</button>
+        <button id="save-settings" class="btn primary">保存兼容字段</button>
         <button id="reset-settings" class="btn">恢复默认</button>
       </div>
     </section>
