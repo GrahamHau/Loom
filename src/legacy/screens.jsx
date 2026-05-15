@@ -82,6 +82,81 @@ function demandSourceUrl(demand) {
   return demand?.url || demand?.source_url || "";
 }
 
+const SUPPORTED_PRODUCT_PLATFORMS = ["amazon", "taobao", "kickstarter"];
+const SUPPORTED_INSPIRATION_PLATFORMS = ["xiaohongshu", "kickstarter"];
+
+function platformClass(platform) {
+  return PLATFORM_KEY[platform] || "";
+}
+
+function platformLabel(platform) {
+  return PLATFORM_LABEL[platform] || platform || "未知平台";
+}
+
+function platformUrlLabel(url, fallback = "未填写链接") {
+  const value = String(url || "").trim();
+  if (!value) return fallback;
+  try {
+    const parsed = new URL(externalHref(value));
+    return `${parsed.hostname.replace(/^www\./, "")}${parsed.pathname === "/" ? "" : parsed.pathname}`;
+  } catch {
+    return value;
+  }
+}
+
+function platformMetricConfig(platform) {
+  if (platform === "kickstarter") {
+    return [
+      { key: "price", label: "档位金额", prefix: "$" },
+      { key: "cost", label: "参考成本", prefix: "¥" },
+      { key: "creator", label: "发起人" },
+      { key: "pledged_amount", label: "认缴金额" },
+      { key: "goal_amount", label: "目标金额" },
+      { key: "backers", label: "支持者", inputMode: "numeric" },
+    ];
+  }
+  if (platform === "taobao") {
+    return [
+      { key: "price", label: "售价", prefix: "¥" },
+      { key: "cost", label: "参考成本", prefix: "¥" },
+      { key: "sales", label: "月销估算", suffix: "/ 月", inputMode: "numeric" },
+    ];
+  }
+  if (platform === "xiaohongshu") {
+    return [
+      { key: "likes", label: "点赞", inputMode: "numeric" },
+      { key: "collects", label: "收藏", inputMode: "numeric" },
+      { key: "comments", label: "评论", inputMode: "numeric" },
+      { key: "author", label: "作者" },
+    ];
+  }
+  return [
+    { key: "price", label: "售价", prefix: "$" },
+    { key: "cost", label: "参考成本", prefix: "¥" },
+    { key: "rating", label: "评分", prefix: "★" },
+    { key: "reviews", label: "评论数", inputMode: "numeric" },
+    { key: "sales", label: "月销估算", suffix: "/ 月", inputMode: "numeric" },
+  ];
+}
+
+function createEmptyPlatform(platform = "amazon") {
+  return {
+    id: `${platform}-${Date.now()}`,
+    platform,
+    url: "",
+    price: "",
+    cost: "",
+    rating: "",
+    reviews: "",
+    sales: "",
+    creator: "",
+    pledged_amount: "",
+    goal_amount: "",
+    backers: "",
+    fetched_at: new Date().toISOString(),
+  };
+}
+
 function DemandImage({ demand, label, className = "", style }) {
   const [failed, setFailed] = useState(false);
   const image = demand?.thumbnail_url || demand?.image || "";
@@ -104,6 +179,141 @@ function DemandImage({ demand, label, className = "", style }) {
 function demandMetricValue(value) {
   if (value === 0 || value) return value;
   return "—";
+}
+
+function newsMergeKey(item = {}) {
+  const classifiedKey = String(item?.classification?.merge_key || "").trim();
+  if (classifiedKey) return classifiedKey;
+  return String(item?.titleZh || item?.original_title || "")
+    .toLowerCase()
+    .replace(/\s+-\s+[^-]+$/g, "")
+    .replace(/['"“”‘’]/g, "")
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 140) || String(item?.id || "");
+}
+
+function newsSourceHost(item = {}) {
+  try {
+    const url = new URL(item.original_url || item.url || "");
+    return url.hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function buildNewsGroups(items = []) {
+  const map = new Map();
+  for (const item of safeArray(items)) {
+    const key = newsMergeKey(item);
+    const groupId = `news-group:${key}`;
+    const current = map.get(key);
+    if (!current) {
+      map.set(key, {
+        ...item,
+        id: item.id,
+        primaryId: item.id,
+        isNewsGroup: false,
+        sourceItems: [item],
+        sourceCount: 1,
+        original_url: item.original_url,
+        unread: item.unread,
+        starred: item.starred,
+        thumbnail_url: item.thumbnail_url,
+      });
+      continue;
+    }
+    current.sourceItems.push(item);
+    current.sourceItems.sort((a, b) => new Date(b.published_at || b.date || 0).getTime() - new Date(a.published_at || a.date || 0).getTime());
+    const primary = current.sourceItems.find((entry) => entry.thumbnail_url || entry.image) || current.sourceItems[0];
+    current.id = groupId;
+    current.primaryId = primary.id;
+    current.isNewsGroup = true;
+    current.titleZh = primary.titleZh || current.titleZh;
+    current.original_title = primary.original_title || current.original_title;
+    current.summary = primary.summary || current.summary;
+    current.contentZh = primary.contentZh || current.contentZh;
+    current.original_url = primary.original_url || current.original_url;
+    current.thumbnail_url = primary.thumbnail_url || current.thumbnail_url;
+    current.image = primary.image || current.image;
+    current.published_at = current.sourceItems[0]?.published_at || current.published_at;
+    current.date = String(current.published_at || current.date || "").slice(0, 10);
+    current.unread = current.sourceItems.some((entry) => entry.unread);
+    current.starred = current.sourceItems.some((entry) => entry.starred);
+    current.sourceCount = current.sourceItems.length;
+    current.source = current.sourceItems[0]?.source || current.source;
+  }
+  return Array.from(map.values()).sort((a, b) => new Date(b.published_at || b.date || 0).getTime() - new Date(a.published_at || a.date || 0).getTime());
+}
+
+function newsGroupCounts(groups = []) {
+  const list = safeArray(groups);
+  const wechat = list.filter((n) => String(n?.classification?.source_type || "").toLowerCase() === "wechat_exporter" || String(n?.source || "").includes("公众号"));
+  const googleNews = list.filter((n) => isGoogleNewsItem(n));
+  return {
+    all: list.length,
+    wechat: wechat.length,
+    trend: googleNews.length,
+    starred: list.filter((n) => n.starred).length,
+  };
+}
+
+function isGoogleNewsItem(item = {}) {
+  const source = String(item?.source || "").toLowerCase();
+  const sourceLabel = String(item?.classification?.source_label || "").toLowerCase();
+  const sourceHomepage = String(item?.classification?.source_homepage || "").toLowerCase();
+  return source.includes("google news") || sourceLabel.includes("google news") || sourceHomepage.includes("news.google.com");
+}
+
+function googleNewsPublisher(item = {}) {
+  const candidates = [
+    item?.titleZh,
+    item?.original_title,
+    ...safeArray(item?.sourceItems).flatMap((entry) => [entry?.titleZh, entry?.original_title]),
+  ].filter(Boolean);
+  for (const text of candidates) {
+    const match = String(text).match(/\s[-|｜]\s([^-|｜]+)$/);
+    const publisher = match?.[1]?.trim();
+    if (publisher && !/google news/i.test(publisher)) return publisher;
+  }
+  const source = String(item?.source || "").replace(/\s*-\s*Google News$/i, "").trim();
+  if (source && !/google news/i.test(source)) return source;
+  const host = newsSourceHost(item);
+  return host || "Google News";
+}
+
+function newsPrimaryTag(item = {}) {
+  if (String(item?.classification?.source_type || "").toLowerCase() === "wechat_exporter") {
+    return String(item?.source || "微信公众号").trim() || "微信公众号";
+  }
+  if (isGoogleNewsItem(item)) return googleNewsPublisher(item);
+  const source = String(item?.source || "").trim();
+  return source || String(item?.type || "").trim() || "资讯";
+}
+
+function newsEmptyState(tab, sampleWorkspace) {
+  if (tab === "starred") {
+    return {
+      title: "还没有收藏的资讯",
+      body: "在 Stream 里点右侧星标后，这里会自动汇总你收藏过的内容。",
+    };
+  }
+  if (tab === "微信公众号") {
+    return {
+      title: sampleWorkspace ? "正在等待公众号内容" : "还没有公众号资讯",
+      body: "公众号文章同步进来后，这里会展示对应内容。",
+    };
+  }
+  if (tab === "Google News") {
+    return {
+      title: sampleWorkspace ? "正在等待 Google News 内容" : "还没有 Google News 资讯",
+      body: "Google News 聚合内容同步进来后，这里会展示对应内容。",
+    };
+  }
+  return {
+    title: sampleWorkspace ? "正在等待信息流" : "还没有真实 News",
+    body: "请使用 Chrome 插件采集。",
+  };
 }
 
 function tagGroupByKey(tagGroups, key) {
@@ -360,46 +570,67 @@ function sameMetaLabel(a, b) {
   return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 }
 
-function DemandTagList({ items, tone = "default", onRemove, addLabel = "+ 添加" }) {
+function EditableTagList({ items, tone = "default", onChange, onRemove, addLabel = "+ 添加", placeholder = "输入标签" }) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const values = safeArray(items);
+  const remove = (item) => {
+    onRemove?.(item);
+    onChange?.(values.filter((value) => value !== item));
+  };
+  const add = () => {
+    const value = draft.trim();
+    if (!value) return;
+    onChange?.(Array.from(new Set([...values, value])));
+    setDraft("");
+    setAdding(false);
+  };
   return (
     <div className="tag-row">
-      {safeArray(items).map((item) => (
+      {values.map((item) => (
         <button
           key={item}
           type="button"
           className={`tag removable ${tone === "default" ? "" : tone}`}
-          onClick={() => onRemove?.(item)}
+          onClick={() => remove(item)}
           title={`删除 ${item}`}
         >
           <span>{item}</span>
           <Icon name="x" size={11} />
         </button>
       ))}
-      <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>{addLabel}</button>
+      {adding ?
+        <span className="tag tag-input-shell">
+          <input
+            autoFocus
+            value={draft}
+            placeholder={placeholder}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={add}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                add();
+              }
+              if (event.key === "Escape") {
+                setAdding(false);
+                setDraft("");
+              }
+            }}
+          />
+        </span> :
+        <button className="tag tag-add" type="button" onClick={() => setAdding(true)}>{addLabel}</button>
+      }
     </div>
   );
 }
 
-function RemovableTagList({ items, tone = "default", onRemove, addLabel = "+ 添加" }) {
-  return (
-    <div className="tag-row">
-      {safeArray(items).map((item) => (
-        <button
-          key={item}
-          type="button"
-          className={`tag removable ${tone === "default" ? "" : tone}`}
-          onClick={() => onRemove?.(item)}
-          title={`删除 ${item}`}
-        >
-          <span>{item}</span>
-          <Icon name="x" size={11} />
-        </button>
-      ))}
-      <button className="tag" style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)" }}>
-        {addLabel}
-      </button>
-    </div>
-  );
+function DemandTagList(props) {
+  return <EditableTagList {...props} />;
+}
+
+function RemovableTagList({ items, tone = "default", onChange, onRemove, addLabel = "+ 添加" }) {
+  return <EditableTagList items={items} tone={tone} onChange={onChange} onRemove={onRemove} addLabel={addLabel} />;
 }
 
 // ============ LOGIN ============
@@ -507,44 +738,40 @@ window.LoginScreen = LoginScreen;
 // ============ NEWS ============
 function NewsScreen({ data, api, refreshData, navTarget }) {
   const [tab, setTab] = useState("all");
-  const [page, setPage] = useState(1);
-  const [items, setItems] = useState(safeArray(data.news));
-  const [counts, setCounts] = useState({
-    all: safeArray(data.news).length,
-    new_product: safeArray(data.news).filter((n) => n.type === "新品发布").length,
-    trend: safeArray(data.news).filter((n) => n.type === "行业趋势").length,
-    starred: safeArray(data.news).filter((n) => n.starred).length,
-  });
+  const initialNewsGroups = buildNewsGroups(data.news);
+  const [items, setItems] = useState(initialNewsGroups);
+  const [counts, setCounts] = useState(newsGroupCounts(initialNewsGroups));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectMode, setSelectMode] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [sourceModalTarget, setSourceModalTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const loadMoreRef = useRef(null);
+  const initialBatchSize = 18;
+  const [visibleCount, setVisibleCount] = useState(initialBatchSize);
   useEffect(() => {
-    setItems(safeArray(data.news));
-    setCounts({
-      all: safeArray(data.news).length,
-      new_product: safeArray(data.news).filter((n) => n.type === "新品发布").length,
-      trend: safeArray(data.news).filter((n) => n.type === "行业趋势").length,
-      starred: safeArray(data.news).filter((n) => n.starred).length,
-    });
+    const groups = buildNewsGroups(data.news);
+    setItems(groups);
+    setCounts(newsGroupCounts(groups));
   }, [data.news]);
 
-  const pageSize = 12;
-  const paged = paginate(items, page, pageSize);
-  const grouped = paged.items.reduce((acc, n) => {
+  const visibleItems = items.slice(0, visibleCount);
+  const grouped = visibleItems.reduce((acc, n) => {
     (acc[n.date] = acc[n.date] || []).push(n);return acc;
   }, {});
   const dates = Object.keys(grouped);
+  const hasMore = visibleCount < items.length;
 
   const toggleStar = async (id) => {
     const item = items.find((n) => n.id === id);
-    const next = items.map((n) => n.id === id ? { ...n, starred: !n.starred } : n);
+    const targetId = item?.primaryId || item?.id || id;
+    const next = items.map((n) => n.id === id ? { ...n, starred: !n.starred, sourceItems: safeArray(n.sourceItems).map((sourceItem, index) => index === 0 ? { ...sourceItem, starred: !n.starred } : sourceItem) } : n);
     setItems(next);
     if (api && item) {
-      await api(`/api/news/${id}`, { method: "PATCH", body: JSON.stringify({ starred: !item.starred }) });
+      await api(`/api/news/${targetId}`, { method: "PATCH", body: JSON.stringify({ starred: !item.starred }) });
       await refreshData?.();
     }
   };
@@ -555,6 +782,10 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   };
 
   const openNews = async (item) => {
+    if (item?.isNewsGroup && item.sourceCount > 1) {
+      setSourceModalTarget(item);
+      return;
+    }
     if (api && item.unread) {
       setItems((current) => current.map((n) => n.id === item.id ? { ...n, unread: false } : n));
       await api(`/api/news/${item.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) });
@@ -596,16 +827,18 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     if (!api) return;
     const params = new URLSearchParams({ page: "1", limit: "100" });
     if (nextTab === "starred") params.set("starred", "1");
-    if (nextTab === "新品发布") params.set("type", "new_product");
-    if (nextTab === "行业趋势") params.set("type", "trend");
+    if (nextTab === "微信公众号") params.set("source_group", "wechat-exporter");
     const result = await api(`/api/news?${params.toString()}`);
-    setItems(safeArray(result.items || result));
-    if (result.counts) setCounts(result.counts);
+    let groups = buildNewsGroups(result.items || result);
+    if (nextTab === "Google News") groups = groups.filter((item) => isGoogleNewsItem(item));
+    setItems(groups);
+    if (nextTab === "all") setCounts(newsGroupCounts(groups));
+    if (result.counts) setCounts((current) => ({ ...current, ...result.counts, all: result.counts.all ?? current.all }));
   };
 
   useEffect(() => {
     loadNews(tab).catch(() => {});
-    setPage(1);
+    setVisibleCount(initialBatchSize);
   }, [tab]);
 
   useEffect(() => {
@@ -615,16 +848,31 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
 
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
-    setPage((current) => clampPage(current, Math.ceil(items.length / pageSize)));
   }, [items]);
   useEffect(() => {
     if (!selectMode) setSelectedIds([]);
   }, [selectMode]);
 
+  useEffect(() => {
+    if (!hasMore || !loadMoreRef.current) return undefined;
+    const root = loadMoreRef.current.closest(".viewport");
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setVisibleCount((current) => Math.min(current + initialBatchSize, items.length));
+    }, {
+      root,
+      rootMargin: "0px 0px 320px 0px",
+      threshold: 0.01,
+    });
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, items.length]);
+
   const selectedItems = items.filter((item) => selectedIds.includes(item.id));
   const sampleWorkspace = Boolean(data.onboarding?.sampleWorkspace);
   const liveNewsReady = Boolean(data.onboarding?.liveNewsReady);
   const newsMaxAgeHours = data.onboarding?.newsMaxAgeHours || 72;
+  const emptyState = newsEmptyState(tab, sampleWorkspace);
   const toggleSelect = (id) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
@@ -645,7 +893,8 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     if (!api || !selectedItems.length) return;
     setDeleteBusy(true);
     try {
-      await Promise.all(selectedItems.map((item) => api(`/api/news/${item.id}`, { method: "DELETE" })));
+      const targetIds = Array.from(new Set(selectedItems.flatMap((item) => safeArray(item.sourceItems).length ? safeArray(item.sourceItems).map((sourceItem) => sourceItem.id) : [item.id])));
+      await Promise.all(targetIds.map((id) => api(`/api/news/${id}`, { method: "DELETE" })));
       setSelectedIds([]);
       setShowBulkDeleteConfirm(false);
       await refreshData?.();
@@ -660,8 +909,8 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
       <div className="news-tabs">
         {[
         ["all", "全部", counts.all],
-        ["新品发布", "新品发布", counts.new_product],
-        ["行业趋势", "行业趋势", counts.trend],
+        ["微信公众号", "微信公众号", counts.wechat],
+        ["Google News", "Google News", counts.trend],
         ["starred", "已收藏", counts.starred]].
         map(([k, label, count]) =>
         <div key={k} className={`news-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
@@ -685,13 +934,13 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
       <div className="viewport">
         <div className="page" style={{ paddingTop: 8 }}>
           {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
-          {sampleWorkspace && (
+          {sampleWorkspace && tab !== "starred" && (
             <div className="live-sample-note">
               <div className="live-sample-note-main">
                 <Icon name="rss" size={15} />
                 <span>
                   {liveNewsReady
-                    ? `News 只展示最近 ${newsMaxAgeHours} 小时内保存的内容。`
+                    ? `News 只展示最近 ${Math.round(newsMaxAgeHours / 24)} 天内保存的内容。`
                     : "等待 Chrome 插件保存内容。"}
                 </span>
               </div>
@@ -700,18 +949,21 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           {dates.length === 0 &&
             <EmptyState
               icon="newspaper"
-              title={sampleWorkspace ? "正在等待信息流" : "还没有真实 News"}>
-              请使用 Chrome 插件采集。
+              title={emptyState.title}>
+              {emptyState.body}
             </EmptyState>
           }
           {dates.map((d) =>
             <div key={d}>
               <div className="news-day">{formatDate(d)}</div>
-              {grouped[d].map((n) =>
-              {
-                const brand = n.type === "新品发布" ? guessBrand(n) : "";
+              {grouped[d].map((n) => {
+                const isWechat = String(n?.classification?.source_type || "").toLowerCase() === "wechat_exporter" || String(n?.source || "").includes("公众号");
+                const primaryTag = newsPrimaryTag(n);
+                const brand = !isWechat && !isGoogleNewsItem(n) ? guessBrand(n) : "";
+                const secondaryTag = sameMetaLabel(primaryTag, brand) ? "" : brand;
+                const sourceTone = isWechat ? "outline" : (isGoogleNewsItem(n) ? "accent" : "outline");
                 return (
-            <div className={`news-card ${n.unread ? "unread" : ""}`} key={n.id} role="button" tabIndex={0}
+            <div className={`news-card ${n.sourceCount > 1 ? "grouped" : ""} ${n.unread ? "unread" : ""}`} key={n.id} role="button" tabIndex={0}
               onClick={() => openNews(n)}
               onKeyDown={(e) => { if (e.key === "Enter") openNews(n); }}>
                   <NewsThumb item={n} />
@@ -730,8 +982,9 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
                     </a>
                     <div className="news-summary">{n.summary}</div>
                     <div className="news-meta">
-                      <Tag tone={n.type === "新品发布" ? "accent" : "warn"}>{n.type}</Tag>
-                      {brand ? <Tag tone="outline">{brand}</Tag> : null}
+                      <Tag tone={sourceTone}>{primaryTag}</Tag>
+                      {secondaryTag ? <Tag tone="outline">{secondaryTag}</Tag> : null}
+                      {n.sourceCount > 1 ? <span className="news-source-pill">{n.sourceCount} 个来源</span> : null}
                       <span>{formatRelativeTime(n.published_at)}</span>
                     </div>
                   </div>
@@ -745,15 +998,64 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
               })}
             </div>
           )}
-          <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条资讯" />
+          {hasMore ? (
+            <div ref={loadMoreRef} className="news-load-more">
+              向下滚动，继续加载更多资讯
+            </div>
+          ) : items.length > initialBatchSize ? (
+            <div className="news-load-more done">
+              已展示全部 {items.length} 条资讯
+            </div>
+          ) : null}
         </div>
       </div>
       {deleteTarget && <DeleteItemsConfirmModal entityLabel="资讯" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
+      {sourceModalTarget && <NewsSourceModal group={sourceModalTarget} onClose={() => setSourceModalTarget(null)} onOpen={openOriginal} />}
       {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="资讯" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}
     </>);
 
 }
 window.NewsScreen = NewsScreen;
+
+function NewsSourceModal({ group, onClose, onOpen }) {
+  const sources = safeArray(group?.sourceItems).length ? safeArray(group.sourceItems) : [group].filter(Boolean);
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal news-source-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <Icon name="newspaper" size={16} style={{ color: "var(--accent)" }} />
+          <h3>{group?.titleZh || group?.original_title || "同一事件来源"}</h3>
+          <Btn variant="ghost" icon="x" onClick={onClose} />
+        </div>
+        <div className="modal-body">
+          <div className="news-source-modal-summary">
+            <NewsThumb item={group} />
+            <div>
+              <div className="news-source-modal-kicker">已合并 {sources.length} 条相近资讯</div>
+              <div className="news-source-modal-text">{group?.summary || group?.contentZh || "这些来源被折叠为同一事件，展开后可逐条查看原文。"}</div>
+            </div>
+          </div>
+          <div className="news-source-list">
+            {sources.map((item, index) =>
+              <button className="news-source-row" type="button" key={item.id || `${item.original_url}-${index}`} onClick={() => onOpen?.(item)}>
+                <div className="news-source-row-index">{index + 1}</div>
+                <div className="news-source-row-main">
+                  <div className="news-source-row-title">{item.titleZh || item.original_title}</div>
+                  <div className="news-source-row-meta">
+                    <span>{item.source || newsSourceHost(item) || "未知来源"}</span>
+                    {newsSourceHost(item) ? <span>{newsSourceHost(item)}</span> : null}
+                    <span>{formatRelativeTime(item.published_at)}</span>
+                  </div>
+                </div>
+                <Icon name="external" size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function NewsThumb({ item }) {
   const [failed, setFailed] = useState(false);
@@ -855,6 +1157,68 @@ function PlatformInput({ label, value, onChange, prefix, suffix, inputMode = "te
 
 }
 
+function ProductPlatformCard({ platform, index, onUpdate, onRemove }) {
+  const fields = platformMetricConfig(platform.platform);
+  const url = platform.url || platform.source_url || "";
+  return (
+    <div className="platform-card">
+      <div className="platform-card-head">
+        <span className={`platform-pill ${platformClass(platform.platform)}`}>{platformLabel(platform.platform)}</span>
+        {url ?
+          <a className="platform-card-link" href={externalHref(url)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title={url}>
+            {platformUrlLabel(url)}
+            <Icon name="external" size={12} />
+          </a> :
+          <span className="platform-card-link">{platformLabel(platform.platform)}</span>
+        }
+        <button className="icon-btn" type="button" title="删除平台" onClick={() => onRemove?.(index)}>
+          <Icon name="x" size={11} />
+        </button>
+      </div>
+      <div className="platform-url-row">
+        <Icon name="link" size={11} />
+        <input
+          className="ghost-input mono"
+          value={url}
+          onChange={(event) => onUpdate(index, { url: event.target.value })}
+          placeholder={`${platformLabel(platform.platform)} 链接`}
+        />
+      </div>
+      <div className={`platform-card-grid ${platform.platform === "taobao" ? "compact" : ""}`}>
+        {fields.map((field) =>
+          <PlatformInput
+            key={field.key}
+            label={field.label}
+            value={field.key === "sales" ? normalizeMonthlySales(platform[field.key]) : platform[field.key]}
+            prefix={field.prefix === "★" ? <span className="rating-star" style={{ fontSize: 11 }}>★</span> : field.prefix}
+            suffix={field.suffix}
+            inputMode={field.inputMode}
+            onChange={(value) => onUpdate(index, { [field.key]: value })}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddPlatformControl({ existingPlatforms, onAdd }) {
+  const available = SUPPORTED_PRODUCT_PLATFORMS.filter((platform) => !safeArray(existingPlatforms).some((item) => item.platform === platform));
+  const [platform, setPlatform] = useState(available[0] || SUPPORTED_PRODUCT_PLATFORMS[0]);
+  useEffect(() => {
+    if (!available.length) return;
+    if (!available.includes(platform)) setPlatform(available[0]);
+  }, [available.join("|"), platform]);
+  if (!available.length) return null;
+  return (
+    <div className="add-platform-control">
+      <select className="input sm" value={platform} onChange={(event) => setPlatform(event.target.value)}>
+        {available.map((item) => <option key={item} value={item}>{platformLabel(item)}</option>)}
+      </select>
+      <Btn size="sm" variant="ghost" icon="plus" onClick={() => onAdd?.(platform)}>添加平台</Btn>
+    </div>
+  );
+}
+
 // Bullet-point list editor (multi-dim-table style, top-down rows)
 function BulletListEditor({ items, onChange, tone = "default", placeholder = "添加一项" }) {
   const [draft, setDraft] = useState("");
@@ -953,6 +1317,17 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const selected = products.find((p) => p.id === selectedId);
   const selectedProducts = products.filter((item) => selectedIds.includes(item.id));
+  const updateSelectedPlatforms = (nextPlatforms) => updateSelected({ platforms: nextPlatforms });
+  const updateSelectedPlatform = (index, patch) => {
+    const next = safeArray(selected?.platforms).map((platform, idx) => idx === index ? { ...platform, ...patch } : platform);
+    updateSelectedPlatforms(next);
+  };
+  const removeSelectedPlatform = (index) => {
+    updateSelectedPlatforms(safeArray(selected?.platforms).filter((_, idx) => idx !== index));
+  };
+  const addSelectedPlatform = (platform) => {
+    updateSelectedPlatforms([...safeArray(selected?.platforms), createEmptyPlatform(platform)]);
+  };
 
   useEffect(() => {
     setPage(1);
@@ -971,6 +1346,20 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
     } catch (error) {
       setNotice(error.message);
     }
+  };
+  const createTagOption = async (groupKey, value) => {
+    const cleanValue = String(value || "").trim();
+    if (!api || !cleanValue) return;
+    const groups = safeArray(data.settings?.tag_groups);
+    const nextGroups = groups.map((group) => {
+      if (group.key !== groupKey || safeArray(group.tags).includes(cleanValue)) return group;
+      return { ...group, tags: [...safeArray(group.tags), cleanValue] };
+    });
+    await api("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ tag_groups: nextGroups }),
+    });
+    await refreshData?.();
   };
   const toggleSelect = (id) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
@@ -1141,20 +1530,32 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                 </div>
               </div>
             </h3>
-            <Btn variant="ghost" icon="trash" onClick={() => setDeleteTarget(selected)} />
-            <Btn variant="ghost" icon="external" />
-            <Btn variant="ghost" icon="more" />
+            <Btn variant="ghost" icon="trash" onClick={() => setDeleteTarget(selected)} title="删除竞品" />
+            <Btn
+              variant="ghost"
+              icon="external"
+              title="打开主平台链接"
+              disabled={!safeArray(selected.platforms)[0]?.url}
+              onClick={() => {
+                const url = safeArray(selected.platforms)[0]?.url;
+                if (url) window.open(externalHref(url), "_blank", "noopener,noreferrer");
+              }}
+            />
+            <Btn variant="ghost" icon="panel-open" title="收起详情栏" onClick={() => setDetailCollapsed?.(true)} />
           </div>
 
           <div className="detail-body">
             <div className="detail-section">
               <div className="detail-section-label">品牌</div>
-              <input
-                className="ghost-input"
-                value={selected.brand ?? selected.name.split(/[\s·]/)[0]}
-                onChange={(e) => updateSelected({ brand: e.target.value })}
-                placeholder="填入品牌名"
-                style={{ width: "100%", fontSize: 13, fontWeight: 600 }}
+              <MultiSelectField
+                label="品牌"
+                fieldKey="competitor_brands"
+                values={[selected.brand].filter(Boolean)}
+                tagGroups={data.settings?.tag_groups}
+                tone="outline"
+                single
+                onChange={(values) => updateSelected({ brand: values[0] || "" })}
+                onCreateOption={createTagOption}
               />
             </div>
             <div className="detail-section">
@@ -1162,42 +1563,15 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                 <Icon name="boxes" size={11} /> 平台信息 · {safeArray(selected.platforms).length} 个
               </div>
               {safeArray(selected.platforms).map((pl, i) =>
-            <div className="platform-card" key={i}>
-                  <div className="platform-card-head">
-                    <span className={`platform-pill ${PLATFORM_KEY[pl.platform]}`}>{PLATFORM_LABEL[pl.platform]}</span>
-                    {pl.url ?
-                    <a className="platform-card-link" href={externalHref(pl.url)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                        {pl.url}
-                        <Icon name="external" size={12} />
-                      </a> :
-                    <span className="platform-card-link">{pl.platform || "未知平台"}</span>
-                    }
-                  </div>
-                  <div className={`platform-card-grid ${pl.platform === "taobao" ? "compact" : ""}`}>
-                    <PlatformInput label="售价" value={pl.price} onChange={(v) => {
-                  const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, price: v } : p);
-                  updateSelected({ platforms: next });
-                }} />
-                    {pl.platform !== "taobao" && <>
-                    <PlatformInput label="评分" value={pl.rating} onChange={(v) => {
-                  const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, rating: v } : p);
-                  updateSelected({ platforms: next });
-                }} prefix={<span className="rating-star" style={{ fontSize: 11 }}>★</span>} />
-                    <PlatformInput label="评论数" value={pl.reviews} onChange={(v) => {
-                  const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, reviews: v } : p);
-                  updateSelected({ platforms: next });
-                }} inputMode="numeric" />
-                    </>}
-                    <PlatformInput label="月销估算" value={normalizeMonthlySales(pl.sales)} onChange={(v) => {
-                  const next = safeArray(selected.platforms).map((p, idx) => idx === i ? { ...p, sales: v } : p);
-                  updateSelected({ platforms: next });
-                }} suffix="/ 月" inputMode="numeric" />
-                  </div>
-                </div>
-            )}
-              <button className="btn sm ghost" style={{ width: "100%", justifyContent: "center", border: "1px dashed var(--border)" }}>
-                <Icon name="plus" size={12} /> 添加平台
-              </button>
+                <ProductPlatformCard
+                  key={pl.id || `${pl.platform}-${i}`}
+                  platform={pl}
+                  index={i}
+                  onUpdate={updateSelectedPlatform}
+                  onRemove={removeSelectedPlatform}
+                />
+              )}
+              <AddPlatformControl existingPlatforms={selected.platforms} onAdd={addSelectedPlatform} />
             </div>
 
             <div className="detail-section">
@@ -1216,9 +1590,23 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
             </div>
 
             <div className="detail-section">
-              <div className="detail-section-label">品类 / 标签</div>
+              <MultiSelectField
+                label="品类"
+                fieldKey="product_categories"
+                values={[selected.category].filter(Boolean)}
+                tagGroups={data.settings?.tag_groups}
+                tone="default"
+                single
+                onChange={(values) => updateSelected({ category: values[0] || "" })}
+                onCreateOption={createTagOption}
+              />
+            </div>
+
+            <div className="detail-section">
+              <div className="detail-section-label">标签</div>
               <RemovableTagList
                 items={selected.tags}
+                onChange={(next) => updateSelected({ tags: next })}
                 onRemove={(value) => updateSelected({ tags: safeArray(selected.tags).filter((item) => item !== value) })}
               />
             </div>
@@ -1270,7 +1658,7 @@ function AddProductModal({ onClose, api, refreshData }) {
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState("");
 
-  const platforms = ["amazon", "taobao", "jd", "xiaohongshu", "kickstarter"];
+  const platforms = SUPPORTED_PRODUCT_PLATFORMS;
   const [platform, setPlatform] = useState("amazon");
 
   const startParse = async () => {
@@ -1330,10 +1718,10 @@ function AddProductModal({ onClose, api, refreshData }) {
               <div>
                 <label className="field-label">商品链接</label>
                 <input className="input lg" style={{ width: "100%" }}
-              placeholder="粘贴 Amazon / 淘宝 / 京东 商品链接..."
+              placeholder="粘贴 Amazon / 淘宝 / Kickstarter 商品链接..."
               value={url} onChange={(e) => setUrl(e.target.value)} />
                 <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 6 }}>
-                  AI 会自动提取商品名、售价、评分、首图与卖点。
+                  AI 会自动提取商品名、价格、首图与卖点。品牌和品类由 AI 整理后填充。
                 </div>
                 {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 8 }}>{error}</div>}
               </div>
@@ -1686,6 +2074,12 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
       await refreshData?.();
     }
   };
+  const syncDemand = async () => {
+    if (!api) return;
+    await api("/api/sync/feishu", { method: "POST", body: JSON.stringify({ kinds: ["demands"] }) });
+    await refreshData?.();
+  };
+  const sourceUrl = demandSourceUrl(demand);
   return (
     <div className="drawer-root" onClick={onClose}>
       <div className="drawer-overlay" />
@@ -1696,8 +2090,13 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
             <span className="drawer-head-meta"><Icon name="calendar" size={10} /> {demand.date}</span>
           </div>
           <div className="drawer-head-actions">
-            <Btn variant="ghost" icon="external" />
-            <Btn variant="ghost" icon="more" />
+            <Btn
+              variant="ghost"
+              icon="external"
+              title="打开来源"
+              disabled={!sourceUrl}
+              onClick={() => sourceUrl && window.open(externalHref(sourceUrl), "_blank", "noopener,noreferrer")}
+            />
             <Btn variant="ghost" icon="x" onClick={onClose} />
           </div>
         </div>
@@ -1706,7 +2105,7 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
 
           <div className="detail-section">
             <div className="detail-section-label">原文正文</div>
-            <textarea className="ghost-input" defaultValue={demand.original_content || demand.summary}
+            <textarea className="ghost-input drawer-textarea" defaultValue={demand.original_content || demand.summary}
             onBlur={(e) => save({ original_content: e.target.value, summary: e.target.value })}
             style={{ width: "100%", minHeight: 70, lineHeight: 1.6, resize: "vertical", fontSize: 12.5 }} />
           </div>
@@ -1751,23 +2150,36 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
           <div className="detail-section">
             <div className="detail-section-label">来源链接</div>
             <a
-              href={externalHref(demandSourceUrl(demand)) || "#"}
+              className="drawer-link-card"
+              href={externalHref(sourceUrl) || "#"}
               target="_blank"
               rel="noreferrer"
-              style={{ fontSize: 12, color: "var(--accent)", wordBreak: "break-all", textDecoration: "underline" }}
             >
-              {demandSourceUrl(demand) || `${demand.source}.com/...`}
+              <Icon name="link" size={12} />
+              {sourceUrl || `${demand.source}.com/...`}
+              {sourceUrl && <Icon name="external" size={12} />}
             </a>
           </div>
 
           <div className="detail-section">
+            <div className="detail-section-label">自定义标签</div>
+            <DemandTagList
+              items={safeArray(demand.tags)}
+              onChange={(values) => save({ tags: values })}
+              addLabel="+ 添加标签"
+            />
+          </div>
+
+          <div className="detail-section">
             <div className="detail-section-label">备注</div>
-            <textarea className="ghost-input" placeholder="补充备注、相关资料链接..."
+            <textarea className="ghost-input drawer-textarea compact" placeholder="补充备注、相关资料链接..."
+            defaultValue={demand.note || ""}
+            onBlur={(e) => save({ note: e.target.value })}
             style={{ width: "100%", minHeight: 60, resize: "vertical", fontSize: 12.5 }} />
           </div>
 
           <div className="detail-section" style={{ display: "flex", gap: 6 }}>
-            <Btn variant="default" icon="sync" style={{ flex: 1, justifyContent: "center" }}>同步飞书</Btn>
+            <Btn variant="default" icon="sync" onClick={syncDemand} style={{ flex: 1, justifyContent: "center" }}>同步飞书</Btn>
             <Btn variant="ghost" icon="trash" onClick={() => onRequestDelete?.(demand)}>删除</Btn>
           </div>
         </div>
@@ -1907,7 +2319,7 @@ function AddDemandModal({ onClose, api, refreshData, tagGroups = [], onCreateTag
               <div>
                 <label className="field-label">来源链接</label>
                 <input className="input lg" style={{ width: "100%" }}
-              placeholder="粘贴小红书 / Kickstarter / YouTube / Instagram 链接..."
+              placeholder="粘贴小红书 / Kickstarter 链接..."
               value={url} onChange={(e) => setUrl(e.target.value)} />
                 <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 6 }}>
                   AI 自动识别平台,提取首图与原文,匹配到场景/痛点/创新类型标签体系。
@@ -1917,7 +2329,7 @@ function AddDemandModal({ onClose, api, refreshData, tagGroups = [], onCreateTag
               <div style={{ background: "var(--surface-2)", padding: 12, borderRadius: 6, fontSize: 11.5, color: "var(--text-3)" }}>
                 <div style={{ fontWeight: 500, color: "var(--text-2)", marginBottom: 6 }}>支持的平台</div>
                 <div className="row" style={{ flexWrap: "wrap", gap: 4 }}>
-                  {["xiaohongshu", "kickstarter", "youtube", "instagram"].map((p) =>
+                  {SUPPORTED_INSPIRATION_PLATFORMS.map((p) =>
                 <Tag key={p} tone="outline">{PLATFORM_LABEL[p]}</Tag>
                 )}
                 </div>
@@ -1955,7 +2367,7 @@ function AddDemandModal({ onClose, api, refreshData, tagGroups = [], onCreateTag
 
               <div className="detail-section">
                 <div className="detail-section-label">原文正文</div>
-                <textarea className="ghost-input"
+                <textarea className="ghost-input drawer-textarea"
                   defaultValue={preview?.original_content || preview?.summary || ""}
                   style={{ width: "100%", minHeight: 70, lineHeight: 1.6, fontSize: 12.5, resize: "vertical" }} />
               </div>
@@ -1999,7 +2411,7 @@ function AddDemandModal({ onClose, api, refreshData, tagGroups = [], onCreateTag
 
               <div className="detail-section">
                 <div className="detail-section-label">备注</div>
-                <textarea className="ghost-input" placeholder="补充备注、相关资料链接..."
+                <textarea className="ghost-input drawer-textarea compact" placeholder="补充备注、相关资料链接..."
                   style={{ width: "100%", minHeight: 50, fontSize: 12.5, resize: "vertical" }} />
               </div>
             </div>
@@ -2583,7 +2995,7 @@ function SettingsScreen({ data, api, refreshData }) {
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="sparkles" size={14} style={{ color: "var(--accent)" }} />
-            <div><h3>AI 模型配置</h3><div className="desc">所有筛选/翻译/打标/分析任务调用的 LLM</div></div>
+            <div><h3>文本模型</h3><div className="desc">负责分类、翻译、整理和最终结构化输出。</div></div>
           </div>
           <div className="settings-section-body">
             <div className="settings-row">
@@ -2608,9 +3020,45 @@ function SettingsScreen({ data, api, refreshData }) {
             <div className="settings-row">
               <div className="label">&nbsp;</div>
               <div className="row">
-                <Btn icon="save" onClick={() => saveSettings()}>保存配置</Btn>
-                <Btn icon="check" onClick={() => test("/api/settings/test-llm", "LLM")}>测试连接</Btn>
+                <Btn icon="save" onClick={() => saveSettings()}>保存文本模型</Btn>
+                <Btn icon="check" onClick={() => test("/api/settings/test-llm", "文本模型")}>测试连接</Btn>
                 {settings.last_llm_test_at && <Tag tone="success">✓ {settings.last_llm_test_at}</Tag>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-head">
+            <Icon name="image" size={14} style={{ color: "var(--accent)" }} />
+            <div><h3>视觉模型</h3><div className="desc">只负责看图提取信息，文本整理会再交给文本模型。</div></div>
+          </div>
+          <div className="settings-section-body">
+            <div className="settings-row">
+              <div className="label">API 类型</div>
+              <select className="input" style={{ width: 240 }} value={settings.llm_vision_api_type || "openai"} onChange={(e) => setSettings({ ...settings, llm_vision_api_type: e.target.value })}>
+                <option value="openai">OpenAI 兼容</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </div>
+            <div className="settings-row">
+              <div className="label">API URL</div>
+              <input className="input" style={{ width: "100%" }} value={settings.llm_vision_api_url || ""} onChange={(e) => setSettings({ ...settings, llm_vision_api_url: e.target.value })} />
+            </div>
+            <div className="settings-row">
+              <div className="label">API Key</div>
+              <input className="input" style={{ width: "100%" }} value={settings.llm_vision_api_key || ""} onChange={(e) => setSettings({ ...settings, llm_vision_api_key: e.target.value })} type="password" placeholder="sk-..." />
+            </div>
+            <div className="settings-row">
+              <div className="label">模型名称</div>
+              <input className="input" style={{ width: 280 }} value={settings.llm_vision_model || ""} onChange={(e) => setSettings({ ...settings, llm_vision_model: e.target.value })} />
+            </div>
+            <div className="settings-row">
+              <div className="label">&nbsp;</div>
+              <div className="row">
+                <Btn icon="save" onClick={() => saveSettings()}>保存视觉模型</Btn>
+                <Btn icon="check" onClick={() => test("/api/settings/test-vision-llm", "视觉模型")}>测试连接</Btn>
+                {settings.last_llm_vision_test_at && <Tag tone="success">✓ {settings.last_llm_vision_test_at}</Tag>}
               </div>
             </div>
           </div>

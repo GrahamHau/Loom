@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { ensureSeed } from "./db.js";
 import { isAdmin, isOwner } from "./access-control.js";
 import adminRouter from "./admin-routes.js";
-import { AppError, isLLMConfigured, testLLM } from "./ai-service.js";
+import { AppError, isLLMConfigured, isVisionLLMConfigured, testLLM, testVisionLLM } from "./ai-service.js";
 import {
   apiToken,
   buildFeishuAuthUrl,
@@ -624,10 +624,20 @@ app.get("/api/news", requireAuth, (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
   const offset = (page - 1) * limit;
+  const isGoogleNewsItem = (item) => {
+    const source = String(item?.source || "").toLowerCase();
+    const sourceLabel = String(item?.classification?.source_label || "").toLowerCase();
+    const sourceHomepage = String(item?.classification?.source_homepage || "").toLowerCase();
+    return source.includes("google news") || sourceLabel.includes("google news") || sourceHomepage.includes("news.google.com");
+  };
   const typeMap = { new_product: "新品发布", trend: "行业趋势" };
   const allItems = visibleNewsItems(userId).filter((item) => item.type);
   let items = allItems;
   if (req.query.type) items = items.filter((item) => item.type === (typeMap[req.query.type] || req.query.type));
+  if (req.query.source_group) {
+    const sourceGroup = String(req.query.source_group || "").toLowerCase();
+    items = items.filter((item) => String(item?.classification?.source_group || "").toLowerCase() === sourceGroup);
+  }
   if (req.query.starred === "1" || req.query.starred === "true") items = items.filter((item) => item.starred);
   if (req.query.q) {
     const q = String(req.query.q).toLowerCase();
@@ -637,8 +647,8 @@ app.get("/api/news", requireAuth, (req, res) => {
   }
   const counts = {
     all: allItems.length,
-    new_product: allItems.filter((item) => item.type === "新品发布").length,
-    trend: allItems.filter((item) => item.type === "行业趋势").length,
+    wechat: allItems.filter((item) => String(item?.classification?.source_type || "").toLowerCase() === "wechat_exporter" || String(item?.source || "").includes("公众号")).length,
+    trend: allItems.filter((item) => isGoogleNewsItem(item)).length,
     starred: allItems.filter((item) => item.starred).length,
   };
   res.json({ items: items.slice(offset, offset + limit), counts, page, limit });
@@ -736,6 +746,7 @@ app.post("/api/research/:id/analyze", requireAuth, asyncHandler(async (req, res)
 app.get("/api/settings", requireAuth, (req, res) => res.json(bootstrap(currentUserId(req)).settings));
 app.patch("/api/settings", requireAuth, (req, res) => res.json(updateSettings(currentUserId(req), req.body || {})));
 app.post("/api/settings/test-llm", requireAuth, asyncHandler(async (req, res) => res.json(await testLLM(currentUserId(req)))));
+app.post("/api/settings/test-vision-llm", requireAuth, asyncHandler(async (req, res) => res.json(await testVisionLLM(currentUserId(req)))));
 app.post("/api/settings/test-feishu", requireAuth, asyncHandler(async (req, res) => res.json(await testFeishuForUser(currentUserId(req)))));
 app.post("/api/sync/feishu", requireAuth, asyncHandler(async (req, res) => res.json(await syncFeishuForUser(currentUserId(req), req.body || {}))));
 app.post("/api/admin/reset-regular-users-to-sample", requireAuth, (req, res) => {

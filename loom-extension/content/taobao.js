@@ -16,6 +16,12 @@
     return url;
   }
 
+  function normalizeImageUrl(value) {
+    const url = normalizeUrl(String(value || "").replace(/&amp;/g, "&").trim());
+    if (!url || url.startsWith("data:")) return "";
+    return url;
+  }
+
   function cleanTitle(value) {
     return String(value || "")
       .replace(/\s+/g, " ")
@@ -109,7 +115,10 @@
     const normalized = raw
       .replace(/已售|月销|近\s*\d+\s*天已售|人付款|件|台|个/gi, "")
       .replace(/\s+/g, "");
-    return normalized ? `${normalized}+` : "";
+    if (!normalized) return "";
+    if (!/[0-9万千百十]/.test(normalized)) return "";
+    if (/^[^\w\u4e00-\u9fa5]+$/.test(normalized)) return "";
+    return `${normalized}+`;
   }
 
   function isUsefulSpec(value) {
@@ -148,6 +157,91 @@
 
   function uniq(items) {
     return [...new Set(items.filter(Boolean).map((item) => String(item).trim()).filter(Boolean))];
+  }
+
+  function imageUrlFromNode(node) {
+    if (!(node instanceof Element)) return "";
+    const attrs = ["src", "data-src", "data-ks-lazyload", "data-lazyload", "data-original", "data-img", "data-url"];
+    for (const name of attrs) {
+      const value = normalizeImageUrl(node.getAttribute(name));
+      if (value) return value;
+    }
+    const srcset = node.getAttribute("srcset") || node.getAttribute("data-srcset") || "";
+    if (srcset) {
+      const candidates = srcset
+        .split(",")
+        .map((item) => normalizeImageUrl(item.trim().split(/\s+/)[0]))
+        .filter(Boolean);
+      if (candidates.length) return candidates[candidates.length - 1];
+    }
+    return "";
+  }
+
+  function isUsefulDetailImage(url, thumbnail = "") {
+    const value = normalizeImageUrl(url);
+    if (!value) return false;
+    const lower = value.toLowerCase();
+    if (thumbnail && value === thumbnail) return false;
+    if (/(\.gif|\.svg)(?:[?#]|$)/.test(lower)) return false;
+    if (/avatar|icon|logo|sprite|blank|loading|placeholder|qrcode|qr-code|wangwang|shop/i.test(lower)) return false;
+    return /alicdn|taobaocdn|tbcdn|tmall|taobao|imgextra|bao\/uploaded/i.test(value) || /\.(jpg|jpeg|png|webp)(?:[?#]|$)/i.test(value);
+  }
+
+  function visibleElement(node) {
+    if (!(node instanceof Element)) return false;
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function looksLikeDetailRoot(node) {
+    if (!(node instanceof Element)) return false;
+    const marker = [
+      node.id,
+      node.className,
+      node.getAttribute("data-spm"),
+      node.getAttribute("aria-label"),
+    ].join(" ").toLowerCase();
+    const label = node.textContent?.slice(0, 120).replace(/\s+/g, " ") || "";
+    return /description|desc|detail|itemdesc|item-desc|商品详情|图文详情|宝贝详情|详情描述|产品参数|规格参数/i.test(`${marker} ${label}`);
+  }
+
+  function collectDetailImages(thumbnail = "") {
+    const explicitRoots = [
+      "#description",
+      "#J_DivItemDesc",
+      "#J_Desc",
+      "#J_DetailMeta",
+      "#attributes",
+      "#J_AttrUL",
+      ".tb-detail-bd",
+      ".attributes-list",
+      "[class*='item-desc']",
+      "[class*='ItemDesc']",
+      "[class*='description']",
+      "[class*='Description']",
+      "[class*='desc-root']",
+      "[class*='DescRoot']",
+      "[class*='detail-content']",
+      "[class*='DetailContent']",
+      "[class*='main-detail']",
+      "[class*='MainDetail']",
+    ]
+      .flatMap((selector) => [...document.querySelectorAll(selector)])
+      .filter((node) => visibleElement(node) && looksLikeDetailRoot(node));
+    const candidateRoots = explicitRoots.length
+      ? explicitRoots
+      : [...document.querySelectorAll("section, article, div")]
+          .filter((node) => visibleElement(node) && looksLikeDetailRoot(node))
+          .slice(0, 3);
+    if (!candidateRoots.length) return [];
+    const images = [];
+    for (const root of candidateRoots) {
+      root.querySelectorAll("img, source").forEach((node) => {
+        const url = imageUrlFromNode(node);
+        if (isUsefulDetailImage(url, thumbnail)) images.push(url);
+      });
+    }
+    return uniq(images).slice(0, 12);
   }
 
   function parseJsonLoose(value) {
@@ -324,7 +418,7 @@
     const monthlySales = cleanSales(
       salesFromScripts
       || salesText
-      || text("span")
+      || ""
     );
 
     const thumbnail = normalizeUrl(
@@ -346,6 +440,7 @@
     );
 
     const rawBullets = extractBulletsAndSpecs();
+    const detailImages = collectDetailImages(thumbnail);
 
     return {
       name,
@@ -358,6 +453,7 @@
       thumbnail_url: thumbnail,
       description,
       raw_bullets: rawBullets,
+      detail_images: detailImages,
     };
   };
 })();

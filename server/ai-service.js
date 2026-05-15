@@ -12,26 +12,37 @@ export class AppError extends Error {
   }
 }
 
-function getSettings(userId) {
+function getSettings(userId, kind = "text") {
   const settings = rawState(userId)?.settings || {};
+  const isVision = kind === "vision";
+  const prefix = isVision ? "llm_vision_" : "llm_";
+  const envPrefix = isVision ? "LLM_VISION_" : "LLM_";
+  const openAiPrefix = isVision ? "OPENAI_VISION_" : "OPENAI_";
   return {
     ...settings,
-    llm_api_url: settings.llm_api_url || process.env.LLM_API_URL || process.env.OPENAI_BASE_URL || "",
-    llm_model: settings.llm_model || process.env.LLM_MODEL || process.env.OPENAI_MODEL || "",
-    llm_api_key: settings.llm_api_key || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
+    llm_api_type: settings[`${prefix}api_type`] || settings.llm_api_type || process.env[`${envPrefix}API_TYPE`] || process.env[`${openAiPrefix}API_TYPE`] || "openai",
+    llm_api_url: settings[`${prefix}api_url`] || process.env[`${envPrefix}API_URL`] || process.env[`${openAiPrefix}API_URL`] || process.env[`${openAiPrefix}BASE_URL`] || process.env.LLM_API_URL || process.env.OPENAI_BASE_URL || "",
+    llm_model: settings[`${prefix}model`] || process.env[`${envPrefix}MODEL`] || process.env[`${openAiPrefix}MODEL`] || "",
+    llm_api_key: settings[`${prefix}api_key`] || process.env[`${envPrefix}API_KEY`] || process.env[`${openAiPrefix}API_KEY`] || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
   };
 }
 
-function configuredSettings(userId) {
-  const settings = getSettings(userId);
+function configuredSettings(userId, kind = "text") {
+  const settings = getSettings(userId, kind);
   if (!settings.llm_api_url || !settings.llm_model || !settings.llm_api_key) {
-    throw new AppError(400, "llm_not_configured", "LLM 未配置完整，请先在系统设置填写 API URL、模型和 API Key。");
+    const label = kind === "vision" ? "视觉模型" : "LLM";
+    throw new AppError(400, "llm_not_configured", `${label} 未配置完整，请先在系统设置填写 API URL、模型和 API Key。`);
   }
   return settings;
 }
 
 export function isLLMConfigured(userId) {
-  const settings = getSettings(userId);
+  const settings = getSettings(userId, "text");
+  return Boolean(settings.llm_api_url && settings.llm_model && settings.llm_api_key);
+}
+
+export function isVisionLLMConfigured(userId) {
+  const settings = getSettings(userId, "vision");
   return Boolean(settings.llm_api_url && settings.llm_model && settings.llm_api_key);
 }
 
@@ -76,9 +87,21 @@ export function parseJsonObject(text, fallback = {}) {
   }
 }
 
-export async function callLLM({ userId, system, user, responseFormat = "json", temperature = 0.2, maxTokens }) {
-  const settings = configuredSettings(userId);
+function compactImageUrls(value, limit = 8) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, limit);
+}
+
+async function requestLLM(settings, { system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
   const timeoutMs = Number(settings.llm_timeout_ms || process.env.LLM_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
+  const images = compactImageUrls(imageUrls);
+  const model = settings.llm_model;
+  const userContent = images.length
+    ? [
+        { type: "text", text: user },
+        ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+      ]
+    : user;
   try {
     const response = await fetchWithTimeout(chatCompletionsUrl(settings.llm_api_url), {
       method: "POST",
@@ -87,10 +110,10 @@ export async function callLLM({ userId, system, user, responseFormat = "json", t
         Authorization: `Bearer ${settings.llm_api_key}`,
       },
       body: JSON.stringify({
-        model: settings.llm_model,
+        model,
         messages: [
           { role: "system", content: system },
-          { role: "user", content: user },
+          { role: "user", content: userContent },
         ],
         temperature,
         max_tokens: maxTokens,
@@ -117,6 +140,53 @@ export async function callLLM({ userId, system, user, responseFormat = "json", t
   }
 }
 
+export async function callLLM({ userId, system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
+  const settings = configuredSettings(userId, "text");
+  return requestLLM(settings, { system, user, imageUrls, responseFormat, temperature, maxTokens });
+}
+
+export async function callVisionLLM({ userId, system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
+  const settings = configuredSettings(userId, "vision");
+  return requestLLM(settings, { system, user, imageUrls, responseFormat, temperature, maxTokens });
+}
+
+export async function callRoutedLLM({
+  userId,
+  system,
+  user,
+  imageUrls = [],
+  responseFormat = "json",
+  temperature = 0.2,
+  maxTokens,
+  visionSystem,
+  visionUser,
+  visionResponseFormat = "json",
+}) {
+  const images = compactImageUrls(imageUrls);
+  if (!images.length) {
+    return callLLM({ userId, system, user, responseFormat, temperature, maxTokens });
+  }
+
+  if (!isVisionLLMConfigured(userId)) {
+    return callLLM({ userId, system, user, imageUrls: images, responseFormat, temperature, maxTokens });
+  }
+
+  const visionResult = await callVisionLLM({
+    userId,
+    system: visionSystem || system,
+    user: visionUser || user,
+    imageUrls: images,
+    responseFormat: visionResponseFormat,
+    temperature,
+    maxTokens: Math.min(Number(maxTokens || 300), 400),
+  });
+  const visionText = visionResponseFormat === "json"
+    ? JSON.stringify(visionResult, null, 2)
+    : String(visionResult?.text || visionResult?.raw || "");
+  const routedUser = `${user}\n\n视觉模型提取结果：\n${visionText}`;
+  return callLLM({ userId, system, user: routedUser, responseFormat, temperature, maxTokens });
+}
+
 export async function testLLM(userId) {
   const result = await callLLM({
     userId,
@@ -124,5 +194,15 @@ export async function testLLM(userId) {
     user: '返回 {"ok":true,"message":"pong"}',
   });
   updateSettings(userId, { last_llm_test_at: new Date().toISOString() });
+  return { ok: Boolean(result.ok ?? true), result };
+}
+
+export async function testVisionLLM(userId) {
+  const result = await callVisionLLM({
+    userId,
+    system: "你是视觉连接测试助手，只返回 JSON。",
+    user: '返回 {"ok":true,"message":"vision pong"}',
+  });
+  updateSettings(userId, { last_llm_vision_test_at: new Date().toISOString() });
   return { ok: Boolean(result.ok ?? true), result };
 }

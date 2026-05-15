@@ -346,11 +346,16 @@
       document.body.innerHTML = `<div id="app"></div>`;
       const activeScenario = scenarios[stateKey] || scenarios.amazon;
       const previewStore = {
+        loom_api_base: "https://loom.my1panelsite.xyz",
+        loom_token: "preview-token",
+        loom_user: { id: "preview-user", name: "Graham" },
+        loom_default_mode: "auto",
+        loom_ai_before_save: true,
         pmcopilot_api_base: "https://loom.my1panelsite.xyz",
         pmcopilot_token: "preview-token",
         pmcopilot_user: { username: "Graham" },
         pmcopilot_default_mode: "auto",
-        pmcopilot_ai_before_save: false,
+        pmcopilot_ai_before_save: true,
         ...(activeScenario.store || {}),
       };
       let previewPageData = activeScenario.page || scenarios.amazon.page;
@@ -370,7 +375,7 @@
             <div class="cl-body">
               <div class="cl-section">
                 <div class="cl-section-label">连接</div>
-                <input class="ghost-input mono" value="${previewStore.pmcopilot_api_base}">
+                <input class="ghost-input mono" value="${previewStore.loom_api_base}">
                 <div class="cl-hint">已保存登录 Token · Graham</div>
               </div>
               <div class="cl-section">
@@ -379,9 +384,9 @@
                   <div class="settings-row">
                     <div>
                       <div class="settings-title">AI 整理</div>
-                      <div class="settings-sub">保存前手动触发</div>
+                      <div class="settings-sub">默认开启，保存前可先整理</div>
                     </div>
-                    <button class="switch" type="button" aria-label="AI 整理默认关闭"></button>
+                    <button class="switch on" type="button" aria-label="AI 整理默认开启"></button>
                   </div>
                 </div>
                 <div class="tag-row">
@@ -413,6 +418,9 @@
 
       window.chrome = {
         runtime: {
+          sendMessage() {
+            return Promise.resolve({ ok: true });
+          },
           openOptionsPage() {
             location.href = "?frame=1&state=settings";
           },
@@ -437,6 +445,16 @@
               for (const key of Array.isArray(keys) ? keys : [keys]) delete previewStore[key];
             },
           },
+          onChanged: { addListener() {} },
+        },
+        cookies: {
+          async get() {
+            return { value: "preview-session" };
+          },
+          async remove() {
+            return { ok: true };
+          },
+          onChanged: { addListener() {} },
         },
         tabs: {
           async query() {
@@ -459,6 +477,8 @@
 
       const originalFetch = window.fetch.bind(window);
       const previewTagGroups = [
+        { key: "competitor_brands", name: "竞品品牌", tone: "outline", tags: ["Ulanzi", "DJI", "Insta360", "SmallRig", "NEEWER"] },
+        { key: "product_categories", name: "产品品类", tone: "default", tags: ["摄影配件", "三脚架", "稳定器", "运动相机", "灯光"] },
         { key: "scenarios", name: "使用场景", tone: "accent", tags: ["Vlog/自拍", "直播/带货", "短视频创作", "户外旅拍", "桌面俯拍", "产品摄影"] },
         { key: "painpoints", name: "用户痛点", tone: "danger", tags: ["携带不便/太重", "操作复杂/学习成本高", "安装固定麻烦", "收纳困难", "价格过高/性价比低"] },
         { key: "innovation_types", name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] },
@@ -467,7 +487,10 @@
       window.fetch = async (url, options = {}) => {
         const target = String(url);
         if (target.includes("/api/health")) return Response.json({ ok: true });
-        if (target.includes("/api/bootstrap")) return Response.json({ settings: { tag_groups: previewTagGroups } });
+        if (target.includes("/api/me")) {
+          return Response.json({ user: { id: "preview-user", name: "Graham" } });
+        }
+        if (target.includes("/api/bootstrap")) return Response.json({ settings: { tag_groups: previewTagGroups, llm_configured: true } });
         if (target.includes("/api/products/parse-raw")) {
           return Response.json({
             tags: ["travel desk", "charging", "organizer"],

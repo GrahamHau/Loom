@@ -222,6 +222,10 @@ function cleanPlatformArray(value) {
     url: cleanText(platform?.url || platform?.source_url),
     price: cleanText(platform?.price),
     cost: cleanText(platform?.cost),
+    creator: cleanText(platform?.creator),
+    pledged_amount: cleanText(platform?.pledged_amount),
+    goal_amount: cleanText(platform?.goal_amount),
+    backers: cleanText(platform?.backers),
     rating: platform?.rating ?? null,
     reviews: platform?.reviews ?? 0,
     sales: cleanText(platform?.sales),
@@ -258,6 +262,7 @@ function isOfficialNewsItem(item = {}) {
 export function maskSettings(settings) {
   const masked = { ...settings };
   if (masked.llm_api_key) masked.llm_api_key = "********";
+  if (masked.llm_vision_api_key) masked.llm_vision_api_key = "********";
   if (masked.search_api_key) masked.search_api_key = "********";
   if (masked.search_tavily_api_key) masked.search_tavily_api_key = "********";
   if (masked.search_serpapi_api_key) masked.search_serpapi_api_key = "********";
@@ -390,9 +395,11 @@ export function bootstrap(userId) {
   state.user = userSummaryFromState(state, findUserById(userId) || { id: userId });
   if (state.settings) {
     const llmConfigured = Boolean(state.settings.llm_api_url && state.settings.llm_model && state.settings.llm_api_key);
+    const llmVisionConfigured = Boolean(state.settings.llm_vision_api_url && state.settings.llm_vision_model && state.settings.llm_vision_api_key);
     state.settings = { ...state.settings, tag_groups: normalizeTagGroups(state.settings.tag_groups) };
     state.settings = maskSettings(state.settings);
     state.settings.llm_configured = llmConfigured;
+    state.settings.llm_vision_configured = llmVisionConfigured;
   }
   return state;
 }
@@ -445,12 +452,17 @@ export function createProduct(userId, input) {
       id: input.id || nanoid(10),
       emoji: cleanText(input.emoji, "📦"),
       name: cleanTitle(input.name, "未命名竞品"),
+      brand: cleanTitle(input.brand, ""),
       category: cleanTitle(input.category, "未分类"),
       tags: cleanArray(input.tags),
       status: cleanTitle(input.status, "新录入"),
       ai_summary: cleanSummary(input.ai_summary),
       selling_points: cleanArray(input.selling_points),
       negative_keywords: cleanArray(input.negative_keywords),
+      cost_estimate: cleanText(input.cost_estimate, ""),
+      image: cleanText(input.image || input.thumbnail_url, ""),
+      thumbnail_url: cleanText(input.thumbnail_url || input.image, ""),
+      note: cleanSummary(input.note),
       related_product_id: cleanText(input.related_product_id, ""),
       related_product_name: cleanText(input.related_product_name, ""),
       sample: Boolean(input.sample),
@@ -472,6 +484,7 @@ export function updateProduct(userId, id, patch) {
     if (!item) return null;
     const next = {
       ...(patch.name !== undefined ? { name: cleanTitle(patch.name, item.name) } : {}),
+      ...(patch.brand !== undefined ? { brand: cleanTitle(patch.brand, item.brand || "") } : {}),
       ...(patch.category !== undefined ? { category: cleanTitle(patch.category, item.category) } : {}),
       ...(patch.status !== undefined ? { status: cleanTitle(patch.status, item.status) } : {}),
       ...(patch.emoji !== undefined ? { emoji: cleanText(patch.emoji, item.emoji) } : {}),
@@ -479,6 +492,10 @@ export function updateProduct(userId, id, patch) {
       ...(patch.tags !== undefined ? { tags: cleanArray(patch.tags) } : {}),
       ...(patch.selling_points !== undefined ? { selling_points: cleanArray(patch.selling_points) } : {}),
       ...(patch.negative_keywords !== undefined ? { negative_keywords: cleanArray(patch.negative_keywords) } : {}),
+      ...(patch.cost_estimate !== undefined ? { cost_estimate: cleanText(patch.cost_estimate, item.cost_estimate || "") } : {}),
+      ...(patch.image !== undefined ? { image: cleanText(patch.image, item.image || "") } : {}),
+      ...(patch.thumbnail_url !== undefined ? { thumbnail_url: cleanText(patch.thumbnail_url, item.thumbnail_url || "") } : {}),
+      ...(patch.note !== undefined ? { note: cleanSummary(patch.note, item.note || "") } : {}),
       ...(patch.related_product_id !== undefined ? { related_product_id: cleanText(patch.related_product_id, item.related_product_id || "") } : {}),
       ...(patch.related_product_name !== undefined ? { related_product_name: cleanText(patch.related_product_name, item.related_product_name || "") } : {}),
       ...(patch.platforms !== undefined ? { platforms: cleanPlatformArray(patch.platforms) } : {}),
@@ -520,6 +537,8 @@ export function createDemand(userId, input) {
       innovation: cleanTitle(input.innovation, "待分类"),
       scenarios: cleanArray(input.scenarios),
       painpoints: cleanArray(input.painpoints),
+      tags: cleanArray(input.tags),
+      note: cleanSummary(input.note),
       sample: Boolean(input.sample),
       synced_at: null,
       feishu_record_id: null,
@@ -555,6 +574,8 @@ export function updateDemand(userId, id, patch) {
       ...(patch.innovation !== undefined ? { innovation: cleanTitle(patch.innovation, item.innovation) } : {}),
       ...(patch.scenarios !== undefined ? { scenarios: cleanArray(patch.scenarios) } : {}),
       ...(patch.painpoints !== undefined ? { painpoints: cleanArray(patch.painpoints) } : {}),
+      ...(patch.tags !== undefined ? { tags: cleanArray(patch.tags) } : {}),
+      ...(patch.note !== undefined ? { note: cleanSummary(patch.note, item.note || "") } : {}),
       updated_at: nowIso(),
     };
     Object.assign(item, next);
@@ -627,7 +648,13 @@ export function updateSettings(userId, patch) {
       "llm_api_url",
       "llm_model",
       "llm_api_key",
+      "llm_vision_api_type",
+      "llm_vision_api_url",
+      "llm_vision_model",
+      "llm_vision_api_key",
       "llm_timeout_ms",
+      "last_llm_test_at",
+      "last_llm_vision_test_at",
       "search_provider",
       "search_enabled",
       "search_api_url",
@@ -657,7 +684,7 @@ export function updateSettings(userId, patch) {
     for (const key of allowed) {
       if (patch[key] !== undefined) next[key] = patch[key];
     }
-    for (const key of ["llm_api_key", "search_api_key", "search_tavily_api_key", "search_serpapi_api_key", "feishu_app_secret"]) {
+    for (const key of ["llm_api_key", "llm_vision_api_key", "search_api_key", "search_tavily_api_key", "search_serpapi_api_key", "feishu_app_secret"]) {
       if (next[key] === "********" || next[key] === "") delete next[key];
     }
     state.settings = { ...(state.settings || {}), ...next };

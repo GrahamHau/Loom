@@ -484,10 +484,10 @@ input,textarea,select{font-family:inherit;color:inherit}
 .source-capture-card{
   display:grid;
   grid-template-columns:76px minmax(0,1fr);
-  gap:12px;
-  padding:12px;
+  gap:14px;
+  padding:13px;
   border:1px solid var(--border);
-  border-radius:var(--radius);
+  border-radius:10px;
   background:var(--surface-2);
 }
 .source-card-media{
@@ -509,18 +509,30 @@ input,textarea,select{font-family:inherit;color:inherit}
   align-items:start;
 }
 .product-card-media{
-  width:76px;
-  height:102px;
+  width:84px;
+  height:112px;
   aspect-ratio:auto;
   grid-row:auto;
+  border-radius:8px;
 }
 .product-capture-main{
   justify-content:flex-start;
+  gap:6px;
 }
 .product-title-input{
-  font-size:14px;
-  line-height:1.4;
-  margin-top:1px;
+  font-size:14.5px;
+  font-weight:700;
+  line-height:1.45;
+  margin-top:0;
+}
+.product-subtitle{
+  font-size:12px;
+  line-height:1.5;
+  color:var(--text-2);
+  display:-webkit-box;
+  -webkit-line-clamp:3;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
 }
 .source-capture-main{
   min-width:0;
@@ -534,7 +546,8 @@ input,textarea,select{font-family:inherit;color:inherit}
   align-items:center;
   gap:5px;
   font-size:10.5px;
-  color:var(--text-4);
+  color:var(--text-3);
+  font-weight:600;
 }
 .source-title-text{
   font-size:14px;
@@ -944,10 +957,10 @@ textarea.ghost-input{line-height:1.6;min-height:64px;resize:vertical;font-size:1
   min-width:0;
 }
 .platform-card.compact{
-  padding:10px 12px;
+  padding:11px 12px;
   border:1px solid var(--border);
   border-radius:var(--radius);
-  background:var(--surface-2);
+  background:var(--surface);
 }
 .platform-card-head{display:flex;align-items:center;gap:7px;margin-bottom:10px;min-width:0}
 .platform-card-link{
@@ -971,6 +984,19 @@ textarea.ghost-input{line-height:1.6;min-height:64px;resize:vertical;font-size:1
   background:var(--surface-2);
 }
 .platform-card-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 14px;min-width:0}
+.product-taxonomy-grid{
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  gap:8px 10px;
+}
+.product-taxonomy-grid .field-select{
+  padding:8px 9px;
+}
+.product-taxonomy-grid .field-select-head{
+  margin-bottom:6px;
+}
+.product-taxonomy-grid .field-selected-row{
+  min-height:22px;
+}
 .metric{display:flex;flex-direction:column;gap:3px;min-width:0}
 .metric.span-2{grid-column:span 2}
 .metric-label{font-size:10.5px;color:var(--text-3)}

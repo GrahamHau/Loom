@@ -67,8 +67,8 @@
     <section class="section">
       <div class="section-head">
         <div>
-          <h2>AI 模型配置</h2>
-          <div class="section-sub">与 Web 工作台共用同一套 LLM 设置，保存后两边自动同步。</div>
+          <h2>文本模型</h2>
+          <div class="section-sub">负责分类、翻译、整理和最终结构化输出。</div>
         </div>
         <span id="llm-state">未检测</span>
       </div>
@@ -83,11 +83,36 @@
         <label class="span-2">API URL<input id="llm-api-url" type="url" placeholder="https://api.openai.com/v1"></label>
         <label class="span-2">API Key<input id="llm-api-key" type="password" placeholder="sk-..."></label>
       </div>
-      <div class="section-note">这里保存的是 Web 端后端配置，不是浏览器本地私有配置。</div>
       <div class="actions">
         <button id="refresh-llm" class="btn">刷新配置</button>
         <button id="test-llm" class="btn">测试连接</button>
-        <button id="save-llm" class="btn primary">保存 AI 配置</button>
+        <button id="save-llm" class="btn primary">保存文本模型</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>视觉模型</h2>
+          <div class="section-sub">只负责看图提取信息，文本整理会再交给文本模型。</div>
+        </div>
+        <span id="vision-llm-state">未检测</span>
+      </div>
+      <div class="form-grid">
+        <label>API 类型
+          <select id="llm-vision-api-type">
+            <option value="openai">OpenAI 兼容</option>
+            <option value="anthropic">Anthropic</option>
+          </select>
+        </label>
+        <label>模型名称<input id="llm-vision-model" type="text" placeholder="gpt-4.1-mini"></label>
+        <label class="span-2">API URL<input id="llm-vision-api-url" type="url" placeholder="https://api.openai.com/v1"></label>
+        <label class="span-2">API Key<input id="llm-vision-api-key" type="password" placeholder="sk-..."></label>
+      </div>
+      <div class="actions">
+        <button id="refresh-vision-llm" class="btn">刷新配置</button>
+        <button id="test-vision-llm" class="btn">测试连接</button>
+        <button id="save-vision-llm" class="btn primary">保存视觉模型</button>
       </div>
     </section>
 

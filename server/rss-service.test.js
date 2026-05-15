@@ -186,4 +186,26 @@ describe("rss-service classification", () => {
     });
     expect(key).toBe("https://newsshooter.com::smallrig-launches-new-camera-cage");
   });
+
+  it("uses the original Google News rss url as image fallback for unresolved articles", () => {
+    const imageUrl = __rssTestUtils.imageLookupUrlForItem({
+      original_url: "google-news://newsshooter.com/smallrig-launches-new-camera-cage",
+      article_url: "google-news://newsshooter.com/smallrig-launches-new-camera-cage",
+      classification: {
+        rss_url: "https://news.google.com/rss/articles/CBMi-demo?oc=5",
+      },
+    });
+    expect(imageUrl).toBe("https://news.google.com/rss/articles/CBMi-demo?oc=5");
+  });
+
+  it("uses source homepage as a last-resort image lookup for Google News items", () => {
+    const imageUrl = __rssTestUtils.imageLookupUrlForItem({
+      original_url: "google-news://newsshooter.com/smallrig-launches-new-camera-cage",
+      article_url: "google-news://newsshooter.com/smallrig-launches-new-camera-cage",
+      classification: {
+        source_homepage: "https://www.newsshooter.com",
+      },
+    });
+    expect(imageUrl).toBe("https://www.newsshooter.com");
+  });
 });

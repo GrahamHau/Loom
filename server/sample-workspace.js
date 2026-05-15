@@ -1,7 +1,7 @@
 import { buildEmptyState } from "./seed.js";
 
 export const SAMPLE_WORKSPACE_VERSION = "live-sample-2026-05";
-export const SAMPLE_NEWS_MAX_AGE_HOURS = Number(process.env.SAMPLE_NEWS_MAX_AGE_HOURS || 72);
+export const SAMPLE_NEWS_MAX_AGE_HOURS = Number(process.env.SAMPLE_NEWS_MAX_AGE_HOURS || 120);
 
 export const SAMPLE_NEWS_SOURCES = [
   {

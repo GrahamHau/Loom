@@ -211,7 +211,7 @@ async function loadCurrentPage(defaultMode = "auto") {
     state.mode = modeForPlatform(result.platform, defaultMode);
     state.tagPicker = null;
     stopCommentCollector();
-    state.processed = result.data;
+    state.processed = { ...result.data, __loom_ai_processed: false };
     state.form = buildDraft(state.mode, state.processed);
     state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
     debugEvent("collect:read-ok", {
@@ -364,7 +364,7 @@ async function processRaw() {
       method: "POST",
       body: JSON.stringify({ platform: state.page.platform, data: state.page.data }),
     });
-    state.processed = { ...state.page.data, ...data };
+    state.processed = { ...state.page.data, ...data, __loom_ai_processed: true };
     state.form = buildDraft(state.mode, state.processed);
     state.message = "AI 结构化完成";
     debugEvent("parse-raw:ok", {
@@ -373,7 +373,7 @@ async function processRaw() {
       tagCount: safeArray(state.processed?.tags).length + safeArray(state.processed?.scenarios).length + safeArray(state.processed?.painpoints).length,
     });
   } catch (error) {
-    state.processed = state.page.data;
+    state.processed = { ...state.page.data, __loom_ai_processed: false };
     state.form = buildDraft(state.mode, state.processed);
     debugEvent("parse-raw:error", { endpoint, code: error.code || "", error: error.message || "parse failed" });
     if (error.code === "llm_not_configured") {
@@ -406,7 +406,7 @@ async function reloadCurrentPage() {
     const stored = await getStoredSettings();
     state.page = result;
     state.mode = modeForPlatform(result.platform, stored[DEFAULT_MODE_KEY] || "auto");
-    state.processed = result.data;
+    state.processed = { ...result.data, __loom_ai_processed: false };
     stopCommentCollector();
     state.form = buildDraft(state.mode, state.processed);
     state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
@@ -1083,19 +1083,30 @@ function successMotionIcon() {
 
 function buildDraft(mode, item) {
   if (mode === "product") {
+    const brand = cleanText(item?.brand, "");
+    const category = cleanText(item?.category, "");
+    const reviewCount = cleanText(item?.review_count ?? item?.platforms?.[0]?.reviews, "");
+    const monthlySales = cleanText(item?.monthly_sales || item?.platforms?.[0]?.sales, "");
+    const sellingPoints = safeArray(item?.selling_points).length
+      ? safeArray(item?.selling_points)
+      : safeArray(item?.raw_bullets);
     return {
       name: cleanText(item?.name || item?.title, ""),
-      brand: cleanText(item?.brand, ""),
-      category: cleanText(item?.category, "未分类"),
+      brand,
+      category,
       price: cleanText(item?.price || item?.platforms?.[0]?.price, ""),
       cost_estimate: cleanText(item?.cost_estimate, ""),
       rating: cleanText(item?.rating ?? item?.platforms?.[0]?.rating, ""),
-      review_count: cleanText(item?.review_count ?? item?.platforms?.[0]?.reviews, ""),
-      monthly_sales: cleanText(item?.monthly_sales || item?.platforms?.[0]?.sales, ""),
+      review_count: reviewCount,
+      monthly_sales: monthlySales,
       image: cleanText(item?.thumbnail_url || item?.image, ""),
+      creator: cleanText(item?.creator || item?.platforms?.[0]?.creator, ""),
+      pledged_amount: cleanText(item?.pledged_amount || item?.platforms?.[0]?.pledged_amount, ""),
+      goal_amount: cleanText(item?.goal_amount || item?.platforms?.[0]?.goal_amount, ""),
+      backers: cleanText(item?.backers || item?.platforms?.[0]?.backers, ""),
       tags: safeArray(item?.tags),
-      selling_points: safeArray(item?.selling_points),
-      ai_summary: cleanText(item?.ai_summary, ""),
+      selling_points: sellingPoints,
+      ai_summary: cleanText(item?.ai_summary || item?.summary || item?.description || "", ""),
       platform: state.page?.platform || "",
       url: cleanText(item?.url || state.page?.data?.url, ""),
       sku_id: cleanText(item?.sku_id, ""),
@@ -1116,8 +1127,10 @@ function buildDraft(mode, item) {
     comments: Number(item?.comments || 0),
     visible_comments: mergeComments([], item?.visible_comments),
     innovation: cleanText(item?.innovation || item?.tags_innovation, "待分类"),
-    scenarios: safeArray(item?.scenarios),
-    painpoints: safeArray(item?.painpoints),
+    scenarios: safeArray(item?.scenarios).length ? safeArray(item?.scenarios) : safeArray(item?.tags_scenario),
+    painpoints: safeArray(item?.painpoints).length ? safeArray(item?.painpoints) : safeArray(item?.tags_painpoint),
+    tags_category: safeArray(item?.tags_category),
+    tags_custom: safeArray(item?.tags_custom),
     thumbnail_url: cleanText(item?.thumbnail_url || item?.image, ""),
     url: cleanText(item?.url || state.page?.data?.url, ""),
     source: state.page?.platform || "",
@@ -1271,23 +1284,26 @@ function pickRelation(productId) {
 }
 
 function productView(item) {
+  const skipListingBullets = state.page?.platform === "taobao" || state.page?.platform === "kickstarter";
   const listingBullets = safeArray(state.processed?.raw_bullets || state.processed?.listing_bullets || state.page?.data?.raw_bullets || state.page?.data?.listing_bullets);
-  const mergedSellingPoints = safeArray(item.selling_points).length ? safeArray(item.selling_points) : listingBullets;
+  const mergedSellingPoints = safeArray(item.selling_points).length
+    ? safeArray(item.selling_points)
+    : (skipListingBullets ? [] : listingBullets);
   return `
     <div class="source-capture-card product-capture-card">
       <div class="source-card-media product-card-media">
         ${item.thumbnail_url || item.image ? `<img src="${escapeAttr(item.thumbnail_url || item.image)}" alt="">` : `<div class="ph">PRODUCT<br>IMG</div>`}
       </div>
       <div class="source-capture-main product-capture-main">
-        <div class="source-card-state"><span class="dot"></span>${escapeHtml(PLATFORM_LABELS[state.page.platform] || state.page.platform)} · 竞品采集</div>
         <input class="ghost-input cl-detail-title-input product-title-input" data-key="name" value="${escapeAttr(item.name || "")}" placeholder="填入商品名">
+        ${item.description ? `<div class="product-subtitle">${escapeHtml(item.description)}</div>` : ""}
       </div>
     </div>
     <div class="cl-section">
       <div class="cl-section-label">平台信息 · 1 个</div>
       ${platformCardsHtml(item)}
     </div>
-    <div class="cl-grid-2">
+    <div class="cl-grid-2 product-taxonomy-grid">
       <div class="cl-section">
         ${singleFieldSelect("brand", "品牌", item.brand || "", "outline", { groupKey: "competitor_brands" })}
       </div>
@@ -1561,6 +1577,10 @@ function platformCardsHtml(item) {
     platform: state.page.platform,
     url: state.page.data?.url || "",
     price: item.price || "",
+    creator: item.creator || "",
+    pledged_amount: item.pledged_amount || "",
+    goal_amount: item.goal_amount || "",
+    backers: item.backers || "",
     rating: item.rating || "",
     reviews: item.review_count || "",
     sales: item.monthly_sales || "",
@@ -1572,14 +1592,39 @@ function platformCardsHtml(item) {
         <input class="platform-card-link mono" data-key="platforms.${index}.url" value="${escapeAttr(pl.url || "")}" aria-label="平台链接">
       </div>
       <div class="platform-card-grid">
-        ${metric("售价", `platforms.${index}.price`, pl.price || "", "$")}
-        ${metric("参考成本", `platforms.${index}.cost`, pl.cost || item.cost_estimate || "", "¥")}
+        ${pl.platform === "kickstarter"
+          ? kickstarterPlatformMetrics(pl, item, index)
+          : `
+        ${metric("售价", `platforms.${index}.price`, pl.price || "", currencyPrefixForValue(pl.platform, pl.price || ""))}
+        ${metric("参考成本", `platforms.${index}.cost`, pl.cost || item.cost_estimate || "", currencyPrefixForValue("cost", pl.cost || item.cost_estimate || ""))}
         ${showMarketplaceRating(pl.platform) ? metric("评分", `platforms.${index}.rating`, pl.rating ?? "", "★") : ""}
         ${showMarketplaceRating(pl.platform) ? metric("评论数", `platforms.${index}.reviews`, pl.reviews ?? "", "") : ""}
-        ${metric("月销估算", `platforms.${index}.sales`, pl.sales || "", "", "/月")}
+        ${metric("月销估算", `platforms.${index}.sales`, pl.sales || "", "", "/月")}`}
       </div>
     </div>
   `).join("");
+}
+
+function kickstarterPlatformMetrics(platform, item, index) {
+  return `
+    ${metric("档位金额", `platforms.${index}.price`, platform.price || "", currencyPrefixForValue(platform.platform, platform.price || ""))}
+    ${metric("参考成本", `platforms.${index}.cost`, platform.cost || item.cost_estimate || "", currencyPrefixForValue("cost", platform.cost || item.cost_estimate || ""))}
+    ${metric("发起人", `platforms.${index}.creator`, platform.creator || item.creator || "", "")}
+    ${metric("认缴金额", `platforms.${index}.pledged_amount`, platform.pledged_amount || item.pledged_amount || "", "")}
+    ${metric("目标金额", `platforms.${index}.goal_amount`, platform.goal_amount || item.goal_amount || "", "")}
+    ${metric("支持者", `platforms.${index}.backers`, platform.backers || item.backers || "", "")}
+  `;
+}
+
+function currencyPrefixForValue(platform, value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    if (platform === "amazon" || platform === "kickstarter") return "$";
+    return platform === "cost" || platform === "taobao" ? "¥" : "";
+  }
+  if (/^[¥￥$€£]/.test(text)) return "";
+  if (platform === "amazon" || platform === "kickstarter") return "$";
+  return platform === "cost" || platform === "taobao" ? "¥" : "";
 }
 
 function isCommercePlatform(platform) {
@@ -1754,7 +1799,7 @@ document.addEventListener("input", (event) => {
     current[field] = el.value;
     platforms[index] = current;
     state.form = { ...(state.form || {}), platforms };
-    if (index === 0 && (field === "price" || field === "sales" || field === "url")) {
+    if (index === 0 && ["price", "sales", "url", "creator", "pledged_amount", "goal_amount", "backers"].includes(field)) {
       const linkedKey = field === "sales" ? "monthly_sales" : field;
       state.form = { ...state.form, [linkedKey]: el.value };
       const summary = document.querySelector(field === "sales" ? "[data-sales-summary]" : "[data-price-summary]");
@@ -1798,6 +1843,10 @@ function productPayload(item) {
     rating: item.rating || null,
     review_count: Number(item.review_count || 0),
     monthly_sales: item.monthly_sales || "",
+    creator: item.creator || "",
+    pledged_amount: item.pledged_amount || "",
+    goal_amount: item.goal_amount || "",
+    backers: item.backers || "",
     image: item.image || item.thumbnail_url || "",
     thumbnail_url: item.thumbnail_url || item.image || "",
     tags: safeArray(item.tags),
@@ -1807,6 +1856,11 @@ function productPayload(item) {
       platform: state.page.platform,
       url: item.url || state.page.data.url,
       price: item.price || "",
+      cost: item.cost_estimate || "",
+      creator: item.creator || "",
+      pledged_amount: item.pledged_amount || "",
+      goal_amount: item.goal_amount || "",
+      backers: item.backers || "",
       rating: item.rating || null,
       reviews: Number(item.review_count || 0),
       sales: item.monthly_sales || "",

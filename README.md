@@ -211,3 +211,34 @@ WeChat exporter source notes:
 - In production set `WECHAT_EXPORTER_BASE_URL` and `WECHAT_EXPORTER_AUTH_KEY` in `.env.production`.
 - WeChat sources are treated as official backend-managed sources: the server imports the account list, checks for updates at `WECHAT_COLLECT_HOURS` each day, keeps only `WECHAT_CACHE_DAYS` of local cached articles, then syncs that cached official stream to visitor and regular users.
 - The default collection hours are `9,21` with `WECHAT_COLLECT_TIMEZONE=Asia/Shanghai`, so the VPS checks WeChat updates at 09:00 and 21:00 Beijing time even if the container timezone changes.
+
+## Local official Stream sync
+
+If you want local Loom to show the same backend-managed official Stream layer as production, do not point your local app directly at the production SQLite file. Instead, sync only the official RSS / WeChat source rows and the recent official `news_items` into your local demo DB:
+
+```bash
+PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run stream:sync-official
+```
+
+Defaults:
+
+- remote host: `tencent-sg-2222`
+- remote DB: `/home/ubuntu/apps/loom/data/pm-copilot.sqlite`
+- local DB: your current `DATABASE_PATH` or `DATA_DIR` target
+- retention window: last `5` days of official Stream items
+
+Optional overrides:
+
+```bash
+PATH=/opt/homebrew/opt/node@22/bin:$PATH \
+LOOM_STREAM_REMOTE=tencent-sg-2222 \
+LOOM_STREAM_REMOTE_DB=/home/ubuntu/apps/loom/data/pm-copilot.sqlite \
+LOOM_STREAM_SYNC_DAYS=5 \
+npm run stream:sync-official
+```
+
+This sync is intentionally narrow:
+
+- it imports official `news_sources` only
+- it imports recent official `news_items` only
+- it does not copy users, sessions, API tokens, or user-owned custom sources

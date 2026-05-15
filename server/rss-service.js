@@ -48,7 +48,6 @@ const NEWS_LLM_SYSTEM_PROMPT = `你是一个信息筛选助手，服务于摄影
 
 const NEWS_LLM_INPUT_LIMIT = 1600;
 const NEWS_LLM_MAX_TOKENS = 520;
-const NEWS_DEDUPE_LLM_MAX_TOKENS = 220;
 const FETCH_TIMEOUT_MS = 30000;
 const OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE = Number(process.env.OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE || 12);
 const RECENT_NEWS_WINDOW_DAYS = Math.max(1, Number(process.env.NEWS_RECENT_WINDOW_DAYS || 5));
@@ -182,6 +181,8 @@ export const __rssTestUtils = {
   resolveOriginalArticleUrl,
   titleSlug,
   parseWechatExporterSourceUrl,
+  mergeKeyForItem,
+  imageLookupUrlForItem,
   dedupeKeyForItem,
 };
 
@@ -193,6 +194,15 @@ function dedupeKeyForItem(item = {}) {
   return `${source}::${title}`;
 }
 
+function mergeKeyForItem(item = {}) {
+  const title = canonicalTitleKey(item);
+  if (title) return title;
+  const fallbackTitle = titleSlug(item.titleZh || item.original_title || "");
+  if (fallbackTitle) return fallbackTitle;
+  const source = normalizedSourceHome(item.classification?.source_homepage || item.source || "");
+  return source || normalizeUrlForDedupe(item.original_url || item.article_url || "") || "";
+}
+
 function canonicalTitleKey(item = {}) {
   return titleSlug(item.titleZh || item.original_title || "")
     .replace(/-[^-]+$/g, "")
@@ -201,82 +211,25 @@ function canonicalTitleKey(item = {}) {
     .replace(/^-+|-+$/g, "");
 }
 
-function maybeDuplicateCandidates(existingItems = [], nextItem) {
-  const nextTitle = titleSlug(nextItem.titleZh || nextItem.original_title || "");
-  const nextDate = String(nextItem.published_at || "").slice(0, 10);
-  return existingItems.filter((item) => {
-    const title = titleSlug(item.titleZh || item.original_title || "");
-    const sameTitle = nextTitle && title && nextTitle === title;
-    const sameDate = nextDate && String(item.published_at || "").slice(0, 10) === nextDate;
-    return sameTitle || (sameDate && title && nextTitle && (title.includes(nextTitle) || nextTitle.includes(title)));
-  }).slice(0, 6);
-}
-
-async function llmLooksDuplicate(userId, nextItem, candidates = []) {
-  if (!candidates.length) return null;
-  const payload = {
-    candidate: {
-      title: nextItem.titleZh || nextItem.original_title || "",
-      summary: nextItem.summary || nextItem.original_content || "",
-      source: nextItem.source || "",
-      published_at: nextItem.published_at || "",
-      url: nextItem.original_url || "",
+async function annotateMergedItems(items = []) {
+  return items.map((item) => ({
+    ...item,
+    classification: {
+      ...(item.classification || {}),
+      merge_key: mergeKeyForItem(item),
+      merge_title: item.titleZh || item.original_title || "",
     },
-    existing: candidates.map((item) => ({
-      id: item.id,
-      title: item.titleZh || item.original_title || "",
-      summary: item.summary || item.original_content || "",
-      source: item.source || "",
-      published_at: item.published_at || "",
-      url: item.original_url || "",
-    })),
-  };
-  try {
-    const result = await callLLM({
-      userId,
-      system: "你是资讯去重助手。判断 candidate 是否与 existing 中任一条是同一篇内容或同一事件的重复转载。只返回 JSON：{\"duplicate\":true|false,\"duplicate_id\":\"id或空字符串\",\"reason\":\"简短原因\"}。",
-      user: JSON.stringify(payload),
-      maxTokens: NEWS_DEDUPE_LLM_MAX_TOKENS,
-    });
-    if (!result?.duplicate) return null;
-    const duplicateId = String(result.duplicate_id || "").trim();
-    return {
-      duplicate: true,
-      duplicateId,
-      reason: String(result.reason || "llm_duplicate"),
-    };
-  } catch {
-    return null;
-  }
+  }));
 }
 
-async function dedupeCollectedItems(userId, items = []) {
-  const existing = listNews(userId);
-  const kept = [];
-  const seenKeys = new Set();
-  const seenTitleKeys = new Set(existing.map((item) => canonicalTitleKey(item)).filter(Boolean));
-  for (const item of items) {
-    const key = dedupeKeyForItem(item);
-    if (key && seenKeys.has(key)) continue;
-    if (key) seenKeys.add(key);
-    const titleKey = canonicalTitleKey(item);
-    if (titleKey && seenTitleKeys.has(titleKey)) continue;
-    if (titleKey) seenTitleKeys.add(titleKey);
-
-    const candidates = maybeDuplicateCandidates(existing, item);
-    const duplicate = await llmLooksDuplicate(userId, item, candidates);
-    if (duplicate?.duplicate) {
-      item.classification = {
-        ...(item.classification || {}),
-        dedupe_reason: duplicate.reason,
-        duplicate_of: duplicate.duplicateId || "",
-        duplicate_filtered: true,
-      };
-      continue;
-    }
-    kept.push(item);
-  }
-  return kept;
+function imageLookupUrlForItem(item = {}) {
+  const primary = String(item.article_url || item.original_url || "").trim();
+  if (primary && !primary.startsWith("google-news://")) return primary;
+  const fallback = String(item.classification?.rss_url || "").trim();
+  if (fallback && /^https?:\/\//i.test(fallback)) return fallback;
+  const sourceHome = String(item.classification?.source_homepage || "").trim();
+  if (sourceHome && /^https?:\/\//i.test(sourceHome)) return sourceHome;
+  return "";
 }
 
 function publishedAtOf(item) {
@@ -588,20 +541,26 @@ async function enrichOfficialImages(source, newsItems) {
     if (item.thumbnail_url || remaining <= 0) continue;
     remaining -= 1;
     try {
-      const imageUrl = item.article_url || item.original_url;
-      if (!imageUrl || imageUrl.startsWith("google-news://")) continue;
-      const page = await fetchPageImage(imageUrl);
-      if (page.articleUrl && isGoogleNewsUrl(item.original_url)) {
-        item.original_url = normalizeUrlForDedupe(page.articleUrl);
-        item.article_url = item.original_url;
-      }
-      if (page.image) {
-        item.thumbnail_url = page.image;
-        item.classification = {
-          ...(item.classification || {}),
-          image_enriched: true,
-          image_source: "page_meta",
-        };
+      const candidateUrls = [
+        imageLookupUrlForItem(item),
+        String(item.classification?.rss_url || "").trim(),
+        String(item.classification?.source_homepage || "").trim(),
+      ].filter((url, index, array) => url && /^https?:\/\//i.test(url) && array.indexOf(url) === index);
+      for (const imageUrl of candidateUrls) {
+        const page = await fetchPageImage(imageUrl);
+        if (page.articleUrl && isGoogleNewsUrl(item.original_url)) {
+          item.original_url = normalizeUrlForDedupe(page.articleUrl);
+          item.article_url = item.original_url;
+        }
+        if (page.image) {
+          item.thumbnail_url = page.image;
+          item.classification = {
+            ...(item.classification || {}),
+            image_enriched: true,
+            image_source: "page_meta",
+          };
+          break;
+        }
       }
       await sleep(250);
     } catch (error) {
@@ -659,14 +618,14 @@ export async function collectSource(userId, source) {
   }
 
   await enrichOfficialImages(source, newsItems);
-  const dedupedNewsItems = await dedupeCollectedItems(userId, newsItems);
-  const result = upsertNews(userId, dedupedNewsItems);
+  const mergedNewsItems = await annotateMergedItems(newsItems);
+  const result = upsertNews(userId, mergedNewsItems);
   updateNewsSource(userId, source.id, {
     last_fetched_at: new Date().toISOString(),
     last_item_count: items.length,
     last_error: null,
   });
-  return { source_id: source.id, source: source.name, fetched: items.length, kept: dedupedNewsItems.length, ...result };
+  return { source_id: source.id, source: source.name, fetched: items.length, kept: mergedNewsItems.length, ...result };
 }
 
 export async function collectSources(userId, sources) {

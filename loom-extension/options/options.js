@@ -8,6 +8,14 @@ const DEFAULTS = {
   loom_api_base: DEFAULT_API_BASE,
   loom_default_mode: "auto",
   loom_ai_before_save: true,
+  llm_api_type: "openai",
+  llm_api_url: "",
+  llm_model: "",
+  llm_api_key: "",
+  llm_vision_api_type: "openai",
+  llm_vision_api_url: "",
+  llm_vision_model: "",
+  llm_vision_api_key: "",
   loom_platforms: {
     amazon: true,
     taobao: true,
@@ -31,6 +39,14 @@ const KEYS = [
   "loom_ai_before_save",
   "loom_platforms",
   "loom_field_mapping",
+  "llm_api_type",
+  "llm_api_url",
+  "llm_model",
+  "llm_api_key",
+  "llm_vision_api_type",
+  "llm_vision_api_url",
+  "llm_vision_model",
+  "llm_vision_api_key",
   "pmcopilot_api_base",
   "pmcopilot_token",
   "pmcopilot_user",
@@ -48,12 +64,24 @@ const LEGACY_KEY_MAP = {
   pmcopilot_ai_before_save: "loom_ai_before_save",
   pmcopilot_platforms: "loom_platforms",
   pmcopilot_field_mapping: "loom_field_mapping",
+  pmcopilot_llm_api_type: "llm_api_type",
+  pmcopilot_llm_api_url: "llm_api_url",
+  pmcopilot_llm_model: "llm_model",
+  pmcopilot_llm_api_key: "llm_api_key",
+  pmcopilot_llm_vision_api_type: "llm_vision_api_type",
+  pmcopilot_llm_vision_api_url: "llm_vision_api_url",
+  pmcopilot_llm_vision_model: "llm_vision_model",
+  pmcopilot_llm_vision_api_key: "llm_vision_api_key",
 };
 
 let currentLlmSettings = null;
+let currentVisionLlmSettings = null;
 let llmLoading = false;
+let visionLlmLoading = false;
 let llmSaving = false;
+let visionLlmSaving = false;
 let llmTesting = false;
+let visionLlmTesting = false;
 
 document.addEventListener("DOMContentLoaded", load);
 
@@ -86,6 +114,7 @@ async function load() {
   await refreshConnectionState(data);
   bind();
   await refreshLlmSettings({ silent: true });
+  await refreshVisionLlmSettings({ silent: true });
 }
 
 async function getSettings() {
@@ -120,8 +149,11 @@ function bind() {
     await load();
   };
   document.getElementById("refresh-llm").onclick = () => refreshLlmSettings();
+  document.getElementById("refresh-vision-llm").onclick = () => refreshVisionLlmSettings();
   document.getElementById("save-llm").onclick = saveLlmSettings;
+  document.getElementById("save-vision-llm").onclick = saveVisionLlmSettings;
   document.getElementById("test-llm").onclick = testLlmSettings;
+  document.getElementById("test-vision-llm").onclick = testVisionLlmSettings;
 }
 
 function openWebLogin() {
@@ -149,9 +181,12 @@ async function logout() {
   } catch {}
   await chrome.storage.local.remove(["loom_token", "loom_user", "pmcopilot_token", "pmcopilot_user"]);
   currentLlmSettings = null;
+  currentVisionLlmSettings = null;
   fillLlmForm(null);
+  fillVisionLlmForm(null);
   setConnection("已退出登录，请在 Web 端重新登录");
   setLlmState("等待 Web 端登录");
+  setVisionLlmState("等待 Web 端登录");
 }
 
 async function saveSettings() {
@@ -183,6 +218,10 @@ function setLlmState(message) {
   document.getElementById("llm-state").textContent = message;
 }
 
+function setVisionLlmState(message) {
+  document.getElementById("vision-llm-state").textContent = message;
+}
+
 function updateLlmActionState() {
   const disabled = llmLoading || llmSaving || llmTesting;
   document.getElementById("refresh-llm").disabled = disabled;
@@ -190,11 +229,25 @@ function updateLlmActionState() {
   document.getElementById("test-llm").disabled = disabled;
 }
 
+function updateVisionLlmActionState() {
+  const disabled = visionLlmLoading || visionLlmSaving || visionLlmTesting;
+  document.getElementById("refresh-vision-llm").disabled = disabled;
+  document.getElementById("save-vision-llm").disabled = disabled;
+  document.getElementById("test-vision-llm").disabled = disabled;
+}
+
 function fillLlmForm(settings) {
   document.getElementById("llm-api-type").value = settings?.llm_api_type || "openai";
   document.getElementById("llm-model").value = settings?.llm_model || "";
   document.getElementById("llm-api-url").value = settings?.llm_api_url || "";
   document.getElementById("llm-api-key").value = settings?.llm_api_key || "";
+}
+
+function fillVisionLlmForm(settings) {
+  document.getElementById("llm-vision-api-type").value = settings?.llm_vision_api_type || "openai";
+  document.getElementById("llm-vision-model").value = settings?.llm_vision_model || "";
+  document.getElementById("llm-vision-api-url").value = settings?.llm_vision_api_url || "";
+  document.getElementById("llm-vision-api-key").value = settings?.llm_vision_api_key || "";
 }
 
 async function refreshConnectionState(stored = null) {
@@ -257,12 +310,41 @@ async function refreshLlmSettings({ silent = false } = {}) {
   }
 }
 
+async function refreshVisionLlmSettings({ silent = false } = {}) {
+  visionLlmLoading = true;
+  updateVisionLlmActionState();
+  if (!silent) setVisionLlmState("正在同步…");
+  try {
+    const settings = await authedFetch("/api/settings");
+    currentVisionLlmSettings = settings || {};
+    fillVisionLlmForm(currentVisionLlmSettings);
+    const configured = Boolean(settings?.llm_vision_api_url && settings?.llm_vision_model && settings?.llm_vision_api_key);
+    setVisionLlmState(configured ? "已同步 · 已配置" : "已同步 · 尚未配置完整");
+  } catch (error) {
+    currentVisionLlmSettings = null;
+    fillVisionLlmForm(null);
+    setVisionLlmState(error.message || "同步失败");
+  } finally {
+    visionLlmLoading = false;
+    updateVisionLlmActionState();
+  }
+}
+
 function collectLlmPayload() {
   return {
     llm_api_type: document.getElementById("llm-api-type").value || "openai",
     llm_model: document.getElementById("llm-model").value.trim(),
     llm_api_url: document.getElementById("llm-api-url").value.trim(),
     llm_api_key: document.getElementById("llm-api-key").value.trim() || (currentLlmSettings?.llm_api_key || ""),
+  };
+}
+
+function collectVisionLlmPayload() {
+  return {
+    llm_vision_api_type: document.getElementById("llm-vision-api-type").value || "openai",
+    llm_vision_model: document.getElementById("llm-vision-model").value.trim(),
+    llm_vision_api_url: document.getElementById("llm-vision-api-url").value.trim(),
+    llm_vision_api_key: document.getElementById("llm-vision-api-key").value.trim() || (currentVisionLlmSettings?.llm_vision_api_key || ""),
   };
 }
 
@@ -288,6 +370,28 @@ async function saveLlmSettings() {
   }
 }
 
+async function saveVisionLlmSettings() {
+  visionLlmSaving = true;
+  updateVisionLlmActionState();
+  setVisionLlmState("正在保存…");
+  try {
+    const payload = collectVisionLlmPayload();
+    const saved = await authedFetch("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    currentVisionLlmSettings = saved || {};
+    fillVisionLlmForm(currentVisionLlmSettings);
+    const configured = Boolean(saved?.llm_vision_api_url && saved?.llm_vision_model && saved?.llm_vision_api_key);
+    setVisionLlmState(configured ? "已保存 · 已配置" : "已保存 · 尚未配置完整");
+  } catch (error) {
+    setVisionLlmState(error.message || "保存失败");
+  } finally {
+    visionLlmSaving = false;
+    updateVisionLlmActionState();
+  }
+}
+
 async function testLlmSettings() {
   llmTesting = true;
   updateLlmActionState();
@@ -303,5 +407,23 @@ async function testLlmSettings() {
   } finally {
     llmTesting = false;
     updateLlmActionState();
+  }
+}
+
+async function testVisionLlmSettings() {
+  visionLlmTesting = true;
+  updateVisionLlmActionState();
+  setVisionLlmState("正在测试连接…");
+  try {
+    await authedFetch("/api/settings/test-vision-llm", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    setVisionLlmState("测试通过");
+  } catch (error) {
+    setVisionLlmState(error.message || "测试失败");
+  } finally {
+    visionLlmTesting = false;
+    updateVisionLlmActionState();
   }
 }

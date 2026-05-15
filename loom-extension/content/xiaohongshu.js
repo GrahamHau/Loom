@@ -1066,22 +1066,101 @@
       return rect.width > 0 && rect.height > 0;
     };
     const hasDetailMask = Boolean(document.querySelector(".note-detail-mask"));
+    const isFeedCardNode = (node) => Boolean(node?.closest?.("#exploreFeeds, .feeds-container, .feeds-page, section.note-item, [class*='note-item']"));
+    const engagementMetricSelectors = {
+      likes: [".like-wrapper", "[class*='like-wrapper']"],
+      collects: ["#note-page-collect-board-guide", ".collect-wrapper", "[class*='collect-wrapper']"],
+      comments: [".chat-wrapper", "[class*='chat-wrapper']"],
+    };
+    const nodeAndMatches = (root, selectors) => {
+      if (!root || !(root instanceof Element)) return [];
+      const matches = [];
+      selectors.forEach((selector) => {
+        try {
+          if (root.matches(selector)) matches.push(root);
+          matches.push(...Array.from(root.querySelectorAll(selector)));
+        } catch {
+          // Ignore selectors that a site-side class mutation makes invalid.
+        }
+      });
+      return [...new Set(matches)];
+    };
+    const pickMetricFromKnownClasses = (kind, root) => {
+      const selectors = engagementMetricSelectors[kind] || [];
+      const nodes = nodeAndMatches(root, selectors)
+        .filter((node) => isVisibleElement(node) && !node.closest("[id^='comment-'], .comment-item"));
+      if (!nodes.length) return null;
+      const ranked = nodes
+        .map((node) => {
+          const rect = node.getBoundingClientRect();
+          const bottomScore = Math.max(0, 1500 - Math.abs(window.innerHeight - rect.bottom) * 8);
+          const overlayBonus = node.closest("#noteContainer, .note-detail-mask") ? 2400 : 0;
+          const feedPenalty = isFeedCardNode(node) && !node.closest("#noteContainer") ? 5000 : 0;
+          const compactBonus = rect.width <= 120 && rect.height <= 60 ? 600 : 0;
+          return { node, score: bottomScore + overlayBonus + compactBonus - feedPenalty };
+        })
+        .sort((a, b) => b.score - a.score);
+      const value = ranked[0]?.node?.textContent || "";
+      return parseCount(value);
+    };
     const findEngagementRoot = () => {
-      const candidates = [
-        scopedRoot?.querySelector(".interactions.engage-bar"),
-        scopedRoot?.querySelector(".engage-bar-container"),
-        scopedRoot?.querySelector(".engage-bar"),
-        scopedRoot?.querySelector(".interact-container"),
-        scopedRoot?.querySelector(".buttons.engage-bar-style"),
-        detailRoot?.querySelector(".interactions.engage-bar"),
-        detailRoot?.querySelector(".engage-bar-container"),
-        detailRoot?.querySelector(".engage-bar"),
-        detailRoot?.querySelector(".interact-container"),
-        detailRoot?.querySelector(".buttons.engage-bar-style"),
+      const searchRoots = [
+        document.querySelector("#noteContainer"),
+        document.querySelector(".note-detail-mask"),
+        scopedRoot,
+        detailRoot,
       ].filter(Boolean);
-      return candidates.find((node) => isVisibleElement(node)) || null;
+      const selectors = [
+        ".interactions.engage-bar",
+        ".engage-bar-container",
+        ".engage-bar",
+        ".interact-container",
+        ".buttons.engage-bar-style",
+      ];
+      const candidates = searchRoots.flatMap((root) => nodeAndMatches(root, selectors))
+        .filter((node) => isVisibleElement(node));
+      const ranked = candidates
+        .map((node) => {
+          const rect = node.getBoundingClientRect();
+          const hasKnownMetrics = Object.values(engagementMetricSelectors)
+            .filter((selectorsForKind) => nodeAndMatches(node, selectorsForKind).some((item) => isVisibleElement(item))).length;
+          const bottomScore = Math.max(0, 2200 - Math.abs(window.innerHeight - rect.bottom) * 8);
+          const overlayBonus = node.closest("#noteContainer, .note-detail-mask") ? 2600 : 0;
+          const inputBonus = node.querySelector(".input-box, #content-textarea, .content-input") ? 900 : 0;
+          const metricBonus = hasKnownMetrics * 1600;
+          const feedPenalty = isFeedCardNode(node) && !node.closest("#noteContainer") ? 9000 : 0;
+          const sizePenalty = rect.height > 120 ? 1200 : 0;
+          return { node, score: bottomScore + overlayBonus + inputBonus + metricBonus - feedPenalty - sizePenalty };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score);
+      return ranked[0]?.node || null;
     };
     const engagementRoot = findEngagementRoot();
+    const findLikelyEngagementRoot = (root) => {
+      if (!root || !(root instanceof Element)) return null;
+      const nodes = Array.from(root.querySelectorAll("div, section, article, nav, footer"));
+      const ranked = nodes
+        .map((node) => {
+          if (isIrrelevantNode(node)) return { node, score: 0 };
+          const rect = node.getBoundingClientRect();
+          if (rect.width < window.innerWidth * 0.25 || rect.height > window.innerHeight * 0.25) return { node, score: 0 };
+          if (rect.bottom < window.innerHeight * 0.35) return { node, score: 0 };
+          const buttons = Array.from(node.querySelectorAll("button, [role='button']")).filter((el) => isVisibleElement(el));
+          if (buttons.length < 3 || buttons.length > 6) return { node, score: 0 };
+          const buttonTexts = buttons.map((button) => (button.textContent || "").replace(/\s+/g, " ").trim());
+          const labelHits = buttonTexts.filter((text) => /(赞|like|收藏|collect|评论|chat|comment)/i.test(text)).length;
+          const numericHits = buttonTexts.filter((text) => /\d/.test(text)).length;
+          const horizontalScore = buttons.length >= 3 ? 1800 : 0;
+          const bottomScore = Math.max(0, 1600 - Math.abs(window.innerHeight - rect.bottom) * 5);
+          const contentScore = labelHits * 2600 + numericHits * 900;
+          const sizeScore = Math.max(0, 1200 - rect.height * 10);
+          return { node, score: contentScore + horizontalScore + bottomScore + sizeScore };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score);
+      return ranked[0]?.node || null;
+    };
     const scopedMetricText = (selectors, root) => {
       if (!root) return "";
       for (const selector of selectors) {
@@ -1112,22 +1191,36 @@
         const groupText = (group?.textContent || textValue).replace(/\s+/g, " ").trim();
         const count = parseCount(groupText);
         if (count) return count;
-        if (kind === "likes" && /赞|like/i.test(textValue || ariaValue || groupText)) return 0;
-        if (kind === "collects" && /收藏|collect/i.test(textValue || ariaValue || groupText)) return 0;
-        if (kind === "comments" && /评论|chat|comment/i.test(textValue || ariaValue || groupText)) return 0;
       }
       return 0;
     };
+    const pickMetricFromButtons = (kind, root) => {
+      if (!root) return 0;
+      const buttons = Array.from(root.querySelectorAll("button, [role='button']"))
+        .filter((node) => isVisibleElement(node));
+      const orderMap = { likes: 0, collects: 1, comments: 2 };
+      const index = orderMap[kind];
+      if (index === undefined) return 0;
+      const count = parseCount(buttons[index]?.textContent || "");
+      return Number.isFinite(count) ? count : 0;
+    };
     const pickMetricCount = (kind, selectors) => {
+      const likelyEngagementRoot = engagementRoot || findLikelyEngagementRoot(detailRoot || scopedRoot || document);
       const overlayStrictRoots = hasDetailMask
-        ? [engagementRoot, scopedRoot, detailRoot].filter(Boolean)
+        ? [engagementRoot, likelyEngagementRoot, document.querySelector("#noteContainer"), scopedRoot, detailRoot].filter(Boolean)
         : [engagementRoot, detailRoot, scopedRoot, document].filter(Boolean);
       for (const root of overlayStrictRoots) {
+        const classCount = pickMetricFromKnownClasses(kind, root);
+        if (classCount !== null) return classCount;
         const textValue = scopedMetricText(selectors, root);
         const count = parseCount(textValue);
         if (count) return count;
         const labeledCount = findMetricFromLabels(kind, root);
-        if (labeledCount || (hasDetailMask && root === engagementRoot)) return labeledCount;
+        if (labeledCount) return labeledCount;
+      }
+      if (likelyEngagementRoot) {
+        const orderedCount = pickMetricFromButtons(kind, likelyEngagementRoot);
+        if (orderedCount || orderedCount === 0) return orderedCount;
       }
       return 0;
     };
