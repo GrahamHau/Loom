@@ -188,7 +188,6 @@ export function migrate() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_news_items_user_date ON news_items(user_id, published_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_news_items_workspace_date ON news_items(workspace_id, published_at DESC);
     CREATE INDEX IF NOT EXISTS idx_news_items_type ON news_items(type);
     CREATE INDEX IF NOT EXISTS idx_news_items_starred ON news_items(is_starred);
     CREATE INDEX IF NOT EXISTS idx_news_items_url ON news_items(original_url);

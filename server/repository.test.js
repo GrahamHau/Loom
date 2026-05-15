@@ -43,6 +43,50 @@ beforeEach(() => {
 });
 
 describe("repository", () => {
+  it("migrates older news tables before creating workspace indexes", () => {
+    dbModule.db.exec(`
+      DROP INDEX IF EXISTS idx_news_items_workspace_date;
+      DROP INDEX IF EXISTS idx_news_items_user_url;
+      DROP TABLE IF EXISTS news_items;
+      CREATE TABLE news_items (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL DEFAULT 'legacy-default',
+        source_id TEXT NOT NULL,
+        source_name TEXT NOT NULL,
+        source_authority TEXT DEFAULT 'watchlist',
+        original_title TEXT NOT NULL,
+        original_url TEXT NOT NULL,
+        original_summary TEXT,
+        original_content TEXT,
+        title_zh TEXT,
+        summary_zh TEXT,
+        content_zh TEXT,
+        type TEXT,
+        thumbnail_url TEXT,
+        thumb_hue INTEGER DEFAULT 40,
+        is_kept INTEGER DEFAULT 0,
+        is_read INTEGER DEFAULT 0,
+        is_starred INTEGER DEFAULT 0,
+        published_at TEXT,
+        llm_processed INTEGER DEFAULT 0,
+        needs_translation INTEGER DEFAULT 0,
+        classification_json TEXT,
+        synced_at TEXT,
+        feishu_record_id TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO news_items (id, user_id, source_id, source_name, original_title, original_url)
+      VALUES ('old-news', 'legacy-default', 'source', 'Source', 'Old title', 'https://old.test/item');
+    `);
+
+    expect(() => dbModule.migrate()).not.toThrow();
+    const columns = dbModule.db.prepare("PRAGMA table_info(news_items)").all().map((column) => column.name);
+    expect(columns).toContain("workspace_id");
+    const index = dbModule.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_news_items_workspace_date'").get();
+    expect(index?.name).toBe("idx_news_items_workspace_date");
+  });
+
   it("creates products", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     const product = repo.createProduct(legacyUserId, { name: "Test Product", related_product_id: "p-1", related_product_name: "Linked Product" });
