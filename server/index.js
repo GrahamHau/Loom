@@ -89,7 +89,7 @@ const wechatCollectHours = String(process.env.WECHAT_COLLECT_HOURS || "9,21")
   .split(",")
   .map((value) => Number(value.trim()))
   .filter((value) => Number.isInteger(value) && value >= 0 && value <= 23);
-const wechatCacheDays = Math.max(1, Number(process.env.WECHAT_CACHE_DAYS || 5));
+const wechatCacheDays = Math.max(1, Number(process.env.WECHAT_CACHE_DAYS || 10));
 const wechatCollectTimezone = process.env.WECHAT_COLLECT_TIMEZONE || "Asia/Shanghai";
 const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE === "true"
   ? true
@@ -378,7 +378,7 @@ function officialWechatSources() {
 async function collectOfficialRssSources() {
   const collected = await collectDueSources(legacyUser.id, officialRssSources());
   await processCollectedNewsWithLlm(legacyUser.id, collected);
-  pruneNewsOlderThan(legacyUser.id, { sourceGroups: ["official-default", "sample-live"], olderThanDays: 5 });
+  pruneNewsOlderThan(legacyUser.id, { sourceGroups: ["official-default", "sample-live"], olderThanDays: wechatCacheDays });
   syncOfficialNewsToAllUsers();
   return collected;
 }
@@ -639,13 +639,18 @@ app.get("/api/news", requireAuth, (req, res) => {
     const sourceHomepage = String(item?.classification?.source_homepage || "").toLowerCase();
     return source.includes("google news") || sourceLabel.includes("google news") || sourceHomepage.includes("news.google.com");
   };
+  const isWechatNewsItem = (item) =>
+    String(item?.classification?.source_type || "").toLowerCase() === "wechat_exporter" ||
+    String(item?.classification?.source_group || "").toLowerCase() === "wechat-exporter" ||
+    String(item?.original_url || item?.url || "").includes("mp.weixin.qq.com") ||
+    String(item?.source || "").includes("公众号");
   const typeMap = { new_product: "新品发布", trend: "行业趋势" };
   const allItems = visibleNewsItems(userId).filter((item) => item.type);
   let items = allItems;
   if (req.query.type) items = items.filter((item) => item.type === (typeMap[req.query.type] || req.query.type));
   if (req.query.source_group) {
     const sourceGroup = String(req.query.source_group || "").toLowerCase();
-    items = items.filter((item) => String(item?.classification?.source_group || "").toLowerCase() === sourceGroup);
+    items = items.filter((item) => sourceGroup === "wechat-exporter" ? isWechatNewsItem(item) : String(item?.classification?.source_group || "").toLowerCase() === sourceGroup);
   }
   if (req.query.starred === "1" || req.query.starred === "true") items = items.filter((item) => item.starred);
   if (req.query.q) {
@@ -656,7 +661,7 @@ app.get("/api/news", requireAuth, (req, res) => {
   }
   const counts = {
     all: allItems.length,
-    wechat: allItems.filter((item) => String(item?.classification?.source_type || "").toLowerCase() === "wechat_exporter" || String(item?.source || "").includes("公众号")).length,
+    wechat: allItems.filter((item) => isWechatNewsItem(item)).length,
     trend: allItems.filter((item) => isGoogleNewsItem(item)).length,
     starred: allItems.filter((item) => item.starred).length,
   };

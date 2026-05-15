@@ -225,7 +225,7 @@ Defaults:
 - remote host: `tencent-sg-2222`
 - remote DB: `/home/ubuntu/apps/loom/data/pm-copilot.sqlite`
 - local DB: your current `DATABASE_PATH` or `DATA_DIR` target
-- retention window: last `5` days of official Stream items
+- retention window: last `10` days of official Stream items
 
 Optional overrides:
 

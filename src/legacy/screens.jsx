@@ -316,6 +316,23 @@ function newsSourceHost(item = {}) {
   }
 }
 
+function isWechatNewsItem(item = {}) {
+  return String(item?.classification?.source_type || "").toLowerCase() === "wechat_exporter" ||
+    String(item?.classification?.source_group || "").toLowerCase() === "wechat-exporter" ||
+    String(item?.original_url || item?.url || "").includes("mp.weixin.qq.com") ||
+    String(item?.source || "").includes("公众号");
+}
+
+function compareNewsPrimary(a = {}, b = {}) {
+  const aWechat = isWechatNewsItem(a);
+  const bWechat = isWechatNewsItem(b);
+  if (aWechat !== bWechat) return aWechat ? -1 : 1;
+  const aImage = Boolean(a.thumbnail_url || a.image);
+  const bImage = Boolean(b.thumbnail_url || b.image);
+  if (aImage !== bImage) return aImage ? -1 : 1;
+  return new Date(b.published_at || b.date || 0).getTime() - new Date(a.published_at || a.date || 0).getTime();
+}
+
 function buildNewsGroups(items = [], tagGroups = []) {
   const map = new Map();
   for (const item of safeArray(items)) {
@@ -339,7 +356,7 @@ function buildNewsGroups(items = [], tagGroups = []) {
     }
     current.sourceItems.push(item);
     current.sourceItems.sort((a, b) => new Date(b.published_at || b.date || 0).getTime() - new Date(a.published_at || a.date || 0).getTime());
-    const primary = current.sourceItems.find((entry) => entry.thumbnail_url || entry.image) || current.sourceItems[0];
+    const primary = [...current.sourceItems].sort(compareNewsPrimary)[0] || current.sourceItems[0];
     current.id = groupId;
     current.primaryId = primary.id;
     current.isNewsGroup = true;
@@ -362,7 +379,7 @@ function buildNewsGroups(items = [], tagGroups = []) {
 
 function newsGroupCounts(groups = []) {
   const list = safeArray(groups);
-  const wechat = list.filter((n) => String(n?.classification?.source_type || "").toLowerCase() === "wechat_exporter" || String(n?.source || "").includes("公众号"));
+  const wechat = list.filter((n) => isWechatNewsItem(n));
   const googleNews = list.filter((n) => isGoogleNewsItem(n));
   return {
     all: list.length,
@@ -397,7 +414,7 @@ function googleNewsPublisher(item = {}) {
 }
 
 function newsPrimaryTag(item = {}) {
-  if (String(item?.classification?.source_type || "").toLowerCase() === "wechat_exporter") {
+  if (isWechatNewsItem(item)) {
     return String(item?.source || "微信公众号").trim() || "微信公众号";
   }
   if (isGoogleNewsItem(item)) return googleNewsPublisher(item);
@@ -1268,7 +1285,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
             <div key={d}>
               <div className="news-day">{formatDate(d)}</div>
               {grouped[d].map((n) => {
-                const isWechat = String(n?.classification?.source_type || "").toLowerCase() === "wechat_exporter" || String(n?.source || "").includes("公众号");
+                const isWechat = isWechatNewsItem(n);
                 const primaryTag = newsPrimaryTag(n);
                 const brand = !isWechat && !isGoogleNewsItem(n) ? guessBrand(n) : "";
                 const secondaryTag = sameMetaLabel(primaryTag, brand) ? "" : brand;

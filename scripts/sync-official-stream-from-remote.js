@@ -11,7 +11,7 @@ import { createNewsSource, listNewsSources, pruneNewsOlderThan, upsertNews } fro
 const DEFAULT_REMOTE = process.env.LOOM_STREAM_REMOTE || "tencent-sg-2222";
 const DEFAULT_REMOTE_DB = process.env.LOOM_STREAM_REMOTE_DB || "/home/ubuntu/apps/loom/data/pm-copilot.sqlite";
 const OFFICIAL_GROUPS = new Set(["official-default", "sample-live", "wechat-exporter"]);
-const KEEP_DAYS = Math.max(1, Number(process.env.LOOM_STREAM_SYNC_DAYS || 5));
+const KEEP_DAYS = Math.max(1, Number(process.env.LOOM_STREAM_SYNC_DAYS || 10));
 
 main();
 

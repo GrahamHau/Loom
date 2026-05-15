@@ -19,7 +19,7 @@ import { isCrossSourceNewsStoryKey, isSpecificNewsStoryKey, withNewsDedupeKeys }
 import { buildEmptyState } from "./seed.js";
 import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
-const STREAM_NEWS_MAX_AGE_DAYS = Math.max(1, Number(process.env.STREAM_NEWS_MAX_AGE_DAYS || 5));
+const STREAM_NEWS_MAX_AGE_DAYS = Math.max(1, Number(process.env.STREAM_NEWS_MAX_AGE_DAYS || 10));
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -1279,7 +1279,11 @@ export function upsertNews(userId, items) {
           ? (input.published_at || input.date || current.published_at || nowIso())
           : (current.published_at || input.published_at || input.date || nowIso());
         const currentClassification = parseJsonObject(current.classification_json);
-        const preferInputPrimary = !currentByUrl && isWechatNewsRecord(input, inputClassification) && !isWechatNewsRecord(current, currentClassification);
+        const inputIsWechat = isWechatNewsRecord(input, inputClassification);
+        const currentIsWechat = isWechatNewsRecord(current, currentClassification);
+        const preferInputPrimary = inputIsWechat && !currentIsWechat;
+        const keepCurrentPrimary = currentIsWechat && !inputIsWechat;
+        const canUseInputPrimaryFields = !keepCurrentPrimary && (currentByUrl || preferInputPrimary);
         const duplicateUrl = preferInputPrimary ? current.original_url : input.original_url;
         const duplicateUrls = current.original_url !== input.original_url
           ? appendUniqueText(currentClassification.duplicate_urls, duplicateUrl)
@@ -1296,16 +1300,16 @@ export function upsertNews(userId, items) {
           ? (input.llmProcessed ? 1 : 0)
           : (nextType ? 1 : current.llm_processed);
         const nextPayload = {
-          source_id: (currentByUrl || preferInputPrimary) ? (input.source_id || current.source_id) : current.source_id,
-          source_name: (currentByUrl || preferInputPrimary) ? (input.source || current.source_name) : current.source_name,
+          source_id: canUseInputPrimaryFields ? (input.source_id || current.source_id) : current.source_id,
+          source_name: canUseInputPrimaryFields ? (input.source || current.source_name) : current.source_name,
           source_authority: input.source_authority || input.classification?.authority || current.source_authority || "watchlist",
-          original_title: (currentByUrl || preferInputPrimary) ? (input.original_title || current.original_title) : current.original_title,
+          original_title: canUseInputPrimaryFields ? (input.original_title || current.original_title) : current.original_title,
           original_url: preferInputPrimary ? input.original_url : current.original_url,
-          original_summary: (currentByUrl || preferInputPrimary) ? (input.summary || current.original_summary || "") : (current.original_summary || input.summary || ""),
-          original_content: (currentByUrl || preferInputPrimary) ? (input.original_content || current.original_content || "") : (current.original_content || input.original_content || ""),
-          title_zh: (currentByUrl || preferInputPrimary) ? (input.titleZh || current.title_zh || input.original_title || current.original_title) : (current.title_zh || input.titleZh || current.original_title),
-          summary_zh: (currentByUrl || preferInputPrimary) ? (input.summary || current.summary_zh || current.original_summary || "") : (current.summary_zh || input.summary || current.original_summary || ""),
-          content_zh: (currentByUrl || preferInputPrimary) ? (input.contentZh || current.content_zh || "") : (current.content_zh || input.contentZh || ""),
+          original_summary: canUseInputPrimaryFields ? (input.summary || current.original_summary || "") : (current.original_summary || input.summary || ""),
+          original_content: canUseInputPrimaryFields ? (input.original_content || current.original_content || "") : (current.original_content || input.original_content || ""),
+          title_zh: canUseInputPrimaryFields ? (input.titleZh || current.title_zh || input.original_title || current.original_title) : (current.title_zh || input.titleZh || current.original_title),
+          summary_zh: canUseInputPrimaryFields ? (input.summary || current.summary_zh || current.original_summary || "") : (current.summary_zh || input.summary || current.original_summary || ""),
+          content_zh: canUseInputPrimaryFields ? (input.contentZh || current.content_zh || "") : (current.content_zh || input.contentZh || ""),
           type: nextType,
           thumbnail_url: nextThumbnail,
           thumb_hue: Number(input.thumbHue ?? current.thumb_hue ?? 40),

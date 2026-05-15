@@ -482,6 +482,45 @@ describe("repository", () => {
     expect(matches[0].classification.duplicate_urls).toContain("https://news.google.com/rss/articles/sony-a7r-vi");
   });
 
+  it("keeps WeChat as the primary row when a non-WeChat duplicate arrives later", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [
+      {
+        source_id: "wechat-sony",
+        source: "索尼中国",
+        original_url: "https://mp.weixin.qq.com/s/sony-a7r-vi-later",
+        titleZh: "新品发布丨Alpha 7R VI索尼新一代全画幅微单发布",
+        original_title: "新品发布丨Alpha 7R VI索尼新一代全画幅微单发布",
+        summary: "WeChat first summary",
+        type: "新品发布",
+        classification: {
+          source_type: "wechat_exporter",
+          source_group: "wechat-exporter",
+        },
+        date: "2026-05-10",
+      },
+      {
+        source_id: "google",
+        source: "主机新品 - Google News",
+        original_url: "https://news.google.com/rss/articles/sony-a7r-vi-later",
+        titleZh: "索尼发布Alpha 7R VI",
+        original_title: "Sony Alpha 7R VI launches",
+        summary: "Google later summary",
+        thumbnail_url: "https://cdn.test/google.jpg",
+        type: "新品发布",
+        date: "2026-05-11",
+      },
+    ]);
+
+    const matches = repo.listNews(legacyUserId).filter((item) => item.classification?.story_key === "sony-a7r-vi-launch");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].source).toBe("索尼中国");
+    expect(matches[0].original_url).toBe("https://mp.weixin.qq.com/s/sony-a7r-vi-later");
+    expect(matches[0].summary).toBe("WeChat first summary");
+    expect(matches[0].thumbnail_url).toBe("https://cdn.test/google.jpg");
+    expect(matches[0].classification.duplicate_urls).toContain("https://news.google.com/rss/articles/sony-a7r-vi-later");
+  });
+
   it("does not classify publisher names containing review as Sony A7R VI review events", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.upsertNews(legacyUserId, [
