@@ -208,4 +208,22 @@ describe("rss-service classification", () => {
     });
     expect(imageUrl).toBe("https://www.newsshooter.com");
   });
+
+  it("retries image enrichment when the current image is a google placeholder or logo-like asset", () => {
+    expect(__rssTestUtils.shouldRetryImageEnrichment({
+      thumbnail_url: "",
+    })).toBe(true);
+
+    expect(__rssTestUtils.shouldRetryImageEnrichment({
+      thumbnail_url: "https://news.google.com/favicon.ico",
+    })).toBe(true);
+
+    expect(__rssTestUtils.shouldRetryImageEnrichment({
+      thumbnail_url: "https://cdn.example.com/assets/logo-placeholder.png",
+    })).toBe(true);
+
+    expect(__rssTestUtils.shouldRetryImageEnrichment({
+      thumbnail_url: "https://cdn.example.com/images/article-cover.jpg",
+    })).toBe(false);
+  });
 });

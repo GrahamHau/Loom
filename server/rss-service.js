@@ -56,6 +56,18 @@ const WECHAT_EXPORTER_SOURCE_TYPES = new Set(["wechat_exporter", "wechat-exporte
 const WECHAT_EXPORTER_MAX_PER_SOURCE = Math.min(20, Math.max(1, Number(process.env.WECHAT_EXPORTER_MAX_PER_SOURCE || 20)));
 const WECHAT_EXPORTER_DEFAULT_BASE_URL = String(process.env.WECHAT_EXPORTER_BASE_URL || "").trim();
 const WECHAT_EXPORTER_DEFAULT_AUTH_KEY = String(process.env.WECHAT_EXPORTER_AUTH_KEY || "").trim();
+const IMAGE_BAD_HOST_PATTERNS = [
+  /news\.google\.com/i,
+  /gstatic\.com/i,
+  /googleusercontent\.com/i,
+];
+const IMAGE_BAD_PATH_PATTERNS = [
+  /\/favicon\./i,
+  /sprite/i,
+  /logo/i,
+  /placeholder/i,
+  /default/i,
+];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -184,6 +196,7 @@ export const __rssTestUtils = {
   mergeKeyForItem,
   imageLookupUrlForItem,
   dedupeKeyForItem,
+  shouldRetryImageEnrichment,
 };
 
 function dedupeKeyForItem(item = {}) {
@@ -230,6 +243,19 @@ function imageLookupUrlForItem(item = {}) {
   const sourceHome = String(item.classification?.source_homepage || "").trim();
   if (sourceHome && /^https?:\/\//i.test(sourceHome)) return sourceHome;
   return "";
+}
+
+function shouldRetryImageEnrichment(item = {}) {
+  const image = String(item.thumbnail_url || item.image || "").trim();
+  if (!image) return true;
+  try {
+    const parsed = new URL(image);
+    if (IMAGE_BAD_HOST_PATTERNS.some((pattern) => pattern.test(parsed.hostname))) return true;
+    if (IMAGE_BAD_PATH_PATTERNS.some((pattern) => pattern.test(parsed.pathname))) return true;
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function publishedAtOf(item) {
@@ -538,7 +564,7 @@ async function enrichOfficialImages(source, newsItems) {
   if (!isOfficialManagedSource(source)) return newsItems;
   let remaining = Math.max(0, OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE);
   for (const item of newsItems) {
-    if (item.thumbnail_url || remaining <= 0) continue;
+    if (!shouldRetryImageEnrichment(item) || remaining <= 0) continue;
     remaining -= 1;
     try {
       const candidateUrls = [

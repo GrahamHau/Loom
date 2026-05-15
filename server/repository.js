@@ -809,6 +809,13 @@ export function listPendingNewsForLlm(userId, limit = 20) {
 export function updateNews(userId, id, patch) {
   const current = db.prepare("SELECT * FROM news_items WHERE id = ? AND user_id = ?").get(id, userId);
   if (!current) return null;
+  const currentClassification = current.classification_json ? JSON.parse(current.classification_json) : {};
+  const mergedClassification = patch.classification
+    ? {
+        ...currentClassification,
+        ...patch.classification,
+      }
+    : currentClassification;
   db.prepare(`
     UPDATE news_items
     SET is_read = ?,
@@ -833,7 +840,7 @@ export function updateNews(userId, id, patch) {
     patch.is_kept ?? null,
     patch.llm_processed ?? null,
     patch.needsTranslation !== undefined ? (patch.needsTranslation ? 1 : 0) : null,
-    patch.classification ? JSON.stringify(patch.classification) : null,
+    Object.keys(mergedClassification).length ? JSON.stringify(mergedClassification) : null,
     nowIso(),
     id,
     userId

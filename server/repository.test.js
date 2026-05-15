@@ -104,6 +104,37 @@ describe("repository", () => {
     expect(repo.listNews(legacyUserId).find((item) => item.id === "n1")?.starred).toBe(true);
   });
 
+  it("merges classification metadata when updating news flags or llm fields", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.upsertNews(legacyUserId, [{
+      source_id: "rss-google",
+      source: "Google Feed",
+      original_url: "https://a.test/grouped",
+      titleZh: "A",
+      type: "行业趋势",
+      classification: {
+        merge_key: "same-story",
+        source_group: "official-default",
+        source_homepage: "https://example.com",
+      },
+      date: "2026-05-10",
+    }]);
+
+    const item = repo.listNews(legacyUserId).find((entry) => entry.original_url === "https://a.test/grouped");
+    repo.updateNews(legacyUserId, item.id, {
+      llm_processed: 1,
+      classification: { reason: "manual_llm" },
+    });
+
+    const updated = repo.listNews(legacyUserId).find((entry) => entry.original_url === "https://a.test/grouped");
+    expect(updated?.classification).toMatchObject({
+      merge_key: "same-story",
+      source_group: "official-default",
+      source_homepage: "https://example.com",
+      reason: "manual_llm",
+    });
+  });
+
   it("upserts news by source and url", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/1", titleZh: "A", date: "2026-05-10" }]);
