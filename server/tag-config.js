@@ -22,18 +22,27 @@ export const DEFAULT_TAG_GROUPS = [
   },
   {
     key: "camera_brands",
-    name: "主机品牌",
+    name: "主机",
     tone: "outline",
     tags: [
-      "影石",
-      "GoPro",
-      "Apple",
-      "Sony",
-      "Canon",
-      "Nikon",
-      "Fujifilm",
-      "Panasonic",
-      "LUMIX",
+      "Osmo Pocket 3",
+      "Osmo Action 5 Pro",
+      "Osmo Action 4",
+      "Osmo Mobile 7P",
+      "Osmo Mobile 7",
+      "DJI Mini 4 Pro",
+      "DJI Air 3S",
+      "DJI Flip",
+      "DJI Neo",
+      "Insta360 Ace Pro 2",
+      "Insta360 Ace Pro",
+      "Insta360 X5",
+      "Insta360 GO 3",
+      "Insta360 GO 3S",
+      "Insta360 X4",
+      "Insta360 Flow 2 Pro",
+      "Insta360 Flow 2",
+      "Insta360 Flow Pro",
     ],
   },
   { key: "product_categories", name: "产品品类", tone: "default", tags: ["灯光", "稳定器", "三脚架", "镜头", "麦克风", "相机配件", "运动相机", "无人机"] },
@@ -71,11 +80,6 @@ export function normalizeTagGroups(groups) {
 
 export function tagListText(groups, key) {
   const normalized = normalizeTagGroups(groups);
-  if (key === "brands") {
-    const competitorBrands = normalized.find((group) => group.key === "competitor_brands")?.tags || [];
-    const cameraBrands = normalized.find((group) => group.key === "camera_brands")?.tags || [];
-    return JSON.stringify([...competitorBrands, ...cameraBrands]);
-  }
   const match = normalized.find((group) => group.key === key);
   return JSON.stringify(match?.tags || []);
 }

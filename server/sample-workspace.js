@@ -16,7 +16,7 @@ export const SAMPLE_NEWS_SOURCES = [
   },
   {
     id: "sample-news-google-camera-launches",
-    name: "主机品牌新品 - Google News",
+    name: "主机新品 - Google News",
     url: "https://news.google.com/rss/search?q=(DJI%20OR%20Insta360%20OR%20GoPro%20OR%20Sony%20OR%20Canon%20OR%20Nikon%20OR%20Fujifilm%20OR%20Panasonic)%20(camera%20OR%20drone%20OR%20gimbal)%20(new%20OR%20launch%20OR%20announces%20OR%20unveils%20OR%20release)&hl=en-US&gl=US&ceid=US:en",
     fetch_interval: 60,
     group: "sample-live",

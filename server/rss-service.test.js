@@ -36,7 +36,7 @@ describe("rss-service classification", () => {
 
   it("drops teaser and expected launch stories", () => {
     const result = heuristicClassifyNews({
-      source: { name: "主机品牌新品 - Google News", authority: "aggregator" },
+      source: { name: "主机新品 - Google News", authority: "aggregator" },
       item: {
         title: "Canon Posts Enigmatic Teaser for a New Camera Set to Debut Next Week",
         contentSnippet: "The company is expected to reveal more details soon.",
@@ -304,7 +304,7 @@ describe("rss-service classification", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.upsertNews(legacyUserId, [{
       source_id: "google-old",
-      source: "主机品牌新品 - Google News",
+      source: "主机新品 - Google News",
       source_authority: "aggregator",
       original_url: "https://news.google.com/rss/articles/known-story",
       titleZh: "索尼发布A7R VI",
@@ -318,7 +318,7 @@ describe("rss-service classification", () => {
     }]);
     repo.createNewsSource(legacyUserId, {
       id: "rss-google-camera-launches",
-      name: "主机品牌新品 - Google News",
+      name: "主机新品 - Google News",
       url: "https://example.com/feed.xml",
       type: "rss",
       authority: "aggregator",
@@ -355,7 +355,7 @@ describe("rss-service classification", () => {
       await collectSource(legacyUserId, {
         id: "rss-google-camera-launches",
         user_id: legacyUserId,
-        name: "主机品牌新品 - Google News",
+        name: "主机新品 - Google News",
         url: "https://example.com/feed.xml",
         type: "rss",
         authority: "aggregator",

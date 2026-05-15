@@ -39,12 +39,21 @@ const PLATFORM_WAITING_COPY = {
 };
 const DEFAULT_TAG_GROUPS = [
   { key: "competitor_brands", name: "竞品品牌", tone: "outline", tags: ["Ulanzi", "DJI", "Insta360", "SmallRig", "NEEWER", "Tilta", "K&F CONCEPT", "Godox", "Nanlite", "Zhiyun", "智云", "Aputure", "Rode", "RODE"] },
-  { key: "camera_brands", name: "主机品牌", tone: "outline", tags: ["影石", "GoPro", "Apple", "Sony", "Canon", "Nikon", "Fujifilm", "Panasonic", "LUMIX"] },
+  { key: "camera_brands", name: "主机", tone: "outline", tags: ["Osmo Pocket 3", "Osmo Action 5 Pro", "Osmo Action 4", "Osmo Mobile 7P", "Osmo Mobile 7", "DJI Mini 4 Pro", "DJI Air 3S", "DJI Flip", "DJI Neo", "Insta360 Ace Pro 2", "Insta360 Ace Pro", "Insta360 X5", "Insta360 GO 3", "Insta360 GO 3S", "Insta360 X4", "Insta360 Flow 2 Pro", "Insta360 Flow 2", "Insta360 Flow Pro"] },
   { key: "product_categories", name: "产品品类", tone: "default", tags: ["灯光", "稳定器", "三脚架", "镜头", "麦克风", "相机配件", "运动相机", "无人机"] },
   { key: "scenarios", name: "使用场景", tone: "accent", tags: ["Vlog/自拍", "直播/带货", "短视频创作", "户外旅拍", "室内棚拍", "桌面俯拍", "运动/极限拍摄", "会议/活动记录", "产品摄影", "延时/慢动作", "街拍/纪实", "教育/网课"] },
   { key: "painpoints", name: "用户痛点", tone: "danger", tags: ["携带不便/太重", "续航不足", "操作复杂/学习成本高", "画质不够", "防抖不足", "散热过热", "噪音大", "兼容性差", "配件缺失/需另购", "安装固定麻烦", "调光/调色不精准", "无线连接不稳定", "收纳困难", "价格过高/性价比低", "做工质感差"] },
   { key: "innovation_types", name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] },
   { key: "custom_tags", name: "自定义标签", tone: "outline", tags: ["便携", "高显色", "模块化", "磁吸", "手机摄影"] },
+];
+const DEFAULT_FIELDS = [
+  { key: "brand", legacyKey: "competitor_brands", name: "品牌", tone: "outline", multi: true, official: true, entities: ["competitor"] },
+  { key: "host", legacyKey: "camera_brands", name: "主机", tone: "outline", multi: false, official: true, entities: ["competitor"] },
+  { key: "category", legacyKey: "product_categories", name: "品类", tone: "default", multi: true, official: true, entities: ["competitor"] },
+  { key: "scenarios", legacyKey: "scenarios", name: "使用场景", tone: "accent", multi: true, official: true, entities: ["competitor", "inspiration"] },
+  { key: "painpoints", legacyKey: "painpoints", name: "用户痛点", tone: "danger", multi: true, official: true, entities: ["competitor", "inspiration"] },
+  { key: "innovation", legacyKey: "innovation_types", name: "创新类型", tone: "success", multi: false, official: true, entities: ["inspiration"] },
+  { key: "custom_tags", legacyKey: "custom_tags", name: "自定义标签", tone: "outline", multi: true, official: true, entities: ["competitor", "inspiration"] },
 ];
 
 function normalizeApiBase(value) {
@@ -79,6 +88,7 @@ const state = {
   relationPickerItems: [],
   relationPickerQuery: "",
   relationPickerError: "",
+  fields: DEFAULT_FIELDS,
   tagGroups: DEFAULT_TAG_GROUPS,
   llmConfigured: false,
   tagPicker: null,
@@ -109,6 +119,68 @@ function cleanText(value, fallback = "") {
   return text;
 }
 
+function uniqueList(value) {
+  return Array.from(new Set(safeArray(value).map((item) => cleanText(item)).filter(Boolean)));
+}
+
+function fieldFromTagGroup(group) {
+  const defaultField = DEFAULT_FIELDS.find((field) => field.legacyKey === group?.key || field.key === group?.field_key);
+  const key = cleanText(group?.field_key || defaultField?.key || group?.key);
+  if (!key) return null;
+  return {
+    key,
+    legacyKey: cleanText(group?.key || defaultField?.legacyKey || key, key),
+    name: cleanText(group?.name, defaultField?.name || key),
+    tone: cleanText(group?.tone, defaultField?.tone || "outline"),
+    multi: group?.multi !== false && defaultField?.multi !== false,
+    official: group?.official !== undefined ? Boolean(group.official) : Boolean(defaultField?.official),
+    entities: uniqueList(group?.entities).filter((item) => item === "competitor" || item === "inspiration").length
+      ? uniqueList(group.entities).filter((item) => item === "competitor" || item === "inspiration")
+      : safeArray(defaultField?.entities).length ? defaultField.entities : ["competitor"],
+    options: uniqueList(group?.tags),
+  };
+}
+
+function normalizeFieldList(fields = [], tagGroups = []) {
+  const groups = safeArray(tagGroups).length ? safeArray(tagGroups) : DEFAULT_TAG_GROUPS;
+  const groupByLegacy = new Map(groups.map((group) => [group.key, group]));
+  const source = safeArray(fields).length ? safeArray(fields) : groups.map(fieldFromTagGroup).filter(Boolean);
+  const normalized = [];
+  const seen = new Set();
+  for (const item of source) {
+    if (!item || typeof item !== "object") continue;
+    const defaultField = DEFAULT_FIELDS.find((field) => field.key === item.key || field.legacyKey === item.legacyKey);
+    const key = cleanText(item.key || defaultField?.key);
+    if (!key || seen.has(key)) continue;
+    const legacyKey = cleanText(item.legacyKey || defaultField?.legacyKey || key, key);
+    const group = groupByLegacy.get(legacyKey) || groupByLegacy.get(key);
+    seen.add(key);
+    normalized.push({
+      key,
+      legacyKey,
+      name: cleanText(item.name, defaultField?.name || group?.name || key),
+      tone: cleanText(item.tone || group?.tone, defaultField?.tone || "outline"),
+      multi: item.multi !== undefined ? item.multi !== false : defaultField?.multi !== false,
+      official: item.official !== undefined ? Boolean(item.official) : Boolean(defaultField?.official),
+      entities: uniqueList(item.entities).filter((entity) => entity === "competitor" || entity === "inspiration").length
+        ? uniqueList(item.entities).filter((entity) => entity === "competitor" || entity === "inspiration")
+        : safeArray(defaultField?.entities).length ? defaultField.entities : ["competitor"],
+      options: uniqueList(item.options || item.tags || group?.tags || defaultField?.options),
+    });
+  }
+  for (const field of DEFAULT_FIELDS) {
+    if (seen.has(field.key)) continue;
+    const group = groupByLegacy.get(field.legacyKey);
+    normalized.push({
+      ...field,
+      name: cleanText(group?.name, field.name),
+      tone: cleanText(group?.tone, field.tone),
+      options: uniqueList(group?.tags || field.options),
+    });
+  }
+  return normalized;
+}
+
 function debugEvent(name, payload = {}) {
   try {
     chrome.runtime.sendMessage({
@@ -117,7 +189,9 @@ function debugEvent(name, payload = {}) {
       name,
       payload,
     });
-  } catch {}
+  } catch {
+    // Debug events are best effort; preview contexts may not expose chrome.runtime.
+  }
 }
 
 function isVisitorUser(user) {
@@ -685,7 +759,9 @@ async function removeSessionCookie() {
   if (!url || !chrome.cookies?.remove) return;
   try {
     await chrome.cookies.remove({ url, name: "connect.sid" });
-  } catch {}
+  } catch {
+    // Cookie removal can fail on browser-managed sessions; auth storage is cleared below.
+  }
 }
 
 async function syncAuthFromWebSession(options = {}) {
@@ -769,6 +845,7 @@ async function loadTagGroups() {
     const data = await api("/api/bootstrap");
     const settings = data?.settings || {};
     state.tagGroups = safeArray(settings.tag_groups).length ? settings.tag_groups : DEFAULT_TAG_GROUPS;
+    state.fields = normalizeFieldList(settings.fields, state.tagGroups);
     state.llmConfigured = Boolean(settings.llm_configured);
     if (state.llmConfigured && state.llmNoticeDismissed) {
       state.llmNoticeDismissed = false;
@@ -776,6 +853,7 @@ async function loadTagGroups() {
     }
   } catch {
     state.tagGroups = DEFAULT_TAG_GROUPS;
+    state.fields = normalizeFieldList(DEFAULT_FIELDS, DEFAULT_TAG_GROUPS);
     state.llmConfigured = false;
   }
 }
@@ -1083,8 +1161,21 @@ function successMotionIcon() {
 
 function buildDraft(mode, item) {
   if (mode === "product") {
-    const brand = cleanText(item?.brand, "");
-    const category = cleanText(item?.category, "");
+    const sourceTagValues = item?.tag_values || {};
+    const brandValues = uniqueList(sourceTagValues.brand || (item?.brand ? [item.brand] : []));
+    const hostValues = uniqueList(sourceTagValues.host || (item?.host ? [item.host] : []));
+    const categoryValues = uniqueList(sourceTagValues.category || (item?.category ? [item.category] : []));
+    const customTagValues = uniqueList(sourceTagValues.custom_tags || item?.tags);
+    const tagValues = {
+      ...sourceTagValues,
+      brand: brandValues,
+      host: hostValues,
+      category: categoryValues,
+      custom_tags: customTagValues,
+    };
+    const brand = brandValues.join(" / ");
+    const host = hostValues.join(" / ");
+    const category = categoryValues.join(" / ");
     const reviewCount = cleanText(item?.review_count ?? item?.platforms?.[0]?.reviews, "");
     const monthlySales = cleanText(item?.monthly_sales || item?.platforms?.[0]?.sales, "");
     const sellingPoints = safeArray(item?.selling_points).length
@@ -1093,7 +1184,9 @@ function buildDraft(mode, item) {
     return {
       name: cleanText(item?.name || item?.title, ""),
       brand,
+      host,
       category,
+      tag_values: tagValues,
       price: cleanText(item?.price || item?.platforms?.[0]?.price, ""),
       cost_estimate: cleanText(item?.cost_estimate, ""),
       rating: cleanText(item?.rating ?? item?.platforms?.[0]?.rating, ""),
@@ -1104,7 +1197,7 @@ function buildDraft(mode, item) {
       pledged_amount: cleanText(item?.pledged_amount || item?.platforms?.[0]?.pledged_amount, ""),
       goal_amount: cleanText(item?.goal_amount || item?.platforms?.[0]?.goal_amount, ""),
       backers: cleanText(item?.backers || item?.platforms?.[0]?.backers, ""),
-      tags: safeArray(item?.tags),
+      tags: customTagValues,
       selling_points: sellingPoints,
       ai_summary: cleanText(item?.ai_summary || item?.summary || item?.description || "", ""),
       platform: state.page?.platform || "",
@@ -1117,6 +1210,18 @@ function buildDraft(mode, item) {
     };
   }
   const originalText = cleanText(item?.content || item?.original_content || item?.description || item?.summary || item?.ai_summary, "");
+  const sourceTagValues = item?.tag_values || {};
+  const innovationValues = uniqueList(sourceTagValues.innovation || [item?.innovation || item?.tags_innovation].filter(Boolean));
+  const scenarioValues = uniqueList(sourceTagValues.scenarios || (safeArray(item?.scenarios).length ? item.scenarios : item?.tags_scenario));
+  const painpointValues = uniqueList(sourceTagValues.painpoints || (safeArray(item?.painpoints).length ? item.painpoints : item?.tags_painpoint));
+  const customTagValues = uniqueList(sourceTagValues.custom_tags || item?.tags_custom || item?.tags);
+  const tagValues = {
+    ...sourceTagValues,
+    innovation: innovationValues,
+    scenarios: scenarioValues,
+    painpoints: painpointValues,
+    custom_tags: customTagValues,
+  };
   return {
     title: cleanText(item?.title || item?.name, ""),
     summary: originalText,
@@ -1126,11 +1231,12 @@ function buildDraft(mode, item) {
     collects: Number(item?.collects || item?.favorites || 0),
     comments: Number(item?.comments || 0),
     visible_comments: mergeComments([], item?.visible_comments),
-    innovation: cleanText(item?.innovation || item?.tags_innovation, "待分类"),
-    scenarios: safeArray(item?.scenarios).length ? safeArray(item?.scenarios) : safeArray(item?.tags_scenario),
-    painpoints: safeArray(item?.painpoints).length ? safeArray(item?.painpoints) : safeArray(item?.tags_painpoint),
+    innovation: cleanText(innovationValues[0], "待分类"),
+    scenarios: scenarioValues,
+    painpoints: painpointValues,
+    tag_values: tagValues,
     tags_category: safeArray(item?.tags_category),
-    tags_custom: safeArray(item?.tags_custom),
+    tags_custom: customTagValues,
     thumbnail_url: cleanText(item?.thumbnail_url || item?.image, ""),
     url: cleanText(item?.url || state.page?.data?.url, ""),
     source: state.page?.platform || "",
@@ -1143,12 +1249,60 @@ function setField(key, value) {
   state.form = { ...(state.form || {}), [key]: value };
 }
 
-function setArrayField(key, value) {
-  const list = String(value || "")
-    .split(/[\n,，；;]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  state.form = { ...(state.form || {}), [key]: list };
+function fieldsForEntity(entity) {
+  return safeArray(state.fields).filter((field) => safeArray(field.entities).includes(entity));
+}
+
+function fieldValues(item, field) {
+  const values = item?.tag_values?.[field.key];
+  if (safeArray(values).length) return safeArray(values).filter(Boolean);
+  if (field.key === "brand" && item?.brand) return String(item.brand).split(/\s*\/\s*/).filter(Boolean);
+  if (field.key === "host" && item?.host) return String(item.host).split(/\s*\/\s*/).filter(Boolean);
+  if (field.key === "category" && item?.category) return String(item.category).split(/\s*\/\s*/).filter(Boolean);
+  if (field.key === "custom_tags") return safeArray(item?.tags || item?.tags_custom);
+  if (field.key === "innovation") return [item?.innovation || "待分类"].filter(Boolean);
+  if (field.key === "scenarios") return safeArray(item?.scenarios);
+  if (field.key === "painpoints") return safeArray(item?.painpoints);
+  return [];
+}
+
+function schemaFieldsView(entity, item) {
+  const fields = fieldsForEntity(entity);
+  if (!fields.length) return "";
+  return `
+    <div class="cl-grid-2 product-taxonomy-grid">
+      ${fields.map((field) => `
+        <div class="cl-section">
+          ${fieldSelect(field.key, field.name, fieldValues(item, field), field.tone || "outline", {
+            single: field.multi === false,
+            groupKey: field.legacyKey || field.key,
+          })}
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function setTagValue(key, values) {
+  const nextValues = uniqueList(values);
+  const next = {
+    ...(state.form || {}),
+    tag_values: {
+      ...((state.form || {}).tag_values || {}),
+      [key]: nextValues,
+    },
+  };
+  if (key === "brand") next.brand = nextValues.join(" / ");
+  if (key === "host") next.host = nextValues.join(" / ");
+  if (key === "category") next.category = nextValues.join(" / ");
+  if (key === "custom_tags") {
+    next.tags = nextValues;
+    next.tags_custom = nextValues;
+  }
+  if (key === "innovation") next.innovation = nextValues[0] || "待分类";
+  if (key === "scenarios") next.scenarios = nextValues;
+  if (key === "painpoints") next.painpoints = nextValues;
+  state.form = next;
 }
 
 function normalizeComment(item) {
@@ -1303,14 +1457,7 @@ function productView(item) {
       <div class="cl-section-label">平台信息 · 1 个</div>
       ${platformCardsHtml(item)}
     </div>
-    <div class="cl-grid-2 product-taxonomy-grid">
-      <div class="cl-section">
-        ${singleFieldSelect("brand", "品牌", item.brand || "", "outline", { groupKey: "competitor_brands" })}
-      </div>
-      <div class="cl-section">
-        ${singleFieldSelect("category", "品类", item.category || "", "outline", { groupKey: "product_categories" })}
-      </div>
-    </div>
+    ${schemaFieldsView("competitor", item)}
     <div class="cl-section">
       <div class="cl-section-label">核心卖点 · AI 总结</div>
       ${listEditor("selling_points", mergedSellingPoints, "输入卖点，回车添加", "success")}
@@ -1406,15 +1553,7 @@ function demandView(item) {
       <div class="cl-section-label">原文正文</div>
       <textarea class="ghost-input full source-content-input" data-key="content" placeholder="采集到的原文正文">${escapeHtml(originalText)}</textarea>
     </div>
-    <div class="cl-section">
-      ${fieldSelect("innovation", "创新类型", [item.innovation].filter(Boolean), "success", { single: true, groupKey: "innovation_types" })}
-    </div>
-    <div class="cl-section">
-      ${fieldSelect("scenarios", "使用场景", safeArray(item.scenarios), "accent")}
-    </div>
-    <div class="cl-section">
-      ${fieldSelect("painpoints", "用户痛点", safeArray(item.painpoints), "danger")}
-    </div>
+    ${schemaFieldsView("inspiration", item)}
     ${state.page?.platform === "xiaohongshu" ? commentsCaptureView(item) : ""}
     <div class="cl-section">
       <div class="cl-section-label">备注</div>
@@ -1478,9 +1617,20 @@ function commentItemView(comment) {
 }
 
 function tagGroupByKey(key) {
-  const normalizedKey = key === "innovation" ? "innovation_types" : key;
-  return safeArray(state.tagGroups).find((group) => group.key === key || group.key === normalizedKey) ||
-    DEFAULT_TAG_GROUPS.find((group) => group.key === normalizedKey) ||
+  const field = safeArray(state.fields).find((item) => item.key === key || item.legacyKey === key);
+  const normalizedKey = field?.legacyKey || (key === "innovation" ? "innovation_types" : key);
+  const group = safeArray(state.tagGroups).find((item) => item.key === key || item.key === normalizedKey);
+  if (field) {
+    return {
+      key: field.key,
+      legacyKey: field.legacyKey || normalizedKey,
+      name: field.name,
+      tone: field.tone || group?.tone || "outline",
+      tags: uniqueList(field.options || group?.tags),
+    };
+  }
+  return group ||
+    DEFAULT_TAG_GROUPS.find((item) => item.key === normalizedKey) ||
     { key, name: key, tone: "outline", tags: [] };
 }
 
@@ -1490,12 +1640,20 @@ function ensureTagOption(groupKey, value) {
   const group = tagGroupByKey(groupKey);
   if (safeArray(group.tags).includes(cleanValue)) return;
   state.tagGroups = safeArray(state.tagGroups).map((item) =>
-    item.key === group.key ? { ...item, tags: [...safeArray(item.tags), cleanValue] } : item
+    item.key === group.legacyKey || item.key === group.key ? { ...item, tags: [...safeArray(item.tags), cleanValue] } : item
   );
-  api(`/api/fields/${encodeURIComponent(groupKey)}/options`, {
+  state.fields = safeArray(state.fields).map((field) =>
+    field.key === group.key ? { ...field, options: [...safeArray(field.options), cleanValue] } : field
+  );
+  api(`/api/fields/${encodeURIComponent(group.key)}/options`, {
     method: "POST",
     body: JSON.stringify({ value: cleanValue }),
-  }).catch(() => {});
+  }).catch(() => {
+    api("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ tag_groups: state.tagGroups }),
+    }).catch(() => {});
+  });
 }
 
 function fieldSelect(key, label, selectedValues, tone = "accent", options = {}) {
@@ -1520,11 +1678,6 @@ function fieldSelect(key, label, selectedValues, tone = "accent", options = {}) 
       ${active ? tagPickerPanel(key, group, selected, tone, options) : ""}
     </div>
   `;
-}
-
-function singleFieldSelect(key, label, value, tone = "outline", options = {}) {
-  const selected = cleanText(value, "");
-  return fieldSelect(key, label, selected ? [selected] : [], tone, { ...options, single: true });
 }
 
 function tagPickerPanel(key, group, selected, tone, options = {}) {
@@ -1688,7 +1841,9 @@ function bindHeader() {
           credentials: "include",
           headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
         });
-      } catch {}
+      } catch {
+        // Logout is best effort; local extension auth state is still cleared.
+      }
       await removeSessionCookie();
       await clearAuthState();
       renderLoginWait("你已退出登录");
@@ -1720,12 +1875,12 @@ function handleGlobalClick(event) {
     if (!key || !value) return;
     ensureTagOption(key, value);
     if (single || key === "innovation") {
-      state.form = { ...(state.form || {}), [key]: value };
+      setTagValue(key, [value]);
       state.tagPicker = null;
     } else {
-      const current = safeArray(state.form?.[key]);
+      const current = safeArray(state.form?.tag_values?.[key] || state.form?.[key]);
       const next = current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
-      state.form = { ...(state.form || {}), [key]: next };
+      setTagValue(key, next);
     }
     renderMain();
     return;
@@ -1736,10 +1891,8 @@ function handleGlobalClick(event) {
     const key = removable.getAttribute("data-tag-key");
     const value = removable.getAttribute("data-tag-value");
     if (!key || !value) return;
-    state.form = {
-      ...(state.form || {}),
-      [key]: key === "innovation" ? "待分类" : safeArray(state.form?.[key]).filter((item) => item !== value),
-    };
+    const current = safeArray(state.form?.tag_values?.[key] || state.form?.[key]);
+    setTagValue(key, key === "innovation" ? [] : current.filter((item) => item !== value));
     renderMain();
     return;
   }
@@ -1817,7 +1970,9 @@ document.addEventListener("focusin", (event) => {
   requestAnimationFrame(() => {
     try {
       el.select();
-    } catch {}
+    } catch {
+      // Some browser contexts reject programmatic selection.
+    }
   });
 });
 
@@ -1825,19 +1980,31 @@ function handleSaveMutation() {
   return state.form || buildDraft(state.mode, state.processed || state.page?.data || {});
 }
 
+function normalizedTagValues(item, entity) {
+  const fields = fieldsForEntity(entity);
+  const values = { ...(item?.tag_values || {}) };
+  for (const field of fields) {
+    const current = fieldValues(item, field);
+    values[field.key] = field.multi === false ? current.slice(0, 1) : current;
+  }
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, uniqueList(value)]));
+}
+
 function productPayload(item) {
+  const tagValues = normalizedTagValues(item, "competitor");
+  const brand = uniqueList(tagValues.brand).join(" / ");
+  const host = uniqueList(tagValues.host).join(" / ");
+  const category = uniqueList(tagValues.category).join(" / ");
+  const customTags = uniqueList(tagValues.custom_tags || item.tags);
   return {
     ...item,
     source_url: item.url || state.page.data.url,
     platform: state.page.platform,
     name: item.name,
-    brand: item.brand || "",
-    category: item.category || "",
-    tag_values: {
-      brand: item.brand ? [item.brand] : [],
-      category: item.category ? [item.category] : [],
-      custom_tags: safeArray(item.tags),
-    },
+    brand: brand || item.brand || "",
+    host: host || item.host || "",
+    category: category || item.category || "",
+    tag_values: tagValues,
     price: item.price || "",
     cost_estimate: item.cost_estimate || "",
     rating: item.rating || null,
@@ -1849,7 +2016,7 @@ function productPayload(item) {
     backers: item.backers || "",
     image: item.image || item.thumbnail_url || "",
     thumbnail_url: item.thumbnail_url || item.image || "",
-    tags: safeArray(item.tags),
+    tags: customTags,
     selling_points: safeArray(item.selling_points),
     platforms: safeArray(item.platforms).length ? item.platforms : [{
       id: `${state.page.platform}-${Date.now()}`,
@@ -1873,6 +2040,11 @@ function productPayload(item) {
 }
 
 function demandPayload(item) {
+  const tagValues = normalizedTagValues(item, "inspiration");
+  const innovation = uniqueList(tagValues.innovation)[0] || item.innovation || "待分类";
+  const scenarios = uniqueList(tagValues.scenarios || item.scenarios);
+  const painpoints = uniqueList(tagValues.painpoints || item.painpoints);
+  const customTags = uniqueList(tagValues.custom_tags || item.tags_custom || item.tags);
   return {
     ...item,
     title: item.title,
@@ -1887,14 +2059,11 @@ function demandPayload(item) {
     collects: Number(item.collects || 0),
     comments: Number(item.comments || 0),
     visible_comments: mergeComments([], item.visible_comments),
-    scenarios: safeArray(item.scenarios),
-    painpoints: safeArray(item.painpoints),
-    innovation: item.innovation || "待分类",
-    tag_values: {
-      innovation: [item.innovation || "待分类"].filter(Boolean),
-      scenarios: safeArray(item.scenarios),
-      painpoints: safeArray(item.painpoints),
-    },
+    scenarios,
+    painpoints,
+    innovation,
+    tags: customTags,
+    tag_values: tagValues,
     thumbnail_url: item.thumbnail_url || item.image || "",
     note: item.note || "",
     import_method: "chrome_extension",

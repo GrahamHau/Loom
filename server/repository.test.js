@@ -4,6 +4,7 @@ process.env.DATABASE_PATH = ":memory:";
 
 const dbModule = await import("./db.js");
 const repo = await import("./repository.js");
+const { fieldOptionsText } = await import("./field-config.js");
 
 beforeEach(() => {
   dbModule.migrate();
@@ -407,7 +408,7 @@ describe("repository", () => {
     const user = repo.ensureLocalUser({ id: "shared-news-user", name: "Shared User", auth_provider: "feishu" });
     repo.upsertNews(legacyUserId, [{
       source_id: "default-news-google-camera-launches",
-      source: "主机品牌新品 - Google News",
+      source: "主机新品 - Google News",
       original_url: "https://shared.test/official-news",
       original_title: "Official shared news",
       titleZh: "官方共享资讯",
@@ -430,7 +431,7 @@ describe("repository", () => {
     const user = repo.ensureLocalUser({ id: "cache-user", name: "Cache User", auth_provider: "feishu" });
     repo.upsertNews(legacyUserId, [{
       source_id: "default-news-google-camera-launches",
-      source: "主机品牌新品 - Google News",
+      source: "主机新品 - Google News",
       original_url: "https://shared.test/cached-official-news",
       original_title: "Official cached news",
       titleZh: "官方缓存资讯",
@@ -453,7 +454,7 @@ describe("repository", () => {
     const user = repo.ensureLocalUser({ id: "stale-shared-news-user", name: "Stale User", auth_provider: "feishu" });
     repo.upsertNews(legacyUserId, [{
       source_id: "default-news-google-camera-launches",
-      source: "主机品牌新品 - Google News",
+      source: "主机新品 - Google News",
       original_url: "https://shared.test/stale-official-news",
       original_title: "Old official shared news",
       titleZh: "旧官方共享资讯",
@@ -476,7 +477,7 @@ describe("repository", () => {
     const user = repo.ensureLocalUser({ id: "official-off-user", name: "Official Off", auth_provider: "feishu" });
     repo.upsertNews(legacyUserId, [{
       source_id: "default-news-google-camera-launches",
-      source: "主机品牌新品 - Google News",
+      source: "主机新品 - Google News",
       original_url: "https://shared.test/hidden-official",
       original_title: "Official hidden news",
       titleZh: "官方隐藏资讯",
@@ -597,7 +598,57 @@ describe("repository", () => {
     const state = repo.bootstrap(legacyUserId);
 
     expect(state.settings.fields.find((field) => field.key === "host")?.name).toBe("主机");
+    expect(state.settings.tag_groups.find((group) => group.key === "camera_brands")?.name).toBe("主机");
     expect(state.settings.tag_groups.find((group) => group.key === "camera_brands")?.field_key).toBe("host");
+    expect(state.settings.fields.find((field) => field.key === "host")?.options).toEqual(expect.arrayContaining([
+      "Osmo Pocket 3",
+      "Osmo Action 5 Pro",
+      "DJI Mini 4 Pro",
+      "Insta360 Ace Pro 2",
+      "Insta360 X5",
+      "Insta360 GO 3S",
+    ]));
+  });
+
+  it("does not merge brand and host options into a pseudo brands field", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const state = repo.bootstrap(legacyUserId);
+
+    expect(JSON.parse(fieldOptionsText(state.settings.fields, "brand"))).toEqual(expect.arrayContaining(["Ulanzi"]));
+    expect(JSON.parse(fieldOptionsText(state.settings.fields, "host"))).toEqual(expect.arrayContaining(["Osmo Pocket 3"]));
+    expect(JSON.parse(fieldOptionsText(state.settings.fields, "category"))).toEqual(expect.arrayContaining(["灯光"]));
+    expect(JSON.parse(fieldOptionsText(state.settings.fields, "brands"))).toEqual([]);
+  });
+
+  it("merges latest official host defaults into existing settings fields", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.updateSettings(legacyUserId, {
+      fields: [
+        {
+          key: "host",
+          legacyKey: "camera_brands",
+          name: "主机",
+          tone: "outline",
+          multi: false,
+          official: true,
+          entities: ["competitor"],
+          options: ["DJI Osmo Pocket 3", "Insta360 GO 3"],
+        },
+      ],
+    });
+
+    const state = repo.bootstrap(legacyUserId);
+    const hostOptions = state.settings.fields.find((field) => field.key === "host")?.options || [];
+    expect(hostOptions).toEqual(expect.arrayContaining([
+      "Osmo Pocket 3",
+      "Osmo Action 5 Pro",
+      "DJI Mini 4 Pro",
+      "Insta360 Ace Pro 2",
+      "Insta360 X5",
+      "Insta360 GO 3S",
+      "DJI Osmo Pocket 3",
+      "Insta360 GO 3",
+    ]));
   });
 
   it("dual-writes product tag_values and legacy fields", () => {

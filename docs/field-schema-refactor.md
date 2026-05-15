@@ -13,7 +13,7 @@
 ```js
 [
   { key: "competitor_brands", name: "竞品品牌", tone: "outline", tags: [...] },
-  { key: "camera_brands",     name: "主机品牌", tone: "outline", tags: [...] },
+  { key: "camera_brands",     name: "主机", tone: "outline", tags: [...] },
   { key: "product_categories",name: "产品品类", tone: "default", tags: [...] },
   // ... 7 组
 ]
@@ -21,7 +21,7 @@
 
 **核心问题**：
 1. **概念混乱**：「字段」和「选项库」搅在一起。一个 `key` 既代表 product 上的属性（如 `brand`），又是 tag 选项的容器。
-2. **隐藏的死配置**：`camera_brands`（主机品牌）已经定义在 tag-config 里，但**竞品详情页根本没用上**——只接入了品牌、品类、自定义标签三个字段。
+2. **隐藏的死配置**：`camera_brands`（主机 legacy key）已经定义在 tag-config 里，但**竞品详情页根本没用上**——只接入了品牌、品类、自定义标签三个字段。
 3. **字段不可扩展**：用户只能新增 tag 选项，不能新增字段本身。
 4. **三类字段没分层**：固定字段（标题/价格）、官方标签字段、用户自定义标签字段混在一个数组里，没区分。
 5. **归属不清**：同一个字段在不同实体（竞品 vs 灵感）下的可用性没有显式表达。
@@ -281,7 +281,7 @@ DELETE /api/fields/:key/options/:value      # 删选项
 在 `server/tag-config.js` 重命名为 `field-config.js`，导出 `DEFAULT_FIELDS`，按上面的数据结构 seed。重点：
 
 - 新增 `host` 字段，options 给一份合理初始列表（Pocket 3/4/4 Pro/5、Insta Luna/Ace、iPhone Pro 系列、α7 IV、R5 等）。
-- 旧 `camera_brands`（主机品牌）保留，作为另一个字段（如"主机品牌"）或直接合并到 `host`。建议：合并，避免重复。
+- 旧 `camera_brands` 保留为 `host` 的 legacy key；展示名统一为“主机”，选项应是适配主机/设备型号，不再混入厂商品牌。
 - `competitor_brands` 改 key 为 `brand`，更短。
 
 ---

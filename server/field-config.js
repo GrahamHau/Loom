@@ -2,22 +2,24 @@ import { nanoid } from "nanoid";
 import { DEFAULT_TAG_GROUPS, normalizeTagGroups } from "./tag-config.js";
 
 const HOST_OPTIONS = [
-  "DJI Osmo Pocket 3",
-  "DJI Osmo Pocket 4",
-  "DJI Osmo Pocket 4 Pro",
-  "DJI Osmo Pocket 5",
+  "Osmo Pocket 3",
+  "Osmo Action 5 Pro",
+  "Osmo Action 4",
+  "Osmo Mobile 7P",
+  "Osmo Mobile 7",
+  "DJI Mini 4 Pro",
+  "DJI Air 3S",
+  "DJI Flip",
+  "DJI Neo",
+  "Insta360 Ace Pro 2",
   "Insta360 Ace Pro",
+  "Insta360 X5",
   "Insta360 GO 3",
+  "Insta360 GO 3S",
   "Insta360 X4",
-  "GoPro HERO12",
-  "GoPro HERO13",
-  "iPhone 15 Pro",
-  "iPhone 15 Pro Max",
-  "iPhone 16 Pro",
-  "Sony A7 IV",
-  "Sony ZV-E10",
-  "Canon EOS R5",
-  "Canon EOS R6 Mark II",
+  "Insta360 Flow 2 Pro",
+  "Insta360 Flow 2",
+  "Insta360 Flow Pro",
 ];
 
 function tagsFor(key) {
@@ -112,6 +114,13 @@ function cleanOptions(value) {
   return Array.from(new Set(value.map((item) => cleanText(item)).filter(Boolean))).slice(0, 200);
 }
 
+function mergedOfficialOptions(currentOptions, fallbackOptions) {
+  return cleanOptions([
+    ...(Array.isArray(fallbackOptions) ? fallbackOptions : []),
+    ...(Array.isArray(currentOptions) ? currentOptions : []),
+  ]);
+}
+
 function cleanEntities(value, fallback = ["competitor"]) {
   const entities = Array.isArray(value)
     ? value.filter((item) => item === "competitor" || item === "inspiration")
@@ -191,6 +200,7 @@ export function normalizeFields(fields = [], tagGroups = []) {
     const key = normalizeFieldKey(item.key, fallback?.key || `u_${nanoid(8)}`);
     if (!key || seen.has(key)) continue;
     seen.add(key);
+    const sourceOptions = item.options || item.tags;
     normalized.push({
       key,
       legacyKey: normalizeFieldKey(item.legacyKey || fallback?.legacyKey || key, key),
@@ -199,7 +209,9 @@ export function normalizeFields(fields = [], tagGroups = []) {
       multi: item.multi !== false,
       official: fallback ? true : Boolean(item.official),
       entities: cleanEntities(item.entities, fallback?.entities || ["competitor"]),
-      options: cleanOptions(item.options || item.tags || fallback?.options),
+      options: fallback
+        ? mergedOfficialOptions(sourceOptions, fallback?.options)
+        : cleanOptions(sourceOptions),
     });
   }
   for (const field of DEFAULT_FIELDS) {

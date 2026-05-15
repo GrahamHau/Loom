@@ -47,6 +47,7 @@ export async function parseProductUrl(userId, { url, platform }) {
 {
   "name": "商品全称",
   "brand": "品牌名",
+  "host": "适配主机/设备型号",
   "category": "产品品类",
   "tags": ["标签"],
   "price": "售价（含币种符号）",
@@ -64,8 +65,9 @@ export async function parseProductUrl(userId, { url, platform }) {
 }
 
 竞品品牌：${fieldListText(userId, "brand")}
-主机：${fieldListText(userId, "host")}
+适配主机/设备型号：${fieldListText(userId, "host")}
 产品品类：${fieldListText(userId, "category")}
+字段语义：brand 只填竞品/厂商品牌；host 只填适配主机或设备型号；category 只填产品品类，三者不要互相混填。
 
 平台：${detectedPlatform}
 URL：${page.url}
@@ -85,6 +87,7 @@ ${searchContext}`,
     emoji: "📦",
     name,
     brand: result.brand || "",
+    host: result.host || "",
     category: result.category || "未分类",
     tags: compactArray(result.tags),
     status: "新录入",
@@ -133,6 +136,7 @@ export async function parseProductRaw(userId, { platform, data }) {
 {
   "name": "标准化商品名",
   "brand": "品牌名",
+  "host": "适配主机/设备型号",
   "category": "品类",
   "price": "带符号的价格",
   "creator": "Kickstarter 发起人或空字符串",
@@ -149,8 +153,9 @@ export async function parseProductRaw(userId, { platform, data }) {
 }
 
 竞品品牌：${fieldListText(userId, "brand")}
-主机：${fieldListText(userId, "host")}
+适配主机/设备型号：${fieldListText(userId, "host")}
 产品品类：${fieldListText(userId, "category")}
+字段语义：brand 只填竞品/厂商品牌；host 只填适配主机或设备型号；category 只填产品品类，三者不要互相混填。
 
 平台：${platform}
 URL：${source.url || ""}
@@ -170,6 +175,7 @@ URL：${source.url || ""}
     platform,
     name: result.name || source.name || source.title || "未命名竞品",
     brand: result.brand || source.brand || "",
+    host: result.host || source.host || "",
     category: result.category || source.category || "未分类",
     price: result.price || source.price || "",
     creator: result.creator || source.creator || "",
@@ -199,6 +205,7 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets }) {
 {
   "price": "带符号价格或空字符串",
   "brand": "品牌或空字符串",
+  "host": "适配主机/设备型号或空字符串",
   "category": "品类或空字符串",
   "monthly_sales": "月销估算或空字符串",
   "selling_points": ["图片中明确出现的卖点"],
@@ -207,7 +214,7 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets }) {
 }
 
 竞品品牌：${fieldListText(userId, "brand")}
-主机：${fieldListText(userId, "host")}
+适配主机/设备型号：${fieldListText(userId, "host")}
 产品品类：${fieldListText(userId, "category")}`,
     user: `从淘宝/天猫详情页中提取商品信息。详情页的卖点主要来自后续长图、规格图、场景图；首图只作为封面参考。
 
@@ -215,6 +222,7 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets }) {
 - selling_points 必须来自详情长图、规格图、商品名、描述或原始规格中明确出现的信息；不确定就返回 []。
 - 不要把“旗舰店、包邮、优惠、券后、销量、售后承诺”当作核心卖点。
 - brand 只能从“竞品品牌”列表中选择完全匹配或高度明确的品牌；匹配不到返回 ""。
+- host 只能填明确出现的适配主机/设备型号，不要把厂商品牌填到 host。
 - category 只能从“产品品类”列表中选择最贴近的一个；匹配不到返回 ""。
 - negative_keywords 只有详情图或文本里明确出现缺陷、限制、差评时才返回；没有就返回 []。
 - ai_summary 用中文，50 字以内，概括这个商品对竞品库有价值的信息。
@@ -223,6 +231,7 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets }) {
 {
   "name": "标准化商品名",
   "brand": "品牌名或空字符串",
+  "host": "适配主机/设备型号或空字符串",
   "category": "品类或空字符串",
   "price": "带符号的价格",
   "sku_id": "SKU ID",
@@ -233,8 +242,9 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets }) {
 }
 
 竞品品牌：${fieldListText(userId, "brand")}
-主机：${fieldListText(userId, "host")}
+适配主机/设备型号：${fieldListText(userId, "host")}
 产品品类：${fieldListText(userId, "category")}
+字段语义：brand 只填竞品/厂商品牌；host 只填适配主机或设备型号；category 只填产品品类，三者不要互相混填。
 
 平台：${platform}
 URL：${source.url || ""}
@@ -257,6 +267,7 @@ ${detailImages.map((url, index) => `${index + 1}. ${url}`).join("\n")}`,
     platform,
     name: result.name || source.name || source.title || "未命名竞品",
     brand: result.brand || "",
+    host: result.host || source.host || "",
     category: result.category || "",
     price: result.price || source.price || "",
     sku_id: result.sku_id || source.sku_id || "",

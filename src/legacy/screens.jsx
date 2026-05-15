@@ -243,32 +243,49 @@ function newsMergeTitleTokens(value = "") {
     .filter((token) => !NEWS_MERGE_STOPWORDS.has(token));
 }
 
-function newsBrandTags(tagGroups = []) {
+function newsTaxonomyTokens(tagGroups = [], keys = ["competitor_brands", "camera_brands"]) {
   return Array.from(new Set(
     safeArray(tagGroups)
-      .filter((group) => ["competitor_brands", "camera_brands"].includes(group?.key))
+      .filter((group) => safeArray(keys).includes(group?.key))
       .flatMap((group) => safeArray(group?.tags))
       .map((tag) => normalizeNewsMergeTitle(tag))
       .filter(Boolean)
   )).sort((a, b) => b.length - a.length);
 }
 
-function detectNewsBrand(normalizedTitle = "", tagGroups = []) {
+function detectNewsTaxonomyToken(normalizedTitle = "", tagGroups = [], keys = ["competitor_brands", "camera_brands"]) {
   const wrapped = `-${normalizedTitle}-`;
-  return newsBrandTags(tagGroups).find((brand) => wrapped.includes(`-${brand}-`)) || "";
+  return newsTaxonomyTokens(tagGroups, keys).find((token) => wrapped.includes(`-${token}-`)) || "";
+}
+
+function detectNewsBrandToken(normalizedTitle = "", tagGroups = []) {
+  return detectNewsTaxonomyToken(normalizedTitle, tagGroups, ["competitor_brands"]);
+}
+
+function detectNewsHostToken(normalizedTitle = "", tagGroups = []) {
+  return detectNewsTaxonomyToken(normalizedTitle, tagGroups, ["camera_brands"]);
+}
+
+function trimBrandPrefix(value = "", brand = "") {
+  if (!value || !brand) return value;
+  return value.startsWith(`${brand}-`) ? value.slice(brand.length + 1) : value;
 }
 
 function newsMergeKey(item = {}, tagGroups = []) {
   const normalizedTitle = normalizeNewsMergeTitle(item?.titleZh || item?.original_title || "");
   const titleTokens = newsMergeTitleTokens(item?.titleZh || item?.original_title || "");
-  const detectedBrand = detectNewsBrand(normalizedTitle, tagGroups);
-  const brandTokens = detectedBrand ? detectedBrand.split("-").filter(Boolean) : [];
-  const coreTokens = titleTokens.filter((token, index) => !brandTokens.length || index >= brandTokens.length || !brandTokens.includes(token));
-  const normalizedKey = detectedBrand && coreTokens.length
-    ? `${detectedBrand}::${coreTokens.slice(0, 6).join("-")}`
+  const detectedBrandToken = detectNewsBrandToken(normalizedTitle, tagGroups);
+  const detectedHostToken = detectNewsHostToken(normalizedTitle, tagGroups);
+  const brandTokens = detectedBrandToken ? detectedBrandToken.split("-").filter(Boolean) : [];
+  const hostTokens = detectedHostToken ? detectedHostToken.split("-").filter(Boolean) : [];
+  const coreTokens = titleTokens.filter((token) => !brandTokens.includes(token) && !hostTokens.includes(token));
+  const hostKey = trimBrandPrefix(detectedHostToken, detectedBrandToken);
+  const taxonomyKey = [detectedBrandToken, hostKey].filter(Boolean).join("::");
+  const normalizedKey = taxonomyKey
+    ? [taxonomyKey, coreTokens.slice(0, 6).join("-")].filter(Boolean).join("::")
     : (coreTokens.slice(0, 6).join("-") || normalizedTitle);
   const classifiedKey = String(item?.classification?.merge_key || "").trim();
-  if (classifiedKey) {
+  if (classifiedKey && !taxonomyKey) {
     const classifiedTokens = classifiedKey
       .split("-")
       .filter(Boolean)
