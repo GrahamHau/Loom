@@ -208,16 +208,74 @@ function demandMetricValue(value) {
   return "—";
 }
 
-function newsMergeKey(item = {}) {
-  const classifiedKey = String(item?.classification?.merge_key || "").trim();
-  if (classifiedKey) return classifiedKey;
-  return String(item?.titleZh || item?.original_title || "")
+const NEWS_MERGE_STOPWORDS = new Set([
+  "a", "an", "the", "and", "or", "to", "for", "of", "with", "in", "on", "at",
+  "launch", "launches", "launched", "launching",
+  "announce", "announces", "announced", "announcing",
+  "introduce", "introduces", "introduced", "introducing",
+  "release", "releases", "released", "releasing",
+  "debut", "debuts", "debuted", "debuting",
+  "official", "presented", "preview", "first", "look", "review", "hands", "hand", "rumor", "rumour", "teaser",
+  "发布", "推出", "上市", "首发", "亮相", "登场", "发售", "开售", "正式发布", "正式推出",
+  "新机", "新品", "相机", "镜头", "套装",
+]);
+
+function normalizeNewsMergeTitle(value = "") {
+  return String(value || "")
+    .replace(/([\u4e00-\u9fa5])([A-Za-z0-9])/g, "$1 $2")
+    .replace(/([A-Za-z0-9])([\u4e00-\u9fa5])/g, "$1 $2")
     .toLowerCase()
     .replace(/\s+-\s+[^-]+$/g, "")
     .replace(/['"“”‘’]/g, "")
     .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/-(发布|推出|上市|首发|亮相|登场|发售|开售|正式发布|正式推出)(?=-|$)/g, "-")
+    .replace(/^(发布|推出|上市|首发|亮相|登场|发售|开售|正式发布|正式推出)-/g, "")
+    .replace(/(新品|新机|复古套装|套装)(发布|推出|上市|首发|亮相|登场|发售|开售|正式发布|正式推出)$/g, "$1")
+    .replace(/(go-\d+s?)(发布|推出|上市|首发|亮相|登场|发售|开售)$/g, "$1")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 140) || String(item?.id || "");
+    .slice(0, 140);
+}
+
+function newsMergeTitleTokens(value = "") {
+  return normalizeNewsMergeTitle(value)
+    .split("-")
+    .filter(Boolean)
+    .filter((token) => !NEWS_MERGE_STOPWORDS.has(token));
+}
+
+function newsBrandTags(tagGroups = []) {
+  return Array.from(new Set(
+    safeArray(tagGroups)
+      .filter((group) => ["competitor_brands", "camera_brands"].includes(group?.key))
+      .flatMap((group) => safeArray(group?.tags))
+      .map((tag) => normalizeNewsMergeTitle(tag))
+      .filter(Boolean)
+  )).sort((a, b) => b.length - a.length);
+}
+
+function detectNewsBrand(normalizedTitle = "", tagGroups = []) {
+  const wrapped = `-${normalizedTitle}-`;
+  return newsBrandTags(tagGroups).find((brand) => wrapped.includes(`-${brand}-`)) || "";
+}
+
+function newsMergeKey(item = {}, tagGroups = []) {
+  const normalizedTitle = normalizeNewsMergeTitle(item?.titleZh || item?.original_title || "");
+  const titleTokens = newsMergeTitleTokens(item?.titleZh || item?.original_title || "");
+  const detectedBrand = detectNewsBrand(normalizedTitle, tagGroups);
+  const brandTokens = detectedBrand ? detectedBrand.split("-").filter(Boolean) : [];
+  const coreTokens = titleTokens.filter((token, index) => !brandTokens.length || index >= brandTokens.length || !brandTokens.includes(token));
+  const normalizedKey = detectedBrand && coreTokens.length
+    ? `${detectedBrand}::${coreTokens.slice(0, 6).join("-")}`
+    : (coreTokens.slice(0, 6).join("-") || normalizedTitle);
+  const classifiedKey = String(item?.classification?.merge_key || "").trim();
+  if (classifiedKey) {
+    const classifiedTokens = classifiedKey
+      .split("-")
+      .filter(Boolean)
+      .filter((token) => normalizedKey.includes(token) || token.includes(normalizedKey));
+    if (classifiedTokens.length >= 2 || !normalizedKey) return classifiedKey;
+  }
+  return normalizedKey || classifiedKey || String(item?.id || "");
 }
 
 function newsSourceHost(item = {}) {
@@ -229,10 +287,10 @@ function newsSourceHost(item = {}) {
   }
 }
 
-function buildNewsGroups(items = []) {
+function buildNewsGroups(items = [], tagGroups = []) {
   const map = new Map();
   for (const item of safeArray(items)) {
-    const key = newsMergeKey(item);
+    const key = newsMergeKey(item, tagGroups);
     const groupId = `news-group:${key}`;
     const current = map.get(key);
     if (!current) {
@@ -345,7 +403,85 @@ function newsEmptyState(tab, sampleWorkspace) {
 
 function tagGroupByKey(tagGroups, key) {
   const normalizedKey = key === "innovation" ? "innovation_types" : key;
-  return safeArray(tagGroups).find((group) => group.key === normalizedKey) || { key: normalizedKey, name: normalizedKey, tone: "outline", tags: [] };
+  return safeArray(tagGroups).find((group) => group.key === key || group.key === normalizedKey) || { key, name: key, tone: "outline", tags: [] };
+}
+
+// ===== Field System =====
+const OFFICIAL_FIELD_DEFS = [
+  { key: "brand",       name: "品牌",    tagGroupKey: "competitor_brands",  official: true,  multi: true,  entities: ["competitor"],               tone: "outline" },
+  { key: "host",        name: "主机",    tagGroupKey: "camera_brands",      official: true,  multi: false, entities: ["competitor"],               tone: "outline" },
+  { key: "category",    name: "品类",    tagGroupKey: "product_categories", official: true,  multi: true,  entities: ["competitor"],               tone: "default" },
+  { key: "scenarios",   name: "使用场景", tagGroupKey: "scenarios",          official: true,  multi: true,  entities: ["competitor", "inspiration"], tone: "accent"  },
+  { key: "painpoints",  name: "用户痛点", tagGroupKey: "painpoints",         official: true,  multi: true,  entities: ["competitor", "inspiration"], tone: "danger"  },
+  { key: "innovation",  name: "创新类型", tagGroupKey: "innovation_types",   official: true,  multi: false, entities: ["inspiration"],              tone: "success" },
+  { key: "custom_tags", name: "自定义标签", tagGroupKey: "custom_tags",      official: true,  multi: true,  entities: ["competitor", "inspiration"], tone: "outline" },
+];
+
+function normalizeFields(fieldsOrGroups, fallbackGroups = []) {
+  const source = Array.isArray(fieldsOrGroups) ? fieldsOrGroups : [];
+  if (source.some((item) => item?.options || item?.official !== undefined || item?.legacyKey)) {
+    return source.map((field) => ({
+      key: field.key,
+      name: field.name || field.key,
+      tagGroupKey: field.key,
+      legacyKey: field.legacyKey || field.key,
+      official: field.official !== false,
+      multi: field.multi !== false,
+      entities: Array.isArray(field.entities) ? field.entities : ["competitor"],
+      tone: field.tone || "outline",
+      options: Array.isArray(field.options) ? field.options : [],
+    }));
+  }
+  const groups = source.length ? source : safeArray(fallbackGroups);
+  const officialGroupKeys = new Set(OFFICIAL_FIELD_DEFS.map((d) => d.tagGroupKey));
+  const official = OFFICIAL_FIELD_DEFS.map((def) => {
+    const group = groups.find((g) => g.key === def.tagGroupKey);
+    return {
+      ...def,
+      options: Array.isArray(group?.tags) ? group.tags : [],
+      entities: Array.isArray(group?.entities) ? group.entities : def.entities,
+    };
+  });
+  const custom = groups
+    .filter((g) => !officialGroupKeys.has(g.key))
+    .map((g) => ({
+      key: g.key,
+      name: g.name || g.key,
+      tagGroupKey: g.key,
+      official: false,
+      multi: g.multi !== false,
+      entities: Array.isArray(g.entities) ? g.entities : ["competitor", "inspiration"],
+      tone: g.tone || "outline",
+      options: Array.isArray(g.tags) ? g.tags : [],
+    }));
+  return [...official, ...custom];
+}
+
+function getFieldValue(entity, fieldKey) {
+  if (entity?.tag_values && Array.isArray(entity.tag_values[fieldKey])) return entity.tag_values[fieldKey];
+  switch (fieldKey) {
+    case "brand":      return splitTokenText(entity?.brand);
+    case "host":       return splitTokenText(entity?.host);
+    case "category":   return splitTokenText(entity?.category);
+    case "scenarios":  return safeArray(entity?.scenarios);
+    case "painpoints": return safeArray(entity?.painpoints);
+    case "innovation":   return [entity?.innovation].filter(Boolean);
+    case "custom_tags":  return safeArray(entity?.tags);
+    default:             return safeArray(entity?.[fieldKey]);
+  }
+}
+
+function buildFieldPatch(fieldKey, values) {
+  switch (fieldKey) {
+    case "brand":      return { brand: values.join(" / "), tag_values: { brand: values } };
+    case "host":       return { host: values.join(" / "), tag_values: { host: values } };
+    case "category":   return { category: values.join(" / "), tag_values: { category: values } };
+    case "innovation":   return { innovation: values[0] || "", tag_values: { innovation: values } };
+    case "scenarios":    return { scenarios: values, tag_values: { scenarios: values } };
+    case "painpoints":   return { painpoints: values, tag_values: { painpoints: values } };
+    case "custom_tags":  return { tags: values, tag_values: { custom_tags: values } };
+    default:             return { tag_values: { [fieldKey]: values } };
+  }
 }
 
 function MultiSelectField({ label, fieldKey, values, tagGroups, tone = "accent", single = false, compact = false, onChange, onCreateOption }) {
@@ -721,6 +857,62 @@ function MultiTagField({ label, fieldKey, values, tagGroups, tone = "outline", o
   );
 }
 
+function FieldRow({ field, entity, onSave, onCreateOption }) {
+  const values = getFieldValue(entity, field.key);
+  const syntheticTagGroups = [{ key: field.key, name: field.name, tone: field.tone, tags: field.options }];
+  return (
+    <div className="detail-section detail-section-tight">
+      <div className="detail-section-label">
+        <Icon name={field.official ? "tag" : "sparkles"} size={11} style={field.official ? {} : { color: "var(--accent)" }} />
+        {field.name}
+        {!field.official && <span className="field-custom-chip">自定义</span>}
+      </div>
+      <MultiSelectField
+        label={field.name}
+        fieldKey={field.key}
+        values={values}
+        tagGroups={syntheticTagGroups}
+        tone={field.tone}
+        single={!field.multi}
+        compact
+        onChange={(vals) => onSave?.(buildFieldPatch(field.key, vals))}
+        onCreateOption={onCreateOption}
+      />
+    </div>
+  );
+}
+
+function AddFieldPopover({ fields, entityType, onAttach, onGoSettings, onClose }) {
+  const rootRef = useRef(null);
+  const unattached = fields.filter((f) => !f.entities.includes(entityType));
+  useEffect(() => {
+    const handler = (e) => { if (!rootRef.current?.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+  return (
+    <div className="add-field-popover" ref={rootRef}>
+      <div className="add-field-popover-head">添加字段</div>
+      {unattached.length === 0 ? (
+        <div className="add-field-empty">所有字段已添加<br /><span>可在设置里新建更多字段</span></div>
+      ) : (
+        <div className="add-field-list">
+          {unattached.map((f) => (
+            <button key={f.key} className="add-field-item" onClick={() => { onAttach(f); onClose(); }}>
+              <Icon name={f.official ? "tag" : "sparkles"} size={12} style={{ color: f.official ? "var(--text-3)" : "var(--accent)", flexShrink: 0 }} />
+              <span className="add-field-item-name">{f.name}</span>
+              <span className="add-field-item-meta">{f.multi ? "多选" : "单选"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <button className="add-field-goto" onClick={onGoSettings}>
+        <Icon name="settings" size={12} /> 去设置里新建字段
+      </button>
+    </div>
+  );
+}
+
 // ============ LOGIN ============
 function LoginScreen({ onLogin, onDemoLogin, onFeishuLogin, error, providers = {} }) {
   const [user, setUser] = useState("");
@@ -826,7 +1018,7 @@ window.LoginScreen = LoginScreen;
 // ============ NEWS ============
 function NewsScreen({ data, api, refreshData, navTarget }) {
   const [tab, setTab] = useState("all");
-  const initialNewsGroups = buildNewsGroups(data.news);
+  const initialNewsGroups = buildNewsGroups(data.news, data.settings?.tag_groups);
   const [items, setItems] = useState(initialNewsGroups);
   const [counts, setCounts] = useState(newsGroupCounts(initialNewsGroups));
   const [busy, setBusy] = useState(false);
@@ -841,10 +1033,10 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   const initialBatchSize = 18;
   const [visibleCount, setVisibleCount] = useState(initialBatchSize);
   useEffect(() => {
-    const groups = buildNewsGroups(data.news);
+    const groups = buildNewsGroups(data.news, data.settings?.tag_groups);
     setItems(groups);
     setCounts(newsGroupCounts(groups));
-  }, [data.news]);
+  }, [data.news, data.settings?.tag_groups]);
 
   const visibleItems = items.slice(0, visibleCount);
   const grouped = visibleItems.reduce((acc, n) => {
@@ -917,7 +1109,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     if (nextTab === "starred") params.set("starred", "1");
     if (nextTab === "微信公众号") params.set("source_group", "wechat-exporter");
     const result = await api(`/api/news?${params.toString()}`);
-    let groups = buildNewsGroups(result.items || result);
+    let groups = buildNewsGroups(result.items || result, data.settings?.tag_groups);
     if (nextTab === "Google News") groups = groups.filter((item) => isGoogleNewsItem(item));
     setItems(groups);
     if (nextTab === "all") setCounts(newsGroupCounts(groups));
@@ -1371,7 +1563,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const [deleteBusy, setDeleteBusy] = useState(false);
   useEffect(() => setProducts(safeArray(data.products)), [data.products]);
   const updateSelected = async (patch) => {
-    setProducts((ps) => ps.map((p) => p.id === selectedId ? { ...p, ...patch } : p));
+    setProducts((ps) => ps.map((p) => p.id === selectedId ? { ...p, ...patch, tag_values: { ...(p.tag_values || {}), ...(patch.tag_values || {}) } } : p));
     if (api && selectedId) {
       const nextPatch = patch.image !== undefined ? { ...patch, image_override: "manual" } : patch;
       await api(`/api/products/${selectedId}`, { method: "PATCH", body: JSON.stringify(nextPatch) });
@@ -1384,6 +1576,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
   const [priceCcy, setPriceCcy] = useState("native"); // unused (toggle removed)
+  const [addFieldOpen, setAddFieldOpen] = useState(false);
 
   useEffect(() => {
     if (!products.some((p) => p.id === selectedId)) {
@@ -1440,15 +1633,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const createTagOption = async (groupKey, value) => {
     const cleanValue = String(value || "").trim();
     if (!api || !cleanValue) return;
-    const groups = safeArray(data.settings?.tag_groups);
-    const nextGroups = groups.map((group) => {
-      if (group.key !== groupKey || safeArray(group.tags).includes(cleanValue)) return group;
-      return { ...group, tags: [...safeArray(group.tags), cleanValue] };
-    });
-    await api("/api/settings", {
-      method: "PATCH",
-      body: JSON.stringify({ tag_groups: nextGroups }),
-    });
+    await api(`/api/fields/${encodeURIComponent(groupKey)}/options`, { method: "POST", body: JSON.stringify({ value: cleanValue }) });
     await refreshData?.();
   };
   const toggleSelect = (id) => {
@@ -1651,50 +1836,46 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
               <AddPlatformControl existingPlatforms={selected.platforms} onAdd={addSelectedPlatform} />
             </div>
 
-            <div className="detail-inline-grid">
-              <div className="detail-section detail-section-tight">
-                <div className="detail-section-label"><Icon name="tag" size={11} /> 品牌</div>
-                <MultiSelectField
-                  label="品牌"
-                  fieldKey="competitor_brands"
-                  values={splitTokenText(selected.brand)}
-                  tagGroups={data.settings?.tag_groups}
-                  tone="outline"
-                  compact
-                  onChange={(values) => updateSelected({ brand: values.join(" / ") })}
-                  onCreateOption={createTagOption}
-                />
-              </div>
-
-              <div className="detail-section detail-section-tight">
-                <div className="detail-section-label"><Icon name="tag" size={11} /> 品类</div>
-                <MultiSelectField
-                  label="品类"
-                  fieldKey="product_categories"
-                  values={splitTokenText(selected.category)}
-                  tagGroups={data.settings?.tag_groups}
-                  tone="default"
-                  compact
-                  onChange={(values) => updateSelected({ category: values.join(" / ") })}
-                  onCreateOption={createTagOption}
-                />
-              </div>
-            </div>
-
-            <div className="detail-section">
-              <div className="detail-section-label"><Icon name="tag" size={11} /> 标签</div>
-              <DetailFieldCard>
-                <MultiTagField
-                  label="标签"
-                  fieldKey="custom_tags"
-                  values={safeArray(selected.tags)}
-                  tagGroups={data.settings?.tag_groups}
-                  tone="outline"
-                  onChange={(next) => updateSelected({ tags: next })}
-                  onCreateOption={createTagOption}
-                />
-              </DetailFieldCard>
-            </div>
+            {(() => {
+              const fields = normalizeFields(data.settings?.fields, data.settings?.tag_groups);
+              const competitorFields = fields.filter((f) => f.entities.includes("competitor"));
+              const attachField = async (field) => {
+                await api?.(`/api/fields/${encodeURIComponent(field.key)}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({ entities: Array.from(new Set([...(Array.isArray(field.entities) ? field.entities : []), "competitor"])) }),
+                });
+                await refreshData?.();
+              };
+              return (
+                <>
+                  <div className="detail-inline-grid">
+                    {competitorFields.map((field) => (
+                      <FieldRow
+                        key={field.key}
+                        field={field}
+                        entity={selected}
+                        onSave={updateSelected}
+                        onCreateOption={createTagOption}
+                      />
+                    ))}
+                  </div>
+                  <div className="detail-section detail-add-field-wrap">
+                    <button className="add-field-trigger" onClick={() => setAddFieldOpen((v) => !v)}>
+                      <Icon name="plus" size={12} /> 添加字段
+                    </button>
+                    {addFieldOpen && (
+                      <AddFieldPopover
+                        fields={fields}
+                        entityType="competitor"
+                        onAttach={attachField}
+                        onGoSettings={() => { setAddFieldOpen(false); setNotice("请前往「设置 → 标签与字段」新建字段。"); }}
+                        onClose={() => setAddFieldOpen(false)}
+                      />
+                    )}
+                  </div>
+                </>
+              );
+            })()}
 
             <div className="detail-section">
               <div className="detail-section-label"><Icon name="sparkles" size={11} /> 核心卖点 · AI 总结 + 用户补充</div>
@@ -1934,15 +2115,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   const createTagOption = async (groupKey, value) => {
     const cleanValue = String(value || "").trim();
     if (!api || !cleanValue) return;
-    const groups = safeArray(data.settings?.tag_groups);
-    const nextGroups = groups.map((group) => {
-      if (group.key !== groupKey || safeArray(group.tags).includes(cleanValue)) return group;
-      return { ...group, tags: [...safeArray(group.tags), cleanValue] };
-    });
-    await api("/api/settings", {
-      method: "PATCH",
-      body: JSON.stringify({ tag_groups: nextGroups }),
-    });
+    await api(`/api/fields/${encodeURIComponent(groupKey)}/options`, { method: "POST", body: JSON.stringify({ value: cleanValue }) });
     await refreshData?.();
   };
 
@@ -2146,7 +2319,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
         <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条灵感" />
       </div>
 
-      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
+      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} fields={data.settings?.fields} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
       {deleteTarget && <DeleteDemandConfirmModal demand={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={confirmDelete} />}
       {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="需求" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={async () => { await deleteSelected(); setShowBulkDeleteConfirm(false); }} />}
     </div>);
@@ -2154,7 +2327,8 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
 }
 window.DemandsScreen = DemandsScreen;
 
-function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete, tagGroups = [], onCreateTagOption }) {
+function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete, fields = [], tagGroups = [], onCreateTagOption, onNavigateSettings }) {
+  const [addFieldOpen, setAddFieldOpen] = useState(false);
   const save = async (patch) => {
     if (api) {
       await api(`/api/demands/${demand.id}`, { method: "PATCH", body: JSON.stringify(patch) });
@@ -2197,42 +2371,44 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
             style={{ width: "100%", minHeight: 70, lineHeight: 1.6, resize: "vertical", fontSize: 12.5 }} />
           </div>
 
-          <div className="detail-section">
-            <MultiSelectField
-              label="创新类型"
-              fieldKey="innovation"
-              values={[demand.innovation].filter(Boolean)}
-              tagGroups={tagGroups}
-              tone="success"
-              single
-              onChange={(values) => save({ innovation: values[0] || "待分类" })}
-              onCreateOption={onCreateTagOption}
-            />
-          </div>
-
-          <div className="detail-section">
-            <MultiSelectField
-              label="使用场景"
-              fieldKey="scenarios"
-              values={demand.scenarios}
-              tagGroups={tagGroups}
-              tone="accent"
-              onChange={(values) => save({ scenarios: values })}
-              onCreateOption={onCreateTagOption}
-            />
-          </div>
-
-          <div className="detail-section">
-            <MultiSelectField
-              label="用户痛点"
-              fieldKey="painpoints"
-              values={demand.painpoints}
-              tagGroups={tagGroups}
-              tone="danger"
-              onChange={(values) => save({ painpoints: values })}
-              onCreateOption={onCreateTagOption}
-            />
-          </div>
+          {(() => {
+            const normalizedFields = normalizeFields(fields, tagGroups);
+            const inspirationFields = normalizedFields.filter((f) => f.entities.includes("inspiration"));
+            const attachField = async (field) => {
+              await api?.(`/api/fields/${encodeURIComponent(field.key)}`, {
+                method: "PATCH",
+                body: JSON.stringify({ entities: Array.from(new Set([...(Array.isArray(field.entities) ? field.entities : []), "inspiration"])) }),
+              });
+              await refreshData?.();
+            };
+            return (
+              <>
+                {inspirationFields.map((field) => (
+                  <FieldRow
+                    key={field.key}
+                    field={field}
+                    entity={demand}
+                    onSave={save}
+                    onCreateOption={onCreateTagOption}
+                  />
+                ))}
+                <div className="detail-section detail-add-field-wrap">
+                  <button className="add-field-trigger" onClick={() => setAddFieldOpen((v) => !v)}>
+                    <Icon name="plus" size={12} /> 添加字段
+                  </button>
+                  {addFieldOpen && (
+                    <AddFieldPopover
+                      fields={normalizedFields}
+                      entityType="inspiration"
+                      onAttach={attachField}
+                      onGoSettings={() => { setAddFieldOpen(false); onNavigateSettings?.(); }}
+                      onClose={() => setAddFieldOpen(false)}
+                    />
+                  )}
+                </div>
+              </>
+            );
+          })()}
 
           <div className="detail-section">
             <div className="detail-section-label">来源链接</div>
@@ -2246,15 +2422,6 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
               {sourceUrl || `${demand.source}.com/...`}
               {sourceUrl && <Icon name="external" size={12} />}
             </a>
-          </div>
-
-          <div className="detail-section">
-            <div className="detail-section-label">自定义标签</div>
-            <DemandTagList
-              items={safeArray(demand.tags)}
-              onChange={(values) => save({ tags: values })}
-              addLabel="+ 添加标签"
-            />
           </div>
 
           <div className="detail-section">
@@ -3074,7 +3241,7 @@ function SettingsScreen({ data, api, refreshData }) {
         <div className="muted text-sm" style={{ marginBottom: 24 }}>配置 AI 模型、飞书同步与数据源</div>
         <div className="news-tabs" style={{ marginBottom: 16 }}>
           <div className={`news-tab ${settingsTab === "general" ? "active" : ""}`} onClick={() => setSettingsTab("general")}>通用设置</div>
-          <div className={`news-tab ${settingsTab === "tags" ? "active" : ""}`} onClick={() => setSettingsTab("tags")}>Tag设置</div>
+          <div className={`news-tab ${settingsTab === "tags" ? "active" : ""}`} onClick={() => setSettingsTab("tags")}>标签与字段</div>
         </div>
         {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
 
@@ -3386,10 +3553,10 @@ function SettingsScreen({ data, api, refreshData }) {
           <div className="settings-section">
             <div className="settings-section-head">
               <Icon name="tag" size={14} style={{ color: "var(--accent)" }} />
-              <div><h3>Tag设置</h3><div className="desc">统一配置品牌、品类、场景、痛点、创新类型与自定义标签</div></div>
+              <div><h3>标签与字段</h3><div className="desc">配置竞品库和灵感库的标签字段，支持新建自定义字段</div></div>
             </div>
             <div className="settings-section-body">
-              <TagSystemEditor settings={settings} setSettings={setSettings} saveSettings={saveSettings} />
+              <FieldSystemEditor settings={settings} setSettings={setSettings} saveSettings={saveSettings} />
             </div>
           </div>
         )}
@@ -3441,6 +3608,7 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
     research: ["competitor_brands", "camera_brands", "product_categories", "scenarios", "painpoints", "innovation_types", "custom_tags"],
   };
 
+  // TagSystemEditor kept for reference but replaced by FieldSystemEditor above
   const visibleGroups = groups.filter((group) => TAB_GROUPS[tagTab]?.includes(group.key));
 
   return (
@@ -3499,4 +3667,265 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
       </div>
     </>);
 
+}
+
+// ===== New Field System Components =====
+
+function FieldCard({ field, onOptionsChange, onEntitiesChange, onDelete, onRename }) {
+  const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [nameInput, setNameInput] = useState(field.name);
+
+  const addOption = () => {
+    const v = draft.trim();
+    if (!v) { setEditing(false); return; }
+    if (!field.options.includes(v)) onOptionsChange?.([...field.options, v]);
+    setDraft("");
+    setEditing(false);
+  };
+
+  const removeOption = (opt) => onOptionsChange?.(field.options.filter((o) => o !== opt));
+
+  const toggleEntity = (entity) => {
+    const curr = field.entities;
+    if (curr.includes(entity)) {
+      if (curr.length <= 1) return;
+      onEntitiesChange?.(curr.filter((e) => e !== entity));
+    } else {
+      onEntitiesChange?.([...curr, entity]);
+    }
+  };
+
+  const commitRename = () => {
+    const name = nameInput.trim();
+    if (name && name !== field.name) onRename?.(name);
+    setRenaming(false);
+  };
+
+  return (
+    <div className="field-card">
+      <div className="field-card-header">
+        <div className="field-card-title">
+          <Icon name={field.official ? "tag" : "sparkles"} size={13} style={{ color: field.official ? "var(--text-3)" : "var(--accent)", flexShrink: 0 }} />
+          {renaming ? (
+            <input
+              autoFocus
+              className="input"
+              style={{ height: 24, padding: "0 8px", fontSize: 12.5, width: 140 }}
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setRenaming(false); setNameInput(field.name); } }}
+              onBlur={commitRename}
+            />
+          ) : (
+            <span className="field-card-name">{field.name}</span>
+          )}
+          <span className="tag outline" style={{ fontSize: 10.5, padding: "0 6px", height: 18, lineHeight: "18px" }}>{field.multi ? "多选" : "单选"}</span>
+          {!field.official && <span className="field-custom-chip">自定义</span>}
+        </div>
+        <div className="field-card-actions">
+          {!field.official && <Btn variant="ghost" size="sm" icon="edit" title="改名" onClick={() => { setRenaming(true); setNameInput(field.name); }} />}
+          {onDelete && <Btn variant="ghost" size="sm" icon="trash" title="删除字段" onClick={onDelete} />}
+        </div>
+      </div>
+      <div className="field-card-entities">
+        <span className="field-card-entity-label">归属：</span>
+        {[{ key: "competitor", label: "竞品库" }, { key: "inspiration", label: "灵感库" }].map((e) => (
+          <label key={e.key} className="field-entity-checkbox">
+            <input
+              type="checkbox"
+              checked={field.entities.includes(e.key)}
+              onChange={() => toggleEntity(e.key)}
+            />
+            {e.label}
+          </label>
+        ))}
+      </div>
+      <div className="field-card-options">
+        {field.options.map((opt) => (
+          <span key={opt} className={`tag ${field.tone}`} style={{ paddingRight: 4, gap: 3, cursor: "default" }}>
+            {opt}
+            <Icon name="x" size={11} style={{ cursor: "pointer", opacity: 0.6 }} onClick={() => removeOption(opt)} />
+          </span>
+        ))}
+        {editing ? (
+          <input
+            autoFocus
+            className="input"
+            style={{ height: 24, padding: "0 8px", fontSize: 11.5, width: 120 }}
+            placeholder="输入后回车"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addOption(); if (e.key === "Escape") { setEditing(false); setDraft(""); } }}
+            onBlur={addOption}
+          />
+        ) : (
+          <button
+            className="tag"
+            style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)", cursor: "pointer", gap: 3 }}
+            onClick={() => setEditing(true)}
+          >
+            <Icon name="plus" size={10} /> 添加
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NewFieldModal({ onClose, onCreate }) {
+  const [name, setName] = useState("");
+  const [multi, setMulti] = useState(true);
+  const [tone, setTone] = useState("outline");
+  const [entities, setEntities] = useState(["competitor"]);
+
+  const toggleEntity = (e) => setEntities((curr) => curr.includes(e) ? curr.filter((x) => x !== e) : [...curr, e]);
+  const valid = name.trim().length > 0 && entities.length > 0;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <Icon name="sparkles" size={16} style={{ color: "var(--accent)" }} />
+          <h3>新建字段</h3>
+          <Btn variant="ghost" icon="x" onClick={onClose} />
+        </div>
+        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="settings-row">
+            <div className="label">字段名</div>
+            <input
+              className="input"
+              style={{ width: "100%" }}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="例如：目标人群"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter" && valid) onCreate({ name: name.trim(), multi, tone, entities }); }}
+            />
+          </div>
+          <div className="settings-row">
+            <div className="label">类型</div>
+            <div style={{ display: "flex", gap: 16 }}>
+              {[{ v: true, label: "多选" }, { v: false, label: "单选" }].map(({ v, label }) => (
+                <label key={label} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12.5 }}>
+                  <input type="radio" checked={multi === v} onChange={() => setMulti(v)} /> {label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="settings-row">
+            <div className="label">颜色</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {["outline", "default", "accent", "success", "warn", "danger"].map((t) => (
+                <button
+                  key={t}
+                  className={`tag ${t} ${tone === t ? "ring" : ""}`}
+                  style={{ cursor: "pointer", outline: tone === t ? "2px solid var(--accent)" : "none", outlineOffset: 2 }}
+                  onClick={() => setTone(t)}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="settings-row">
+            <div className="label">归属</div>
+            <div style={{ display: "flex", gap: 16 }}>
+              {[{ key: "competitor", label: "竞品库" }, { key: "inspiration", label: "灵感库" }].map((e) => (
+                <label key={e.key} className="field-entity-checkbox" style={{ cursor: "pointer" }}>
+                  <input type="checkbox" checked={entities.includes(e.key)} onChange={() => toggleEntity(e.key)} />
+                  {e.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <Btn variant="ghost" onClick={onClose}>取消</Btn>
+          <Btn variant="primary" disabled={!valid} onClick={() => onCreate({ name: name.trim(), multi, tone, entities })}>创建</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FieldSystemEditor({ settings, setSettings, saveSettings }) {
+  const [fieldsState, setFieldsState] = useState(normalizeFields(settings.fields, settings.tag_groups));
+  const [fieldTab, setFieldTab] = useState("competitor");
+  const [showNewField, setShowNewField] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => setFieldsState(normalizeFields(settings.fields, settings.tag_groups)), [settings.fields, settings.tag_groups]);
+
+  const visibleFields = fieldTab === "all" ? fieldsState : fieldsState.filter((f) => f.entities.includes(fieldTab));
+
+  const persist = async (nextFields) => {
+    const next = { ...settings, fields: nextFields };
+    setSettings(next);
+    try {
+      await saveSettings(next);
+      setNotice("已保存");
+      setTimeout(() => setNotice(""), 2000);
+    } catch {
+      setNotice("保存失败");
+    }
+  };
+
+  const updateField = async (fieldKey, patch) => {
+    const next = fieldsState.map((field) => field.key === fieldKey ? { ...field, ...patch } : field);
+    setFieldsState(next);
+    await persist(next);
+  };
+
+  const addCustomField = async (fd) => {
+    const key = `u_${Date.now()}`;
+    const newField = { key, name: fd.name, tone: fd.tone, multi: fd.multi, official: false, entities: fd.entities, options: [] };
+    const next = [...fieldsState, newField];
+    setFieldsState(next);
+    await persist(next);
+  };
+
+  const deleteCustomField = async (fieldKey) => {
+    const next = fieldsState.filter((field) => field.key !== fieldKey);
+    setFieldsState(next);
+    await persist(next);
+  };
+
+  return (
+    <>
+      <div className="news-tabs" style={{ marginBottom: 16 }}>
+        <div className={`news-tab ${fieldTab === "competitor" ? "active" : ""}`} onClick={() => setFieldTab("competitor")}>竞品库</div>
+        <div className={`news-tab ${fieldTab === "inspiration" ? "active" : ""}`} onClick={() => setFieldTab("inspiration")}>灵感库</div>
+        <div className={`news-tab ${fieldTab === "all" ? "active" : ""}`} onClick={() => setFieldTab("all")}>所有字段</div>
+      </div>
+      {notice && <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 10 }}>{notice}</div>}
+      <div className="field-card-list">
+        {visibleFields.map((field) => (
+          <FieldCard
+            key={field.key}
+            field={field}
+            onOptionsChange={(options) => updateField(field.key, { options })}
+            onEntitiesChange={(entities) => updateField(field.key, { entities })}
+            onRename={!field.official ? (name) => updateField(field.key, { name }) : undefined}
+            onDelete={!field.official ? () => deleteCustomField(field.key) : undefined}
+          />
+        ))}
+        {visibleFields.length === 0 && (
+          <div style={{ padding: "20px 0", color: "var(--text-3)", fontSize: 12.5, textAlign: "center" }}>
+            暂无字段，点击下方「新建字段」添加
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 14, display: "flex", gap: 8, alignItems: "center" }}>
+        <Btn icon="plus" variant="ghost" onClick={() => setShowNewField(true)}>新建字段</Btn>
+      </div>
+      {showNewField && (
+        <NewFieldModal
+          onClose={() => setShowNewField(false)}
+          onCreate={async (fd) => { await addCustomField(fd); setShowNewField(false); }}
+        />
+      )}
+    </>
+  );
 }

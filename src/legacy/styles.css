@@ -211,6 +211,8 @@ a { color: inherit; text-decoration: none; }
 }
 .sb-user:hover,
 .sb-user.open { background: var(--hover); }
+.sb-user-name { font-size: 12.5px; font-weight: 500; }
+.sb-user-role { font-size: 10.5px; color: var(--text-3); }
 .sb-account-menu {
   position: absolute;
   left: 10px;
@@ -241,14 +243,17 @@ a { color: inherit; text-decoration: none; }
 .sb-account-menu-item:hover { background: var(--hover); color: var(--text); }
 .sb-account-menu-item.danger { color: var(--danger); }
 .sb-avatar {
-  width: 24px; height: 24px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, oklch(0.7 0.12 30), oklch(0.55 0.14 290));
-  color: white;
+  width: 26px; height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
   display: grid; place-items: center;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
+  letter-spacing: 0;
+  flex-shrink: 0;
 }
+.sb-avatar[data-len="1"] { font-size: 13px; }
 
 /* Main area */
 .main {
@@ -847,6 +852,8 @@ textarea.ghost-input { line-height: 1.6; }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+  align-items: start;
+  overflow: visible;
 }
 .detail-section-label {
   font-size: 10.5px;
@@ -997,6 +1004,9 @@ a.platform-card-link:hover {
 .multi-field {
   position: relative;
 }
+.multi-field.open {
+  z-index: 12;
+}
 .multi-field.compact {
   min-height: 0;
 }
@@ -1079,6 +1089,8 @@ a.platform-card-link:hover {
   border-radius: 7px;
   background: var(--surface-2);
   box-shadow: var(--shadow-sm);
+  position: relative;
+  z-index: 13;
 }
 .multi-field.compact .multi-picker {
   padding: 6px;
@@ -2670,4 +2682,205 @@ a.platform-card-link:hover {
   .admin-sidebar {
     min-height: auto;
   }
+}
+
+/* ===== Field System ===== */
+
+/* Chip shown on custom field labels */
+.field-custom-chip {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 16px;
+  flex-shrink: 0;
+}
+
+/* Field card list in Settings */
+.field-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.field-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.field-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field-card-name {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.field-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.field-card-entities {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+}
+
+.field-card-entity-label {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.field-entity-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.field-card-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 12px;
+  min-height: 44px;
+}
+
+/* "添加字段" trigger + popover */
+.detail-add-field-wrap {
+  position: relative;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.add-field-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.add-field-trigger:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.add-field-popover {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 200;
+  min-width: 210px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.add-field-popover-head {
+  padding: 7px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.add-field-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.add-field-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12.5px;
+  width: 100%;
+  font-family: inherit;
+}
+
+.add-field-item:hover {
+  background: var(--hover);
+}
+
+.add-field-item-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.add-field-item-meta {
+  font-size: 10.5px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.add-field-empty {
+  padding: 14px 12px;
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.add-field-goto {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent-text);
+  font-size: 11.5px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+.add-field-goto:hover {
+  background: var(--accent-soft);
 }

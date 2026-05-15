@@ -3,7 +3,7 @@ import { callLLM, callRoutedLLM } from "./ai-service.js";
 import { fetchPageContent } from "./content-fetcher.js";
 import { buildSearchContext } from "./search-service.js";
 import { rawState } from "./repository.js";
-import { tagListText } from "./tag-config.js";
+import { fieldOptionsText } from "./field-config.js";
 
 function compactArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String).slice(0, 8);
@@ -28,15 +28,18 @@ function normalizeMonthlySales(value) {
     .trim();
 }
 
-function tagGroups(userId) {
-  return rawState(userId)?.settings?.tag_groups || [];
+function fields(userId) {
+  return rawState(userId)?.settings?.fields || [];
+}
+
+function fieldListText(userId, key) {
+  return fieldOptionsText(fields(userId), key);
 }
 
 export async function parseProductUrl(userId, { url, platform }) {
   const page = await fetchPageContent(url);
   const detectedPlatform = platform || page.platform;
   const searchContext = await buildSearchContext(userId, `${page.title} ${detectedPlatform} product review specs`, { limit: 4 });
-  const groups = tagGroups(userId);
   const result = await callLLM({
     userId,
     system: "你是产品经理的竞品信息结构化助手。只返回 JSON，不要解释。",
@@ -60,9 +63,9 @@ export async function parseProductUrl(userId, { url, platform }) {
   "ai_summary": "80字以内中文摘要"
 }
 
-竞品品牌：${tagListText(groups, "competitor_brands")}
-主机品牌：${tagListText(groups, "camera_brands")}
-产品品类：${tagListText(groups, "product_categories")}
+竞品品牌：${fieldListText(userId, "brand")}
+主机：${fieldListText(userId, "host")}
+产品品类：${fieldListText(userId, "category")}
 
 平台：${detectedPlatform}
 URL：${page.url}
@@ -110,11 +113,10 @@ ${searchContext}`,
 }
 
 export async function parseProductRaw(userId, { platform, data }) {
-  const groups = tagGroups(userId);
   const source = data || {};
   const rawBullets = compactArray(source.raw_bullets);
   if (platform === "taobao") {
-    return parseTaobaoProductRaw(userId, { platform, source, rawBullets, groups });
+    return parseTaobaoProductRaw(userId, { platform, source, rawBullets });
   }
   const result = await callLLM({
     userId,
@@ -146,9 +148,9 @@ export async function parseProductRaw(userId, { platform, data }) {
   "ai_summary": "50字以内中文竞品摘要"
 }
 
-竞品品牌：${tagListText(groups, "competitor_brands")}
-主机品牌：${tagListText(groups, "camera_brands")}
-产品品类：${tagListText(groups, "product_categories")}
+竞品品牌：${fieldListText(userId, "brand")}
+主机：${fieldListText(userId, "host")}
+产品品类：${fieldListText(userId, "category")}
 
 平台：${platform}
 URL：${source.url || ""}
@@ -185,7 +187,7 @@ URL：${source.url || ""}
   };
 }
 
-async function parseTaobaoProductRaw(userId, { platform, source, rawBullets, groups }) {
+async function parseTaobaoProductRaw(userId, { platform, source, rawBullets }) {
   const detailImages = compactUrlArray(source.detail_images);
   const result = await callRoutedLLM({
     userId,
@@ -204,9 +206,9 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets, gro
   "summary": "50字以内中文摘要"
 }
 
-竞品品牌：${tagListText(groups, "competitor_brands")}
-主机品牌：${tagListText(groups, "camera_brands")}
-产品品类：${tagListText(groups, "product_categories")}`,
+竞品品牌：${fieldListText(userId, "brand")}
+主机：${fieldListText(userId, "host")}
+产品品类：${fieldListText(userId, "category")}`,
     user: `从淘宝/天猫详情页中提取商品信息。详情页的卖点主要来自后续长图、规格图、场景图；首图只作为封面参考。
 
 规则：
@@ -230,9 +232,9 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets, gro
   "ai_summary": "50字以内中文竞品摘要"
 }
 
-竞品品牌：${tagListText(groups, "competitor_brands")}
-主机品牌：${tagListText(groups, "camera_brands")}
-产品品类：${tagListText(groups, "product_categories")}
+竞品品牌：${fieldListText(userId, "brand")}
+主机：${fieldListText(userId, "host")}
+产品品类：${fieldListText(userId, "category")}
 
 平台：${platform}
 URL：${source.url || ""}
@@ -272,16 +274,15 @@ ${detailImages.map((url, index) => `${index + 1}. ${url}`).join("\n")}`,
 export async function parseDemandUrl(userId, { url }) {
   const page = await fetchPageContent(url);
   const searchContext = await buildSearchContext(userId, `${page.title} creator problem use case trend`, { limit: 4 });
-  const groups = tagGroups(userId);
   const result = await callLLM({
     userId,
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
     user: `请对以下内容进行结构化打标。
 
-使用场景：${tagListText(groups, "scenarios")}
-用户痛点：${tagListText(groups, "painpoints")}
-创新类型：${tagListText(groups, "innovation_types")}
-自定义标签：${tagListText(groups, "custom_tags")}
+使用场景：${fieldListText(userId, "scenarios")}
+用户痛点：${fieldListText(userId, "painpoints")}
+创新类型：${fieldListText(userId, "innovation")}
+自定义标签：${fieldListText(userId, "custom_tags")}
 
 返回 JSON：
 {
@@ -329,7 +330,6 @@ ${searchContext}`,
 
 export async function parseDemandRaw(userId, { platform, data }) {
   const source = data || {};
-  const groups = tagGroups(userId);
   const result = await callLLM({
     userId,
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
@@ -339,10 +339,10 @@ export async function parseDemandRaw(userId, { platform, data }) {
 - title 必须基于原始标题压缩或清洗，不要改成另一个事件，也不要凭空重写。
 - 如果原始标题已经清晰，直接沿用原始标题。
 
-使用场景：${tagListText(groups, "scenarios")}
-用户痛点：${tagListText(groups, "painpoints")}
-创新类型：${tagListText(groups, "innovation_types")}
-自定义标签：${tagListText(groups, "custom_tags")}
+使用场景：${fieldListText(userId, "scenarios")}
+用户痛点：${fieldListText(userId, "painpoints")}
+创新类型：${fieldListText(userId, "innovation")}
+自定义标签：${fieldListText(userId, "custom_tags")}
 
 返回 JSON：
 {

@@ -161,6 +161,63 @@ describe("repository", () => {
     expect(repo.listNews(legacyUserId).find((item) => item.original_url === "https://a.test/with-image")?.thumbnail_url).toBe("https://cdn.test/a.jpg");
   });
 
+  it("finds reusable thumbnails across users by merge key and prefers same-user matches", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const secondUser = repo.ensureLocalUser({ id: "user-b", name: "User B", auth_provider: "feishu" });
+
+    repo.upsertNews(secondUser.id, [{
+      source_id: "google",
+      source: "Google Feed",
+      original_url: "https://news.google.com/rss/articles/shared-story",
+      titleZh: "索尼发布A7R VI",
+      thumbnail_url: "https://cdn.test/other-user.jpg",
+      type: "新品发布",
+      classification: { merge_key: "sony-a7r-vi" },
+      date: "2026-05-10",
+    }]);
+
+    repo.upsertNews(legacyUserId, [{
+      source_id: "google",
+      source: "Google Feed",
+      original_url: "https://news.google.com/rss/articles/local-story",
+      titleZh: "索尼发布A7R VI",
+      thumbnail_url: "https://cdn.test/same-user.jpg",
+      type: "新品发布",
+      classification: { merge_key: "sony-a7r-vi" },
+      date: "2026-05-11",
+    }]);
+
+    expect(repo.findReusableNewsThumbnail({
+      originalUrl: "https://news.google.com/rss/articles/missing-story",
+      mergeKey: "sony-a7r-vi",
+      titleZh: "索尼发布A7R VI",
+      userId: legacyUserId,
+    })).toBe("https://cdn.test/same-user.jpg");
+  });
+
+  it("finds reusable thumbnails across users by original url when no same-user image exists", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const secondUser = repo.ensureLocalUser({ id: "user-b", name: "User B", auth_provider: "feishu" });
+
+    repo.upsertNews(secondUser.id, [{
+      source_id: "google",
+      source: "Google Feed",
+      original_url: "https://news.google.com/rss/articles/shared-story",
+      titleZh: "Canon firmware update",
+      thumbnail_url: "https://cdn.test/shared.jpg",
+      type: "行业趋势",
+      classification: { merge_key: "canon-firmware-update" },
+      date: "2026-05-10",
+    }]);
+
+    expect(repo.findReusableNewsThumbnail({
+      originalUrl: "https://news.google.com/rss/articles/shared-story",
+      mergeKey: "canon-firmware-update",
+      titleZh: "Canon firmware update",
+      userId: legacyUserId,
+    })).toBe("https://cdn.test/shared.jpg");
+  });
+
   it("refreshes published_at and metadata for existing news when source sends newer data", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.upsertNews(legacyUserId, [{
@@ -533,5 +590,65 @@ describe("repository", () => {
     const updated = repo.updateProduct(legacyUserId, product.id, { related_product_id: "p-2", related_product_name: "Target Product" });
     expect(updated.related_product_id).toBe("p-2");
     expect(updated.related_product_name).toBe("Target Product");
+  });
+
+  it("exposes field schema and keeps legacy tag groups for compatibility", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const state = repo.bootstrap(legacyUserId);
+
+    expect(state.settings.fields.find((field) => field.key === "host")?.name).toBe("主机");
+    expect(state.settings.tag_groups.find((group) => group.key === "camera_brands")?.field_key).toBe("host");
+  });
+
+  it("dual-writes product tag_values and legacy fields", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const product = repo.createProduct(legacyUserId, {
+      name: "Schema Product",
+      tag_values: {
+        brand: ["DJI"],
+        host: ["DJI Osmo Pocket 3"],
+        category: ["稳定器"],
+        custom_tags: ["便携"],
+      },
+    });
+
+    expect(product.brand).toBe("DJI");
+    expect(product.host).toBe("DJI Osmo Pocket 3");
+    expect(product.category).toBe("稳定器");
+    expect(product.tags).toEqual(["便携"]);
+
+    const updated = repo.updateProduct(legacyUserId, product.id, { brand: "Ulanzi / SmallRig" });
+    expect(updated.tag_values.brand).toEqual(["Ulanzi", "SmallRig"]);
+  });
+
+  it("creates custom fields and can attach them to entities", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const field = repo.createField(legacyUserId, {
+      name: "目标人群",
+      entities: ["competitor"],
+      options: ["创作者"],
+    });
+
+    expect(field.official).toBe(false);
+    expect(repo.listFields(legacyUserId, "competitor").map((item) => item.key)).toContain(field.key);
+
+    const updated = repo.updateField(legacyUserId, field.key, { entities: ["competitor", "inspiration"], options: ["创作者", "摄影爱好者"] });
+    expect(updated.entities).toEqual(["competitor", "inspiration"]);
+    expect(repo.listFields(legacyUserId, "inspiration").map((item) => item.key)).toContain(field.key);
+  });
+
+  it("cleans custom tag_values when settings removes a custom field", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const field = repo.createField(legacyUserId, { name: "目标人群", entities: ["competitor"], options: ["创作者"] });
+    const product = repo.createProduct(legacyUserId, {
+      name: "Audience Product",
+      tag_values: { [field.key]: ["创作者"] },
+    });
+
+    const fields = repo.listFields(legacyUserId).filter((item) => item.key !== field.key);
+    repo.updateSettings(legacyUserId, { fields });
+
+    const saved = repo.rawState(legacyUserId).products.find((item) => item.id === product.id);
+    expect(saved.tag_values[field.key]).toBeUndefined();
   });
 });

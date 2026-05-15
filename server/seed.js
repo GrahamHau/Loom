@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_TAG_GROUPS } from "./tag-config.js";
+import { DEFAULT_FIELDS, fieldsToTagGroups } from "./field-config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -32,7 +32,8 @@ export function defaultSettings() {
     search_serpapi_api_key: "",
     search_serpapi_api_url: "https://serpapi.com/search.json",
     search_serpapi_engine: "google",
-    tag_groups: DEFAULT_TAG_GROUPS,
+    fields: DEFAULT_FIELDS,
+    tag_groups: fieldsToTagGroups(DEFAULT_FIELDS),
     feishu_app_id: "",
     feishu_app_secret: "",
     feishu_base_token: "",

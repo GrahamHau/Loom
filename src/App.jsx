@@ -211,6 +211,15 @@ function normalizeData(input = {}) {
   };
 }
 
+/** 从用户名推导头像字符：中文名取末尾 1-2 个汉字，英文取首字母缩写 */
+function userInitials(name) {
+  const str = String(name || "").trim();
+  if (!str) return "?";
+  const cjk = str.match(/[一-鿿㐀-䶿]/g);
+  if (cjk?.length) return cjk[cjk.length - 1];
+  return str[0].toUpperCase();
+}
+
 function Sidebar({ active, onNav, data, onLogout }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef(null);
@@ -287,10 +296,10 @@ function Sidebar({ active, onNav, data, onLogout }) {
           onClick={() => setAccountOpen((value) => !value)}
           aria-expanded={accountOpen}
         >
-          <div className="sb-avatar">{user.initials}</div>
+          <div className="sb-avatar" data-len={userInitials(user.name).length}>{userInitials(user.name)}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 500 }}>{user.name}</div>
-            <div style={{ fontSize: 10.5, color: "var(--text-3)" }}>{user.role}</div>
+            <div className="sb-user-name">{user.name}</div>
+            <div className="sb-user-role">{user.role}</div>
           </div>
           <Icon name="chevron-down" size={12} style={{ color: "var(--text-3)" }} />
         </button>

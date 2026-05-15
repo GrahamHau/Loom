@@ -13,7 +13,7 @@ import {
   upsertApiToken,
   saveUserState,
 } from "./db.js";
-import { normalizeTagGroups } from "./tag-config.js";
+import { DEFAULT_FIELDS, normalizeFields, normalizeSettingsFields } from "./field-config.js";
 import { buildEmptyState } from "./seed.js";
 import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
@@ -128,13 +128,14 @@ function mapUserRow(row) {
 
 function requireState(userId) {
   const state = getUserState(userId);
-  if (state) return clone(state);
+  if (state) return normalizeWorkspaceState(clone(state));
   const user = findUserById(userId);
   if (!user) return null;
-  return clone(ensureUserState(user));
+  return normalizeWorkspaceState(clone(ensureUserState(user)));
 }
 
 function saveStateForUser(userId, state) {
+  normalizeWorkspaceState(state);
   saveUserState(userId, state);
 }
 
@@ -221,6 +222,70 @@ function cleanSummary(value, fallback = "") {
 function cleanArray(value, limit = 20) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => cleanText(item)).filter(Boolean).slice(0, limit);
+}
+
+function splitTokenText(value) {
+  return cleanText(value)
+    .split(/\s*(?:\/|,|，|、|\|)\s*/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function cleanTagValues(value, limit = 50) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out = {};
+  for (const [key, list] of Object.entries(value)) {
+    const cleanKey = cleanText(key).replace(/[^a-zA-Z0-9_:-]+/g, "_").slice(0, 80);
+    if (!cleanKey) continue;
+    out[cleanKey] = cleanArray(Array.isArray(list) ? list : [list], limit);
+  }
+  return out;
+}
+
+function productTagValues(input = {}) {
+  const tagValues = cleanTagValues(input.tag_values);
+  if (input.brand !== undefined && !tagValues.brand) tagValues.brand = splitTokenText(input.brand);
+  if (input.host !== undefined && !tagValues.host) tagValues.host = splitTokenText(input.host);
+  if (input.category !== undefined && !tagValues.category) tagValues.category = splitTokenText(input.category);
+  if (input.tags !== undefined && !tagValues.custom_tags) tagValues.custom_tags = cleanArray(input.tags);
+  return tagValues;
+}
+
+function demandTagValues(input = {}) {
+  const tagValues = cleanTagValues(input.tag_values);
+  if (input.innovation !== undefined && !tagValues.innovation) tagValues.innovation = [cleanTitle(input.innovation, "")].filter(Boolean);
+  if (input.scenarios !== undefined && !tagValues.scenarios) tagValues.scenarios = cleanArray(input.scenarios);
+  if (input.painpoints !== undefined && !tagValues.painpoints) tagValues.painpoints = cleanArray(input.painpoints);
+  if (input.tags !== undefined && !tagValues.custom_tags) tagValues.custom_tags = cleanArray(input.tags);
+  return tagValues;
+}
+
+function syncLegacyProductFields(item) {
+  const values = cleanTagValues(item.tag_values);
+  item.tag_values = values;
+  item.brand = (values.brand || splitTokenText(item.brand)).join(" / ");
+  item.host = (values.host || splitTokenText(item.host)).join(" / ");
+  item.category = (values.category || splitTokenText(item.category)).join(" / ") || item.category || "未分类";
+  item.tags = values.custom_tags || cleanArray(item.tags);
+  return item;
+}
+
+function syncLegacyDemandFields(item) {
+  const values = cleanTagValues(item.tag_values);
+  item.tag_values = values;
+  item.innovation = (values.innovation || [item.innovation].filter(Boolean))[0] || "待分类";
+  item.scenarios = values.scenarios || cleanArray(item.scenarios);
+  item.painpoints = values.painpoints || cleanArray(item.painpoints);
+  item.tags = values.custom_tags || cleanArray(item.tags);
+  return item;
+}
+
+function normalizeWorkspaceState(state) {
+  if (!state) return state;
+  state.settings = normalizeSettingsFields(state.settings || {});
+  state.products = (state.products || []).map(syncLegacyProductFields);
+  state.demands = (state.demands || []).map(syncLegacyDemandFields);
+  return state;
 }
 
 function cleanVisibleComments(value, limit = 80) {
@@ -424,7 +489,7 @@ export function bootstrap(userId) {
   if (state.settings) {
     const llmConfigured = Boolean(state.settings.llm_api_url && state.settings.llm_model && state.settings.llm_api_key);
     const llmVisionConfigured = Boolean(state.settings.llm_vision_api_url && state.settings.llm_vision_model && state.settings.llm_vision_api_key);
-    state.settings = { ...state.settings, tag_groups: normalizeTagGroups(state.settings.tag_groups) };
+    state.settings = normalizeSettingsFields(state.settings);
     state.settings = maskSettings(state.settings);
     state.settings.llm_configured = llmConfigured;
     state.settings.llm_vision_configured = llmVisionConfigured;
@@ -437,7 +502,7 @@ export function rawState(userId) {
   if (!state) return null;
   state.user = userSummaryFromState(state, findUserById(userId) || { id: userId });
   if (state.settings) {
-    state.settings = { ...state.settings, tag_groups: normalizeTagGroups(state.settings.tag_groups) };
+    state.settings = normalizeSettingsFields(state.settings);
   }
   return state;
 }
@@ -483,8 +548,10 @@ export function createProduct(userId, input) {
       emoji: cleanText(input.emoji, "📦"),
       name: cleanTitle(input.name, "未命名竞品"),
       brand: cleanTitle(input.brand, ""),
+      host: cleanTitle(input.host, ""),
       category: cleanTitle(input.category, "未分类"),
       tags: cleanArray(input.tags),
+      tag_values: productTagValues(input),
       status: cleanTitle(input.status, "新录入"),
       ai_summary: cleanSummary(input.ai_summary),
       selling_points: cleanArray(input.selling_points),
@@ -502,6 +569,7 @@ export function createProduct(userId, input) {
       updated_at: input.updated_at || nowIso(),
       platforms: cleanPlatformArray(input.platforms),
     };
+    syncLegacyProductFields(product);
     state.products ||= [];
     state.products.unshift(product);
     return product;
@@ -516,7 +584,9 @@ export function updateProduct(userId, id, patch) {
     const next = {
       ...(patch.name !== undefined ? { name: cleanTitle(patch.name, item.name) } : {}),
       ...(patch.brand !== undefined ? { brand: cleanTitle(patch.brand, item.brand || "") } : {}),
+      ...(patch.host !== undefined ? { host: cleanTitle(patch.host, item.host || "") } : {}),
       ...(patch.category !== undefined ? { category: cleanTitle(patch.category, item.category) } : {}),
+      ...(patch.tag_values !== undefined ? { tag_values: { ...cleanTagValues(item.tag_values), ...cleanTagValues(patch.tag_values) } } : {}),
       ...(patch.status !== undefined ? { status: cleanTitle(patch.status, item.status) } : {}),
       ...(patch.emoji !== undefined ? { emoji: cleanText(patch.emoji, item.emoji) } : {}),
       ...(patch.ai_summary !== undefined ? { ai_summary: cleanSummary(patch.ai_summary, item.ai_summary) } : {}),
@@ -532,6 +602,15 @@ export function updateProduct(userId, id, patch) {
       updated_at: nowIso(),
     };
     Object.assign(item, next);
+    const tagValues = cleanTagValues(item.tag_values);
+    if (patch.brand !== undefined) tagValues.brand = splitTokenText(patch.brand);
+    if (patch.host !== undefined) tagValues.host = splitTokenText(patch.host);
+    if (patch.category !== undefined) tagValues.category = splitTokenText(patch.category);
+    if (patch.tags !== undefined) tagValues.custom_tags = cleanArray(patch.tags);
+    if (patch.brand !== undefined || patch.host !== undefined || patch.category !== undefined || patch.tags !== undefined || patch.tag_values !== undefined) {
+      item.tag_values = tagValues;
+    }
+    syncLegacyProductFields(item);
     return item;
   });
 }
@@ -568,6 +647,7 @@ export function createDemand(userId, input) {
       scenarios: cleanArray(input.scenarios),
       painpoints: cleanArray(input.painpoints),
       tags: cleanArray(input.tags),
+      tag_values: demandTagValues(input),
       note: cleanSummary(input.note),
       sample: Boolean(input.sample),
       synced_at: null,
@@ -575,6 +655,7 @@ export function createDemand(userId, input) {
       created_at: input.created_at || nowIso(),
       updated_at: input.updated_at || nowIso(),
     };
+    syncLegacyDemandFields(demand);
     state.demands ||= [];
     state.demands.unshift(demand);
     return demand;
@@ -602,6 +683,7 @@ export function updateDemand(userId, id, patch) {
       ...(patch.thumbnail_url !== undefined ? { thumbnail_url: cleanText(patch.thumbnail_url, item.thumbnail_url || "") } : {}),
       ...(patch.image !== undefined ? { image: cleanText(patch.image, item.image || "") } : {}),
       ...(patch.innovation !== undefined ? { innovation: cleanTitle(patch.innovation, item.innovation) } : {}),
+      ...(patch.tag_values !== undefined ? { tag_values: { ...cleanTagValues(item.tag_values), ...cleanTagValues(patch.tag_values) } } : {}),
       ...(patch.scenarios !== undefined ? { scenarios: cleanArray(patch.scenarios) } : {}),
       ...(patch.painpoints !== undefined ? { painpoints: cleanArray(patch.painpoints) } : {}),
       ...(patch.tags !== undefined ? { tags: cleanArray(patch.tags) } : {}),
@@ -609,6 +691,15 @@ export function updateDemand(userId, id, patch) {
       updated_at: nowIso(),
     };
     Object.assign(item, next);
+    const tagValues = cleanTagValues(item.tag_values);
+    if (patch.innovation !== undefined) tagValues.innovation = [cleanTitle(patch.innovation, "")].filter(Boolean);
+    if (patch.scenarios !== undefined) tagValues.scenarios = cleanArray(patch.scenarios);
+    if (patch.painpoints !== undefined) tagValues.painpoints = cleanArray(patch.painpoints);
+    if (patch.tags !== undefined) tagValues.custom_tags = cleanArray(patch.tags);
+    if (patch.innovation !== undefined || patch.scenarios !== undefined || patch.painpoints !== undefined || patch.tags !== undefined || patch.tag_values !== undefined) {
+      item.tag_values = tagValues;
+    }
+    syncLegacyDemandFields(item);
     return item;
   });
 }
@@ -673,6 +764,7 @@ export function deleteResearch(userId, id) {
 
 export function updateSettings(userId, patch) {
   return mutateUserState(userId, (state) => {
+    const previousFields = normalizeFields(state.settings?.fields, state.settings?.tag_groups);
     const allowed = [
       "llm_api_type",
       "llm_api_url",
@@ -698,6 +790,7 @@ export function updateSettings(userId, patch) {
       "search_serpapi_api_key",
       "search_serpapi_api_url",
       "search_serpapi_engine",
+      "fields",
       "tag_groups",
       "feishu_app_id",
       "feishu_app_secret",
@@ -718,9 +811,122 @@ export function updateSettings(userId, patch) {
       if (next[key] === "********" || next[key] === "") delete next[key];
     }
     state.settings = { ...(state.settings || {}), ...next };
-    state.settings.tag_groups = normalizeTagGroups(state.settings.tag_groups);
+    state.settings = normalizeSettingsFields(state.settings);
+    if (patch.fields !== undefined) {
+      const nextKeys = new Set(normalizeFields(state.settings.fields).map((field) => field.key));
+      const removedCustomKeys = previousFields
+        .filter((field) => !field.official && !nextKeys.has(field.key))
+        .map((field) => field.key);
+      if (removedCustomKeys.length) {
+        for (const product of state.products || []) {
+          for (const key of removedCustomKeys) {
+            if (product.tag_values) delete product.tag_values[key];
+            delete product[key];
+          }
+        }
+        for (const demand of state.demands || []) {
+          for (const key of removedCustomKeys) {
+            if (demand.tag_values) delete demand.tag_values[key];
+            delete demand[key];
+          }
+        }
+      }
+    }
     return maskSettings(state.settings);
   });
+}
+
+export function listFields(userId, entity = "") {
+  const fields = rawState(userId)?.settings?.fields || DEFAULT_FIELDS;
+  const normalized = normalizeFields(fields);
+  return entity ? normalized.filter((field) => field.entities.includes(entity)) : normalized;
+}
+
+export function createField(userId, input = {}) {
+  return mutateUserState(userId, (state) => {
+    const fields = normalizeFields(state.settings?.fields, state.settings?.tag_groups);
+    const name = cleanTitle(input.name, "自定义字段");
+    const keyBase = cleanText(input.key || name)
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 40);
+    let key = input.key ? `u_${keyBase.replace(/^u_/, "")}` : `u_${nanoid(8)}`;
+    if (fields.some((field) => field.key === key)) key = `u_${nanoid(8)}`;
+    const field = {
+      key,
+      legacyKey: key,
+      name,
+      tone: ["default", "outline", "accent", "success", "warn", "danger"].includes(input.tone) ? input.tone : "outline",
+      multi: input.multi !== false,
+      official: false,
+      entities: cleanArray(input.entities).filter((item) => item === "competitor" || item === "inspiration"),
+      options: cleanArray(input.options, 200),
+    };
+    if (!field.entities.length) field.entities = ["competitor"];
+    state.settings = normalizeSettingsFields({ ...(state.settings || {}), fields: [...fields, field] });
+    return field;
+  });
+}
+
+export function updateField(userId, key, patch = {}) {
+  return mutateUserState(userId, (state) => {
+    const fields = normalizeFields(state.settings?.fields, state.settings?.tag_groups);
+    const index = fields.findIndex((field) => field.key === key || field.legacyKey === key);
+    if (index === -1) return null;
+    const current = fields[index];
+    const next = {
+      ...current,
+      ...(patch.name !== undefined ? { name: cleanTitle(patch.name, current.name) } : {}),
+      ...(patch.tone !== undefined && ["default", "outline", "accent", "success", "warn", "danger"].includes(patch.tone) ? { tone: patch.tone } : {}),
+      ...(patch.multi !== undefined && !current.official ? { multi: patch.multi !== false } : {}),
+      ...(patch.entities !== undefined ? { entities: cleanArray(patch.entities).filter((item) => item === "competitor" || item === "inspiration") } : {}),
+      ...(patch.options !== undefined ? { options: cleanArray(patch.options, 200) } : {}),
+    };
+    if (!next.entities.length) next.entities = current.entities.length ? current.entities : ["competitor"];
+    fields[index] = next;
+    state.settings = normalizeSettingsFields({ ...(state.settings || {}), fields });
+    for (const product of state.products || []) syncLegacyProductFields(product);
+    for (const demand of state.demands || []) syncLegacyDemandFields(demand);
+    return next;
+  });
+}
+
+export function deleteField(userId, key) {
+  return mutateUserState(userId, (state) => {
+    const fields = normalizeFields(state.settings?.fields, state.settings?.tag_groups);
+    const target = fields.find((field) => field.key === key || field.legacyKey === key);
+    if (!target || target.official) return false;
+    state.settings = normalizeSettingsFields({
+      ...(state.settings || {}),
+      fields: fields.filter((field) => field.key !== target.key),
+    });
+    for (const product of state.products || []) {
+      if (product.tag_values) delete product.tag_values[target.key];
+      delete product[target.key];
+    }
+    for (const demand of state.demands || []) {
+      if (demand.tag_values) delete demand.tag_values[target.key];
+      delete demand[target.key];
+    }
+    return true;
+  });
+}
+
+export function addFieldOption(userId, key, value) {
+  const cleanValue = cleanText(value).slice(0, 120);
+  if (!cleanValue) return null;
+  const field = listFields(userId).find((item) => item.key === key || item.legacyKey === key);
+  if (!field) return null;
+  const options = Array.from(new Set([...(field.options || []), cleanValue]));
+  return updateField(userId, field.key, { options });
+}
+
+export function removeFieldOption(userId, key, value) {
+  const cleanValue = cleanText(value);
+  const field = listFields(userId).find((item) => item.key === key || item.legacyKey === key);
+  if (!field) return null;
+  return updateField(userId, field.key, { options: (field.options || []).filter((item) => item !== cleanValue) });
 }
 
 export function finishSampleWorkspace(userId) {
@@ -751,6 +957,49 @@ export function listNews(userId) {
     WHERE user_id = ?
     ORDER BY published_at DESC, created_at DESC
   `).all(userId).map(mapNewsRow);
+}
+
+export function findReusableNewsThumbnail({ originalUrl = "", mergeKey = "", titleZh = "", excludeId = "", userId = "" } = {}) {
+  const normalizedOriginalUrl = cleanText(originalUrl);
+  const normalizedMergeKey = cleanText(mergeKey);
+  const normalizedTitleZh = cleanText(titleZh);
+  const normalizedExcludeId = cleanText(excludeId);
+  const normalizedUserId = cleanText(userId);
+
+  const rows = db.prepare(`
+    SELECT id, user_id, original_url, title_zh, thumbnail_url, updated_at,
+           COALESCE(json_extract(classification_json, '$.merge_key'), '') AS merge_key
+    FROM news_items
+    WHERE COALESCE(thumbnail_url, '') <> ''
+      AND lower(COALESCE(thumbnail_url, '')) NOT LIKE '%googleusercontent.com%'
+      AND lower(COALESCE(thumbnail_url, '')) NOT LIKE '%share_save%'
+      AND lower(COALESCE(thumbnail_url, '')) NOT LIKE '%addtoany%'
+      AND (? = '' OR id <> ?)
+      AND (
+        (? <> '' AND original_url = ?)
+        OR (? <> '' AND COALESCE(json_extract(classification_json, '$.merge_key'), '') = ?)
+        OR (? <> '' AND title_zh = ?)
+      )
+    ORDER BY
+      CASE WHEN ? <> '' AND user_id = ? THEN 0 ELSE 1 END,
+      CASE WHEN ? <> '' AND original_url = ? THEN 0 ELSE 1 END,
+      CASE WHEN ? <> '' AND COALESCE(json_extract(classification_json, '$.merge_key'), '') = ? THEN 0 ELSE 1 END,
+      CASE WHEN ? <> '' AND title_zh = ? THEN 0 ELSE 1 END,
+      updated_at DESC
+    LIMIT 1
+  `).all(
+    normalizedExcludeId, normalizedExcludeId,
+    normalizedOriginalUrl, normalizedOriginalUrl,
+    normalizedMergeKey, normalizedMergeKey,
+    normalizedTitleZh, normalizedTitleZh,
+    normalizedUserId, normalizedUserId,
+    normalizedOriginalUrl, normalizedOriginalUrl,
+    normalizedMergeKey, normalizedMergeKey,
+    normalizedTitleZh, normalizedTitleZh
+  );
+
+  const match = rows[0];
+  return match ? String(match.thumbnail_url || "").trim() : "";
 }
 
 export function officialNewsItems() {

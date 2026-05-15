@@ -1,7 +1,7 @@
 import Parser from "rss-parser";
 import { callLLM } from "./ai-service.js";
 import { fetchPageImage, resolvePageUrl } from "./content-fetcher.js";
-import { listNews, listPendingNewsForLlm, updateNews, upsertNews, updateNewsSource } from "./repository.js";
+import { findReusableNewsThumbnail, listNews, listPendingNewsForLlm, updateNews, upsertNews, updateNewsSource } from "./repository.js";
 
 const parser = new Parser({
   timeout: 20000,
@@ -56,6 +56,7 @@ const WECHAT_EXPORTER_SOURCE_TYPES = new Set(["wechat_exporter", "wechat-exporte
 const WECHAT_EXPORTER_MAX_PER_SOURCE = Math.min(20, Math.max(1, Number(process.env.WECHAT_EXPORTER_MAX_PER_SOURCE || 20)));
 const WECHAT_EXPORTER_DEFAULT_BASE_URL = String(process.env.WECHAT_EXPORTER_BASE_URL || "").trim();
 const WECHAT_EXPORTER_DEFAULT_AUTH_KEY = String(process.env.WECHAT_EXPORTER_AUTH_KEY || "").trim();
+const WECHAT_IMAGE_ENRICH_MAX_PER_SOURCE = Math.min(20, Math.max(1, Number(process.env.WECHAT_IMAGE_ENRICH_MAX_PER_SOURCE || 8)));
 const IMAGE_BAD_HOST_PATTERNS = [
   /news\.google\.com/i,
   /gstatic\.com/i,
@@ -141,13 +142,37 @@ function sourceHostname(item) {
 }
 
 function titleSlug(value) {
-  return stripHtml(value)
+  return stripHtml(String(value || "")
+    .replace(/([\u4e00-\u9fa5])([A-Za-z0-9])/g, "$1 $2")
+    .replace(/([A-Za-z0-9])([\u4e00-\u9fa5])/g, "$1 $2"))
     .replace(/\s+-\s+[^-]+$/g, "")
     .toLowerCase()
     .replace(/['"“”‘’]/g, "")
     .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 140);
+}
+
+const MERGE_KEY_STOPWORDS = new Set([
+  "a", "an", "the", "and", "or", "to", "for", "of", "with", "in", "on", "at",
+  "launch", "launches", "launched", "launching",
+  "announce", "announces", "announced", "announcing",
+  "introduce", "introduces", "introduced", "introducing",
+  "release", "releases", "released", "releasing",
+  "debut", "debuts", "debuted", "debuting",
+  "official", "presented", "preview", "first", "look", "review", "hands", "hand", "rumor", "rumour", "teaser",
+  "发布", "推出", "上市", "首发", "亮相", "登场", "发售", "开售", "正式发布", "正式推出",
+  "新机", "新品", "相机", "镜头", "套装",
+]);
+
+function normalizeMergeTitle(value) {
+  return titleSlug(value)
+    .replace(/-(发布|推出|上市|首发|亮相|登场|发售|开售|正式发布|正式推出)(?=-|$)/g, "-")
+    .replace(/^(发布|推出|上市|首发|亮相|登场|发售|开售|正式发布|正式推出)-/g, "")
+    .replace(/(新品|新机|复古套装|套装)(发布|推出|上市|首发|亮相|登场|发售|开售|正式发布|正式推出)$/g, "$1")
+    .replace(/(go-\d+s?)(发布|推出|上市|首发|亮相|登场|发售|开售)$/g, "$1")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function normalizedSourceHome(source) {
@@ -217,11 +242,12 @@ function mergeKeyForItem(item = {}) {
 }
 
 function canonicalTitleKey(item = {}) {
-  return titleSlug(item.titleZh || item.original_title || "")
-    .replace(/-[^-]+$/g, "")
-    .replace(/\b(review|hands-on|first-look|announced|introduced|launches|released|official)\b/g, "")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  const tokens = normalizeMergeTitle(item.titleZh || item.original_title || "")
+    .split("-")
+    .filter(Boolean)
+    .filter((token) => !MERGE_KEY_STOPWORDS.has(token));
+  if (tokens.length >= 2) return tokens.slice(0, 6).join("-");
+  return tokens[0] || "";
 }
 
 async function annotateMergedItems(items = []) {
@@ -251,6 +277,7 @@ function shouldRetryImageEnrichment(item = {}) {
   try {
     const parsed = new URL(image);
     if (IMAGE_BAD_HOST_PATTERNS.some((pattern) => pattern.test(parsed.hostname))) return true;
+    if (/googleusercontent\.com/i.test(parsed.hostname) && /(?:^|[=/?&])s0-w\d+/i.test(parsed.pathname + parsed.search)) return true;
     if (IMAGE_BAD_PATH_PATTERNS.some((pattern) => pattern.test(parsed.pathname))) return true;
     return false;
   } catch {
@@ -375,7 +402,8 @@ function isOfficialManagedSource(source = {}) {
 }
 
 export function shouldEnrichSourceImages(source) {
-  return isOfficialManagedSource(source);
+  const type = String(source?.type || "rss").toLowerCase();
+  return type === "rss" || type === "atom" || isOfficialManagedSource(source);
 }
 
 function buildWechatExporterApiUrl(origin, pathPrefix, endpoint) {
@@ -551,6 +579,7 @@ async function collectWechatExporterSource(userId, source) {
     })
     .filter(Boolean);
 
+  await enrichWechatImages(newsItems);
   const upserted = upsertNews(userId, newsItems);
   updateNewsSource(userId, source.id, {
     last_fetched_at: new Date().toISOString(),
@@ -560,12 +589,61 @@ async function collectWechatExporterSource(userId, source) {
   return { source_id: source.id, source: source.name, fetched: items.length, kept: newsItems.length, ...upserted };
 }
 
+async function enrichWechatImages(newsItems) {
+  let remaining = Math.max(0, WECHAT_IMAGE_ENRICH_MAX_PER_SOURCE);
+  for (const item of newsItems) {
+    if (!shouldRetryImageEnrichment(item) || remaining <= 0) continue;
+    remaining -= 1;
+    try {
+      const page = await fetchPageImage(item.article_url || item.original_url || "");
+      if (page.image) {
+        item.thumbnail_url = page.image;
+        item.classification = {
+          ...(item.classification || {}),
+          image_enriched: true,
+          image_source: "wechat_page_meta",
+        };
+      } else {
+        item.classification = {
+          ...(item.classification || {}),
+          image_enriched: false,
+        };
+      }
+      await sleep(250);
+    } catch (error) {
+      item.classification = {
+        ...(item.classification || {}),
+        image_enriched: false,
+        image_error: error.message || "image_fetch_failed",
+      };
+    }
+  }
+  return newsItems;
+}
+
 async function enrichOfficialImages(source, newsItems) {
   if (!isOfficialManagedSource(source)) return newsItems;
   let remaining = Math.max(0, OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE);
   for (const item of newsItems) {
-    if (!shouldRetryImageEnrichment(item) || remaining <= 0) continue;
+    if (!shouldRetryImageEnrichment(item)) continue;
+    const reusableThumbnail = findReusableNewsThumbnail({
+      originalUrl: item.original_url || item.article_url || "",
+      mergeKey: item.classification?.merge_key || "",
+      titleZh: item.titleZh || item.original_title || "",
+      userId: source.user_id || "",
+    });
+    if (reusableThumbnail) {
+      item.thumbnail_url = reusableThumbnail;
+      item.classification = {
+        ...(item.classification || {}),
+        image_enriched: true,
+        image_source: "reused_known_thumbnail",
+      };
+      continue;
+    }
+    if (remaining <= 0) continue;
     remaining -= 1;
+    let lastError = "";
     try {
       const candidateUrls = [
         imageLookupUrlForItem(item),
@@ -573,20 +651,31 @@ async function enrichOfficialImages(source, newsItems) {
         String(item.classification?.source_homepage || "").trim(),
       ].filter((url, index, array) => url && /^https?:\/\//i.test(url) && array.indexOf(url) === index);
       for (const imageUrl of candidateUrls) {
-        const page = await fetchPageImage(imageUrl);
-        if (page.articleUrl && isGoogleNewsUrl(item.original_url)) {
-          item.original_url = normalizeUrlForDedupe(page.articleUrl);
-          item.article_url = item.original_url;
+        try {
+          const page = await fetchPageImage(imageUrl);
+          if (page.articleUrl && isGoogleNewsUrl(item.original_url)) {
+            item.original_url = normalizeUrlForDedupe(page.articleUrl);
+            item.article_url = item.original_url;
+          }
+          if (page.image) {
+            item.thumbnail_url = page.image;
+            item.classification = {
+              ...(item.classification || {}),
+              image_enriched: true,
+              image_source: "page_meta",
+            };
+            break;
+          }
+        } catch (error) {
+          lastError = error.message || "image_fetch_failed";
         }
-        if (page.image) {
-          item.thumbnail_url = page.image;
-          item.classification = {
-            ...(item.classification || {}),
-            image_enriched: true,
-            image_source: "page_meta",
-          };
-          break;
-        }
+      }
+      if (!item.thumbnail_url || shouldRetryImageEnrichment(item)) {
+        item.classification = {
+          ...(item.classification || {}),
+          image_enriched: false,
+          ...(lastError ? { image_error: lastError } : {}),
+        };
       }
       await sleep(250);
     } catch (error) {

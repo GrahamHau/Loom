@@ -1479,27 +1479,22 @@ function commentItemView(comment) {
 
 function tagGroupByKey(key) {
   const normalizedKey = key === "innovation" ? "innovation_types" : key;
-  return safeArray(state.tagGroups).find((group) => group.key === normalizedKey) ||
+  return safeArray(state.tagGroups).find((group) => group.key === key || group.key === normalizedKey) ||
     DEFAULT_TAG_GROUPS.find((group) => group.key === normalizedKey) ||
-    { key: normalizedKey, name: normalizedKey, tone: "outline", tags: [] };
+    { key, name: key, tone: "outline", tags: [] };
 }
 
 function ensureTagOption(groupKey, value) {
-  const normalizedKey = groupKey === "innovation" ? "innovation_types" : groupKey;
   const cleanValue = cleanText(value);
   if (!cleanValue) return;
-  const groups = safeArray(state.tagGroups).length ? safeArray(state.tagGroups) : DEFAULT_TAG_GROUPS;
-  let changed = false;
-  state.tagGroups = groups.map((group) => {
-    if (group.key !== normalizedKey) return group;
-    if (safeArray(group.tags).includes(cleanValue)) return group;
-    changed = true;
-    return { ...group, tags: [...safeArray(group.tags), cleanValue] };
-  });
-  if (!changed) return;
-  api("/api/settings", {
-    method: "PATCH",
-    body: JSON.stringify({ tag_groups: state.tagGroups }),
+  const group = tagGroupByKey(groupKey);
+  if (safeArray(group.tags).includes(cleanValue)) return;
+  state.tagGroups = safeArray(state.tagGroups).map((item) =>
+    item.key === group.key ? { ...item, tags: [...safeArray(item.tags), cleanValue] } : item
+  );
+  api(`/api/fields/${encodeURIComponent(groupKey)}/options`, {
+    method: "POST",
+    body: JSON.stringify({ value: cleanValue }),
   }).catch(() => {});
 }
 
@@ -1838,6 +1833,11 @@ function productPayload(item) {
     name: item.name,
     brand: item.brand || "",
     category: item.category || "",
+    tag_values: {
+      brand: item.brand ? [item.brand] : [],
+      category: item.category ? [item.category] : [],
+      custom_tags: safeArray(item.tags),
+    },
     price: item.price || "",
     cost_estimate: item.cost_estimate || "",
     rating: item.rating || null,
@@ -1890,6 +1890,11 @@ function demandPayload(item) {
     scenarios: safeArray(item.scenarios),
     painpoints: safeArray(item.painpoints),
     innovation: item.innovation || "待分类",
+    tag_values: {
+      innovation: [item.innovation || "待分类"].filter(Boolean),
+      scenarios: safeArray(item.scenarios),
+      painpoints: safeArray(item.painpoints),
+    },
     thumbnail_url: item.thumbnail_url || item.image || "",
     note: item.note || "",
     import_method: "chrome_extension",

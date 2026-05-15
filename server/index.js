@@ -33,13 +33,16 @@ import {
   acquireLock,
   createNewsSource,
   createDemand,
+  createField,
   createProduct,
   createResearch,
   deleteDemand,
+  deleteField,
   deleteNews,
   deleteNewsSource,
   deleteProduct,
   deleteResearch,
+  addFieldOption,
   ensureLegacyWorkspace,
   ensureLocalUser,
   getUserIdByApiToken,
@@ -48,6 +51,7 @@ import {
   findUserById,
   finishSampleWorkspace,
   importWechatExporterAccounts,
+  listFields,
   listAllUsers,
   listNews,
   listNewsSources,
@@ -63,11 +67,13 @@ import {
   ensureOfficialNewsCache,
   touchUserLogin,
   updateDemand,
+  updateField,
   updateNews,
   updateNewsSource,
   updateProduct,
   updateResearch,
   updateSettings,
+  removeFieldOption,
   visibleNewsItems,
 } from "./repository.js";
 
@@ -747,6 +753,28 @@ app.post("/api/research/:id/analyze", requireAuth, asyncHandler(async (req, res)
 
 app.get("/api/settings", requireAuth, (req, res) => res.json(bootstrap(currentUserId(req)).settings));
 app.patch("/api/settings", requireAuth, (req, res) => res.json(updateSettings(currentUserId(req), req.body || {})));
+app.get("/api/fields", requireAuth, (req, res) => res.json(listFields(currentUserId(req), String(req.query.entity || ""))));
+app.get("/api/fields/catalog", requireAuth, (req, res) => res.json(listFields(currentUserId(req))));
+app.post("/api/fields", requireAuth, (req, res) => res.status(201).json(createField(currentUserId(req), req.body || {})));
+app.patch("/api/fields/:key", requireAuth, (req, res) => {
+  const field = updateField(currentUserId(req), req.params.key, req.body || {});
+  if (!field) return res.status(404).json({ error: "field_not_found" });
+  res.json(field);
+});
+app.delete("/api/fields/:key", requireAuth, (req, res) => {
+  if (!deleteField(currentUserId(req), req.params.key)) return res.status(404).json({ error: "field_not_found_or_official" });
+  res.json({ ok: true });
+});
+app.post("/api/fields/:key/options", requireAuth, (req, res) => {
+  const field = addFieldOption(currentUserId(req), req.params.key, req.body?.value || req.body?.option);
+  if (!field) return res.status(404).json({ error: "field_not_found" });
+  res.json(field);
+});
+app.delete("/api/fields/:key/options/:value", requireAuth, (req, res) => {
+  const field = removeFieldOption(currentUserId(req), req.params.key, req.params.value);
+  if (!field) return res.status(404).json({ error: "field_not_found" });
+  res.json(field);
+});
 app.post("/api/settings/test-llm", requireAuth, asyncHandler(async (req, res) => res.json(await testLLM(currentUserId(req)))));
 app.post("/api/settings/test-vision-llm", requireAuth, asyncHandler(async (req, res) => res.json(await testVisionLLM(currentUserId(req)))));
 app.post("/api/settings/test-feishu", requireAuth, asyncHandler(async (req, res) => res.json(await testFeishuForUser(currentUserId(req)))));
