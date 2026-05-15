@@ -1035,9 +1035,8 @@ window.LoginScreen = LoginScreen;
 // ============ NEWS ============
 function NewsScreen({ data, api, refreshData, navTarget }) {
   const [tab, setTab] = useState("all");
-  const initialNewsGroups = buildNewsGroups(data.news, data.settings?.tag_groups);
-  const [items, setItems] = useState(initialNewsGroups);
-  const [counts, setCounts] = useState(newsGroupCounts(initialNewsGroups));
+  const [items, setItems] = useState([]);
+  const [counts, setCounts] = useState(data.newsCounts || { all: 0, wechat: 0, trend: 0, starred: 0 });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [selectedIds, setSelectedIds] = useState([]);
