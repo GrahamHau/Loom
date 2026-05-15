@@ -10,7 +10,7 @@ const PIPELINE = [
     body: "SmallRig、Ulanzi、Peak Design 的同类品 × 小红书、B 站、Reddit 上的真实抱怨与需求线索。",
   },
   {
-    label: "Step 03 · 织造",
+    label: "Step 03 · 融合",
     title: "AI 融合结构化数据 + 你的注解",
     body: "前三个模块里你留下的每一条判断、写过的每一行点评，在这一步全部被调用。",
   },
@@ -31,10 +31,10 @@ export default function Weave() {
     <section id="weave" className="section">
       <div className="container reveal">
         <div className="kicker">调研工坊</div>
-        <h2 className="section-title">不是收集，是织造</h2>
+        <h2 className="section-title">不是收集，是组合</h2>
         <p className="section-lead">
-          Weave 是 LOOM 的飞轮中心。前三个模块沉淀的信息和判断，
-          在这里被关联、交叉、重组 —— 变成结构化的产品洞察和意想不到的新方向。
+          Weave 是飞轮的中心。前三个模块沉下来的信息和判断，
+          在这里被关联、交叉、重组 —— 一头是结构化的产品洞察，一头是你想不到的新方向。
         </p>
 
         <div className="weave-pipeline">
@@ -51,16 +51,16 @@ export default function Weave() {
               <div className="pipeline-step-label">输出 A · 洞察</div>
               <h3 className="pipeline-step-title">结构化的产品分析</h3>
               <p className="pipeline-step-body">
-                定位、卖点、价格带、差异点 —— 每个论断都能追溯回竞品库 /
-                灵感库里你留下的判断。你在前面边看边整理的内容，到这里直接变成结构化分析
-                —— 省掉了传统 MRD 里最费时间的信息梳理环节。
+                定位、卖点、价格带、差异点 —— 每个论断都能追溯回你在 Lens / Spark
+                里留下的判断。边看边整理的内容，到这里直接成型 ——
+                省掉了传统 MRD 里最费时间的信息梳理。
               </p>
             </div>
             <div className="pipeline-step">
               <div className="pipeline-step-label">输出 B · 新方向</div>
               <h3 className="pipeline-step-title">跨维度交叉组合</h3>
               <p className="pipeline-step-body">
-                AI 把已有元素交叉组合，给你抛开经验惯性的新方向。
+                AI 把已有元素交叉穷举，抛开经验惯性，给你想不到的新方向。
               </p>
             </div>
           </div>
@@ -89,12 +89,12 @@ export default function Weave() {
           </div>
           <div className="brainstorm-result">
             Peak Design 的 Capture Clip 就是这么来的 —— 快装板 × 腰夹 × 背包肩带 ×
-            单手操作 = 一个前所未有的相机携带方式。AI 可以每天帮你做这种穷举。
+            单手操作。AI 可以每天帮你穷举这种组合。
           </div>
         </div>
 
         <blockquote className="weave-quote">
-          AI 跟人不同的一点是 —— 它能抛开经验惯性。
+          AI 跟人不同的一点：它能抛开经验惯性。
           你会被「快装板就是装三脚架的」框死；它不会。
         </blockquote>
       </div>

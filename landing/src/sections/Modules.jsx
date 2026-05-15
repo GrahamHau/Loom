@@ -11,9 +11,9 @@ const MODULES = [
     body: "RSS + 公众号 + 摄影行业定向源（DPReview、PetaPixel、SmallRig blog、Peak Design 更新、小红书摄影博主 RSS 等），AI 翻译筛选后推到你眼前。",
     annotation: (
       <>
-        <strong>纬线在哪里：</strong>
-        你顺手标记的「相关 / 不相关」、「值得追」、「拿去看竞品」，
-        每一次判断都在帮 AI 学你的口味。
+        <strong>你的判断在这里：</strong>
+        你顺手标的「相关 / 值得追 / 拿去看竞品」——
+        每一次都是在教 AI 你的口味。
       </>
     ),
   },
@@ -26,9 +26,9 @@ const MODULES = [
     body: "浏览亚马逊 / 淘宝看 SmallRig、Ulanzi、Peak Design 时，用 LOOM 浏览器插件一键采集图片、卖点、价格、规格、标签 —— 落到统一的结构化卡片。",
     annotation: (
       <>
-        <strong>纬线在哪里：</strong>
-        你写下的「这个卡口为什么好」「这个材质手感不行」—— 这些注解才是 AI 缺的
-        skill，是通用语料里找不到的隐性知识。
+        <strong>你的判断在这里：</strong>
+        你写的「这个卡口为什么好」「这个材质手感不行」——
+        通用语料里没有这种隐性知识，正是 AI 缺的 skill。
       </>
     ),
   },
@@ -41,9 +41,9 @@ const MODULES = [
     body: "小红书摄影博主吐槽 / B 站测评 / Reddit r/photography / Kickstarter 摄影配件众筹的线索，沉淀成可追溯的需求脉络。",
     annotation: (
       <>
-        <strong>纬线在哪里：</strong>
-        你对每条需求的判断 ——「真痛点 / 伪需求」「值得做 / 不值得做」「优先级」——
-        是 AI 学会判断的关键，不是它的训练数据里能有的。
+        <strong>你的判断在这里：</strong>
+        你对每条需求打的标 ——「真痛点 / 伪需求」「值得做 / 不值得做」「优先级」——
+        训练数据里没有这一层，AI 也就学不会判断。
       </>
     ),
   },
@@ -56,9 +56,9 @@ const MODULES = [
     body: "设定调研目标（如「背包场景的相机快拆方案」），关联 Lens 的竞品 + Spark 的需求，AI 输出结构化的产品分析，并基于已有元素做交叉组合给你意想不到的方向。",
     annotation: (
       <>
-        <strong>布在这里成型：</strong>
-        前三个模块织进去的所有判断，到了 Weave 这里被一起调用 ——
-        AI 在你的行业语料里做推理，而不是在「全网平均水平」上瞎猜。
+        <strong>判断在这里汇合：</strong>
+        前三个模块沉下来的判断，到 Weave 被一起调用 ——
+        AI 在你的行业语料里做推理，而不是在全网平均水平上瞎猜。
       </>
     ),
   },
@@ -68,11 +68,11 @@ export default function Modules() {
   return (
     <section id="modules" className="section">
       <div className="container reveal">
-        <div className="kicker">四根经线</div>
-        <h2 className="section-title">把世界的信息，织进你的工作台</h2>
+        <div className="kicker">四个模块</div>
+        <h2 className="section-title">把世界的信息，接进你的工作台</h2>
         <p className="section-lead">
-          三个模块负责采集（经线），第四个模块负责把它们和你的判断（纬线）一起调用。
-          鼠标悬停每张卡，看「纬线在哪里」。
+          三个模块负责采集，第四个模块把它们和你的判断一起调用。
+          悬停每张卡，看你的判断进到哪里。
         </p>
 
         <div className="modules-grid">

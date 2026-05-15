@@ -30,14 +30,14 @@ export default function Hero() {
         </div>
 
         <h1 className="hero-headline">
-          给 AI 织一份
+          让 AI 真的懂
           <br />
-          你的<span className="accent">行业直觉</span>
+          你这<span className="accent">一行</span>
         </h1>
 
         <p className="hero-sub">
-          每天看资讯、翻竞品、记需求 —— 你本来就在做这些事。
-          LOOM 让你做的每一个判断都不白做：它们会沉淀下来，让 AI 越来越懂你这一行。
+          资讯、竞品、用户需求 —— 你每天本来就在判断。
+          LOOM 把这些判断结构化、可调用 —— 让 AI 越用越懂你这一行。
         </p>
 
         <div className="hero-cta-row">
@@ -46,7 +46,7 @@ export default function Hero() {
             href="#problem"
             onClick={onSecondary}
           >
-            看看它怎么工作 <span aria-hidden="true">↓</span>
+            看看它怎么运作 <span aria-hidden="true">↓</span>
           </a>
         </div>
 

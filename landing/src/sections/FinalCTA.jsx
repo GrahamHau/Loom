@@ -9,17 +9,17 @@ export default function FinalCTA() {
     <section id="login" className="section finalcta">
       <div className="container finalcta-stack reveal">
         <div className="finalcta-copy">
-          <div className="kicker">开始织造</div>
+          <div className="kicker">开始使用</div>
           <h2 className="finalcta-title">
             让 AI 变成一个
             <br />
             真正懂你这一行的同事。
           </h2>
           <p className="finalcta-body">
-            LOOM 当前是单用户个人工作台。先用一个月 ——
-            等四个模块都积累了你真实的判断和点评，你会发现 Weave
-            给出的洞察越来越像一个跟你共事了一年的同事，而不是一个只读过全网文章的通用
-            AI。这些认知沉淀下来，团队里的其他人也能调用。
+            LOOM 当前是单用户工作台。先用一个月 ——
+            等四个模块攒下你真实的判断和点评，Weave
+            给出的洞察会越来越像一个和你共事过一年的同事，而不是一个只读过全网文章的通用
+            AI。这些认知沉下来，团队里其他人也能调用。
           </p>
         </div>
 
@@ -29,7 +29,7 @@ export default function FinalCTA() {
             <div className="finalcta-step-content">
               <h3 className="finalcta-step-title">先看教程</h3>
               <p className="finalcta-step-desc">
-                第一次使用的话，先按教程走一遍，会更快理解 LOOM 的使用方式。
+                第一次用，建议先按教程走一遍 —— 几分钟就能上手。
               </p>
               <a
                 className="btn btn-primary"
@@ -47,7 +47,7 @@ export default function FinalCTA() {
             <div className="finalcta-step-content">
               <h3 className="finalcta-step-title">下载浏览器插件</h3>
               <p className="finalcta-step-desc">
-                LOOM 通过插件在你浏览竞品、看资讯时一键采集，这是使用的第一步。
+                LOOM 靠插件在你浏览竞品、看资讯时一键采集 —— 这是入口。
               </p>
               <a
                 className="btn btn-primary"

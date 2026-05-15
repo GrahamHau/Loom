@@ -22,7 +22,7 @@ const MODULES = [
 ];
 
 const EXPORT = [
-  { label: "即将推出", items: ["CSV 导出", "飞书表格导出"] },
+  { label: "即将上线", items: ["CSV 导出", "飞书表格导出"] },
   { label: "敬请期待", items: ["Billfish 导入", "Eagle 导入"] },
 ];
 

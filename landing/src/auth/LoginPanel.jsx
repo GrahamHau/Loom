@@ -106,7 +106,7 @@ export default function LoginPanel() {
       <div className="login-card-head">
         <h3 className="login-card-title">登录工作台</h3>
         <p className="login-card-sub">
-          用你已经沉淀下来的判断，继续训练一个更懂业务的 LOOM。
+          用你已经沉下来的判断，继续养一个更懂业务的 LOOM。
         </p>
       </div>
 
