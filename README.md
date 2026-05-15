@@ -161,27 +161,6 @@ SQLite 数据和 Session 默认放在 `./data`，这个目录不会进入 Git。
 4. 选择 `loom-extension` 目录
 5. 打开插件设置页，配置 Loom API 地址
 
-## 公开仓库说明
-
-这个仓库是公开的，所以以下内容默认不会提交：
-
-- `.env`
-- `data/`
-- `uploads/`
-- `.claude/`
-- `claude-design-pack/`
-- `.codex-artifacts/`
-- `.codex-tmp/`
-- `README_LOCAL.md`
-
-如果你使用 Claude、Codex 或其他 AI 设计工具生成中间文件，请先确认内容已经清理，再决定是否提交。
-
-## 命名说明
-
-当前项目名是 **Loom**。
-
-如果在旧文件、数据库字段、浏览器存储键或历史文档里看到 `PM Copilot` / `pm-copilot`，通常只是历史兼容命名，不代表当前产品名。
-
 ## License
 
 目前还没有声明开源许可证。在添加 License 之前，默认保留所有权利。
