@@ -54,7 +54,6 @@ describe("feishu-service", () => {
       "类型": "Bug",
       "严重程度": "影响使用",
       "描述": "保存后页面没有刷新",
-      "页面路径": "/app?screen=products",
       "用户名称": "Graham",
       "用户ID": "user-1",
       "用户邮箱（如有）": "",
@@ -64,6 +63,10 @@ describe("feishu-service", () => {
       "登录方式": "飞书 OAuth",
       "状态": "新反馈",
       "来源": "Web App",
+    });
+    expect(fields["页面路径"]).toEqual({
+      link: "https://loom.my1panelsite.xyz/app?screen=products",
+      text: "/app?screen=products",
     });
     expect(fields["提交时间"]).toBe(new Date("2026-05-15T01:02:03+08:00").getTime());
   });

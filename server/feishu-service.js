@@ -202,6 +202,13 @@ function loginMethodLabel(provider) {
   return "账号密码";
 }
 
+function feedbackLinkValue(value) {
+  const text = cleanFeedbackText(value, 1000);
+  if (!text) return "";
+  const link = /^https?:\/\//i.test(text) ? text : `https://loom.my1panelsite.xyz${text.startsWith("/") ? text : `/${text}`}`;
+  return { link, text };
+}
+
 export function feedbackRecordFieldsFor(feedback = {}, user = {}, now = new Date()) {
   const type = FEEDBACK_TYPES.has(String(feedback.type || "")) ? String(feedback.type) : "其他";
   const content = cleanFeedbackText(feedback.content || feedback.description, 2000);
@@ -213,7 +220,7 @@ export function feedbackRecordFieldsFor(feedback = {}, user = {}, now = new Date
     "类型": type,
     "严重程度": type === "Bug" ? "影响使用" : "一般",
     "描述": content,
-    "页面路径": page,
+    "页面路径": feedbackLinkValue(page),
     "用户名称": cleanFeedbackText(user.name, 120),
     "用户ID": cleanFeedbackText(user.id, 120),
     "用户邮箱（如有）": cleanFeedbackText(user.email, 200),
