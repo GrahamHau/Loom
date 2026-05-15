@@ -225,7 +225,7 @@ function userInitials(name) {
 
 const FEEDBACK_TYPES = ["功能建议", "Bug", "数据问题", "体验问题", "其他"];
 
-function Sidebar({ active, onNav, data, onLogout, onFeedback }) {
+function Sidebar({ active, onNav, data, onLogout, onFeedback, isAdmin }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef(null);
   const counts = {
@@ -293,6 +293,12 @@ function Sidebar({ active, onNav, data, onLogout, onFeedback }) {
       <div className="sb-footer" ref={accountRef}>
         {accountOpen && (
           <div className="sb-account-menu">
+            {isAdmin ? (
+              <a className="sb-account-menu-item" href="/admin">
+                <Icon name="settings" size={14} />
+                <span>管理员总控台</span>
+              </a>
+            ) : null}
             <button type="button" className="sb-account-menu-item danger" onClick={onLogout}>
               <Icon name="x" size={14} />
               <span>退出登录</span>
@@ -648,6 +654,7 @@ function App() {
   }
 
   const screenProps = { data, api, refreshData, navTarget };
+  const isAdmin = Boolean(me?.is_admin || data?.user?.is_admin || data?.user?.is_owner);
   const sampleWorkspace = Boolean(data.onboarding?.sampleWorkspace);
   const canExitSample = Boolean(data.onboarding?.canExitSample);
   const liveNewsReady = Boolean(data.onboarding?.liveNewsReady);
@@ -666,7 +673,7 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar active={active} onNav={setActive} data={data} onLogout={logout} onFeedback={() => setFeedbackOpen(true)} />
+      <Sidebar active={active} onNav={setActive} data={data} onLogout={logout} onFeedback={() => setFeedbackOpen(true)} isAdmin={isAdmin} />
       <main className="main" data-screen-label={TITLES[active]?.label || active}>
         {sampleWorkspace && (
           <div className="sample-workspace-banner">
@@ -686,6 +693,12 @@ function App() {
           {active === "demands" && <span className="topbar-crumb">· {data.demands.length} 条灵感</span>}
           {active === "research" && <span className="topbar-crumb">· {data.research.length} 个项目</span>}
           <div className="topbar-actions">
+            {isAdmin ? (
+              <a className="topbar-admin-link" href="/admin">
+                <Icon name="settings" size={13} />
+                <span>管理员总控台</span>
+              </a>
+            ) : null}
             {sampleWorkspace && canExitSample ? (
               <Btn
                 className="demo-mode-exit-btn"

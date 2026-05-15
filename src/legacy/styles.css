@@ -268,6 +268,7 @@ a { color: inherit; text-decoration: none; }
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  text-decoration: none;
 }
 .sb-account-menu-item:hover { background: var(--hover); color: var(--text); }
 .sb-account-menu-item.danger { color: var(--danger); }
@@ -316,6 +317,25 @@ a { color: inherit; text-decoration: none; }
   color: var(--text-3);
 }
 .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.topbar-admin-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in oklch, var(--accent) 24%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.topbar-admin-link:hover {
+  border-color: color-mix(in oklch, var(--accent) 42%, var(--border));
+  background: color-mix(in oklch, var(--accent-soft) 82%, var(--surface));
+  color: var(--accent-text);
+}
 .topbar-mode-toggle {
   display: inline-flex;
   align-items: center;
