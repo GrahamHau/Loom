@@ -60,7 +60,7 @@ describe("ai-service routing", () => {
     });
 
     expect(calls).toHaveLength(2);
-    const logs = dbModule.db.prepare("SELECT kind, purpose, status FROM llm_call_logs ORDER BY created_at ASC, id ASC").all();
+    const logs = dbModule.db.prepare("SELECT kind, purpose, status FROM llm_call_logs ORDER BY created_at ASC, rowid ASC").all();
     expect(logs.map((log) => log.kind)).toEqual(["vision", "text"]);
     expect(logs.every((log) => log.status === "ok")).toBe(true);
   });

@@ -90,7 +90,7 @@ export function listLLMLogs({ userId = "", workspaceId = "", kind = "", purpose 
     sql += " AND l.status = ?";
     params.push(status);
   }
-  sql += " ORDER BY l.created_at DESC, l.id DESC LIMIT ?";
+  sql += " ORDER BY l.created_at DESC, l.rowid DESC LIMIT ?";
   params.push(Math.min(Math.max(Number(limit) || 100, 1), 500));
   return db.prepare(sql).all(...params);
 }
