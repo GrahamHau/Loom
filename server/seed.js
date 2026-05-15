@@ -40,6 +40,8 @@ export function defaultSettings() {
     feishu_products_table_id: "",
     feishu_demands_table_id: "",
     feishu_news_table_id: "",
+    feishu_feedback_base_token: process.env.FEISHU_FEEDBACK_BASE_TOKEN || "",
+    feishu_feedback_table_id: process.env.FEISHU_FEEDBACK_TABLE_ID || "",
     feishu_table_token: "",
     last_llm_test_at: null,
     last_llm_vision_test_at: null,

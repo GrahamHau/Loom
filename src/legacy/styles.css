@@ -192,6 +192,31 @@ a { color: inherit; text-decoration: none; }
 }
 .sb-item.active .badge { background: var(--accent-soft); color: var(--accent-text); }
 .sb-spacer { flex: 1; }
+.sb-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.12s, border-color 0.12s, transform 0.12s;
+}
+.sb-feedback:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.sb-feedback .ico {
+  color: var(--accent);
+}
 .sb-footer {
   position: relative;
   border-top: 1px solid var(--border);
@@ -1970,6 +1995,56 @@ a.platform-card-link:hover {
 .modal-head h3 { margin: 0; font-size: 14px; font-weight: 600; flex: 1;}
 .modal-body { padding: 18px; overflow-y: auto; }
 .modal-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;}
+.feedback-backdrop {
+  background: rgba(20, 24, 32, 0.32);
+}
+.feedback-modal {
+  width: 460px;
+}
+.feedback-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.feedback-type-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.feedback-type {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.feedback-type:hover,
+.feedback-type.active {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.feedback-textarea {
+  width: 100%;
+  min-height: 118px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.55;
+}
+.feedback-message {
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12px;
+}
+.feedback-message.error {
+  background: color-mix(in oklab, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+}
 .demo-mode-backdrop {
   background: rgba(22, 18, 14, 0.18);
   backdrop-filter: blur(10px);

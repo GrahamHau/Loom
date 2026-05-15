@@ -3,6 +3,10 @@ import { listNews, markSynced, rawState, updateSettings } from "./repository.js"
 
 const FEISHU_BASE = "https://open.feishu.cn/open-apis";
 const FETCH_TIMEOUT_MS = 30000;
+const LEGACY_USER_ID = "legacy-default";
+const DEFAULT_FEEDBACK_BASE_TOKEN = "OeS5bT8kjalJnEs85Qgcs5jQnIg";
+const DEFAULT_FEEDBACK_TABLE_ID = "tblfN7MErcVmepYF";
+const FEEDBACK_TYPES = new Set(["Bug", "功能建议", "数据问题", "体验问题", "其他"]);
 
 async function fetchWithTimeout(path, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -18,6 +22,13 @@ function settings(userId) {
   return rawState(userId)?.settings || {};
 }
 
+function mergedSettings(userId) {
+  return {
+    ...settings(LEGACY_USER_ID),
+    ...settings(userId),
+  };
+}
+
 function requireFeishuSettings(userId) {
   const s = settings(userId);
   const baseToken = s.feishu_base_token || s.feishu_table_token;
@@ -25,6 +36,30 @@ function requireFeishuSettings(userId) {
     throw new AppError(400, "feishu_not_configured", "飞书未配置完整，请填写 App ID、App Secret 和 Base Token。");
   }
   return { ...s, feishu_base_token: baseToken };
+}
+
+function requireFeedbackSettings(userId) {
+  const userSettings = settings(userId);
+  const ownerSettings = settings(LEGACY_USER_ID);
+  const s = mergedSettings(userId);
+  const appId = userSettings.feishu_app_id || ownerSettings.feishu_app_id || process.env.FEISHU_APP_ID;
+  const appSecret = userSettings.feishu_app_secret || ownerSettings.feishu_app_secret || process.env.FEISHU_APP_SECRET;
+  const baseToken = userSettings.feishu_feedback_base_token ||
+    ownerSettings.feishu_feedback_base_token ||
+    process.env.FEISHU_FEEDBACK_BASE_TOKEN ||
+    DEFAULT_FEEDBACK_BASE_TOKEN ||
+    userSettings.feishu_base_token ||
+    ownerSettings.feishu_base_token ||
+    userSettings.feishu_table_token ||
+    ownerSettings.feishu_table_token;
+  const tableId = userSettings.feishu_feedback_table_id ||
+    ownerSettings.feishu_feedback_table_id ||
+    process.env.FEISHU_FEEDBACK_TABLE_ID ||
+    DEFAULT_FEEDBACK_TABLE_ID;
+  if (!appId || !appSecret || !baseToken || !tableId) {
+    throw new AppError(400, "feedback_not_configured", "反馈收件箱未配置完整，请检查飞书 App 和反馈表配置。");
+  }
+  return { ...s, feishu_app_id: appId, feishu_app_secret: appSecret, feishu_feedback_base_token: baseToken, feishu_feedback_table_id: tableId };
 }
 
 async function feishuFetch(path, options = {}) {
@@ -38,6 +73,10 @@ async function feishuFetch(path, options = {}) {
 
 export async function getTenantAccessTokenForUser(userId) {
   const s = requireFeishuSettings(userId);
+  return getTenantAccessTokenForSettings(s);
+}
+
+async function getTenantAccessTokenForSettings(s) {
   const body = await feishuFetch("/auth/v3/tenant_access_token/internal", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -134,6 +173,80 @@ async function createRecord({ token, baseToken, tableId, fields }) {
     body: JSON.stringify({ fields }),
   });
   return body.data?.record?.record_id;
+}
+
+function cleanFeedbackText(value, limit) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, limit);
+}
+
+function feedbackTitle(content) {
+  const title = cleanFeedbackText(content, 36);
+  return title || "用户反馈";
+}
+
+function loginMethodLabel(provider) {
+  if (provider === "feishu") return "飞书 OAuth";
+  if (provider === "visitor") return "访客/体验";
+  return "账号密码";
+}
+
+function formatFeishuDateTime(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    "-",
+    pad(date.getMonth() + 1),
+    "-",
+    pad(date.getDate()),
+    " ",
+    pad(date.getHours()),
+    ":",
+    pad(date.getMinutes()),
+    ":",
+    pad(date.getSeconds()),
+  ].join("");
+}
+
+export function feedbackRecordFieldsFor(feedback = {}, user = {}, now = new Date()) {
+  const type = FEEDBACK_TYPES.has(String(feedback.type || "")) ? String(feedback.type) : "其他";
+  const content = cleanFeedbackText(feedback.content || feedback.description, 2000);
+  const contact = cleanFeedbackText(feedback.contact, 200);
+  const page = cleanFeedbackText(feedback.page || feedback.path || feedback.url, 1000);
+  const authProvider = user.id === LEGACY_USER_ID ? "visitor" : String(user.auth_provider || "");
+  return {
+    "标题": feedbackTitle(content),
+    "类型": type,
+    "严重程度": type === "Bug" ? "影响使用" : "一般",
+    "描述": content,
+    "页面路径": page,
+    "用户名称": cleanFeedbackText(user.name, 120),
+    "用户ID": cleanFeedbackText(user.id, 120),
+    "用户邮箱（如有）": cleanFeedbackText(user.email, 200),
+    "联系方式": contact,
+    "飞书 Open ID": cleanFeedbackText(user.feishu_open_id, 200),
+    "飞书 Union ID": cleanFeedbackText(user.feishu_union_id, 200),
+    "登录方式": loginMethodLabel(authProvider),
+    "状态": "新反馈",
+    "来源": "Web App",
+    "提交时间": formatFeishuDateTime(now),
+  };
+}
+
+export async function submitFeedbackToFeishu(userId, feedback = {}, user = {}) {
+  const content = cleanFeedbackText(feedback.content || feedback.description, 2000);
+  if (!content) {
+    throw new AppError(400, "feedback_content_required", "请填写反馈内容。");
+  }
+  const s = requireFeedbackSettings(userId);
+  const token = await getTenantAccessTokenForSettings(s);
+  const fields = feedbackRecordFieldsFor({ ...feedback, content }, user);
+  const recordId = await createRecord({
+    token,
+    baseToken: s.feishu_feedback_base_token,
+    tableId: s.feishu_feedback_table_id,
+    fields,
+  });
+  return { ok: true, record_id: recordId };
 }
 
 async function updateRecord({ token, baseToken, tableId, recordId, fields }) {

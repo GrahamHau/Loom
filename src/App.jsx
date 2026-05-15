@@ -220,7 +220,9 @@ function userInitials(name) {
   return str[0].toUpperCase();
 }
 
-function Sidebar({ active, onNav, data, onLogout }) {
+const FEEDBACK_TYPES = ["功能建议", "Bug", "数据问题", "体验问题", "其他"];
+
+function Sidebar({ active, onNav, data, onLogout, onFeedback }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef(null);
   const counts = {
@@ -280,6 +282,10 @@ function Sidebar({ active, onNav, data, onLogout }) {
           <span className="sb-item-sub">系统设置</span>
         </span>
       </div>
+      <button type="button" className="sb-feedback" onClick={onFeedback}>
+        <Icon name="sparkles" size={14} className="ico" />
+        <span>用户反馈</span>
+      </button>
 
       <div className="sb-footer" ref={accountRef}>
         {accountOpen && (
@@ -305,6 +311,94 @@ function Sidebar({ active, onNav, data, onLogout }) {
         </button>
       </div>
     </aside>
+  );
+}
+
+function FeedbackModal({ active, onClose }) {
+  const [type, setType] = useState("功能建议");
+  const [content, setContent] = useState("");
+  const [contact, setContact] = useState("");
+  const [status, setStatus] = useState("idle");
+  const [message, setMessage] = useState("");
+  const canSubmit = content.trim().length > 0 && status !== "submitting";
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+    setStatus("submitting");
+    setMessage("");
+    try {
+      await api("/api/feedback", {
+        method: "POST",
+        body: JSON.stringify({
+          type,
+          content,
+          contact,
+          screen: active,
+          page: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+        }),
+      });
+      setStatus("sent");
+      setMessage("已收到，谢谢你。");
+      setContent("");
+      setContact("");
+    } catch (err) {
+      setStatus("error");
+      setMessage(err.message || "提交失败，请稍后再试。");
+    }
+  };
+
+  return (
+    <div className="modal-backdrop feedback-backdrop" onClick={onClose}>
+      <form className="modal feedback-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="modal-head">
+          <Icon name="sparkles" size={15} />
+          <h3>用户反馈</h3>
+          <Btn variant="ghost" icon="x" onClick={onClose} />
+        </div>
+        <div className="modal-body feedback-body">
+          <div className="feedback-type-grid" role="radiogroup" aria-label="反馈类型">
+            {FEEDBACK_TYPES.map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={`feedback-type ${type === item ? "active" : ""}`}
+                onClick={() => setType(item)}
+                aria-pressed={type === item}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+          <label>
+            <span className="field-label">反馈内容</span>
+            <textarea
+              autoFocus
+              className="input feedback-textarea"
+              value={content}
+              maxLength={2000}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder="哪里不顺手、哪里出错，直接写一句也可以。"
+            />
+          </label>
+          <label>
+            <span className="field-label">联系方式（可选）</span>
+            <input
+              className="input"
+              value={contact}
+              maxLength={200}
+              onChange={(event) => setContact(event.target.value)}
+              placeholder="飞书、微信、手机号都可以，不填也没关系"
+            />
+          </label>
+          {message ? <div className={`feedback-message ${status === "error" ? "error" : ""}`}>{message}</div> : null}
+        </div>
+        <div className="modal-foot">
+          <Btn variant="ghost" onClick={onClose}>关闭</Btn>
+          <Btn type="submit" disabled={!canSubmit}>{status === "submitting" ? "提交中..." : "提交反馈"}</Btn>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -343,6 +437,7 @@ function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [detailCollapsed, setDetailCollapsed] = useState(false);
   const [demoIntroOpen, setDemoIntroOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [t, setTweak] = useTweaks({ theme: "feishu", mode: "light", showLogin: false });
   const prevSampleWorkspaceRef = useRef(false);
   const prevUserIdRef = useRef("");
@@ -394,6 +489,7 @@ function App() {
       if (event.key === "Escape") {
         setSearchOpen(false);
         setDemoIntroOpen(false);
+        setFeedbackOpen(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -501,7 +597,7 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar active={active} onNav={setActive} data={data} onLogout={logout} />
+      <Sidebar active={active} onNav={setActive} data={data} onLogout={logout} onFeedback={() => setFeedbackOpen(true)} />
       <main className="main" data-screen-label={TITLES[active]?.label || active}>
         {sampleWorkspace && (
           <div className="sample-workspace-banner">
@@ -598,6 +694,7 @@ function App() {
           }}
         />
       )}
+      {feedbackOpen && <FeedbackModal active={active} onClose={() => setFeedbackOpen(false)} />}
     </div>
   );
 }

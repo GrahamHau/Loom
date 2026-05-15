@@ -26,7 +26,7 @@ import { parseDemandRaw, parseDemandUrl, parseProductRaw, parseProductUrl } from
 import { matchFieldKey, matchFieldOption, normalizeTagValues } from "./field-matcher.js";
 import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-service.js";
 import { analyzeResearch } from "./research-service.js";
-import { syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
+import { submitFeedbackToFeishu, syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
 import { loadInitialData } from "./seed.js";
 import { isRecentSampleNews, isSampleWorkspace } from "./sample-workspace.js";
 import {
@@ -797,6 +797,12 @@ app.post("/api/settings/test-llm", requireAuth, asyncHandler(async (req, res) =>
 app.post("/api/settings/test-vision-llm", requireAuth, asyncHandler(async (req, res) => res.json(await testVisionLLM(currentUserId(req)))));
 app.post("/api/settings/test-feishu", requireAuth, asyncHandler(async (req, res) => res.json(await testFeishuForUser(currentUserId(req)))));
 app.post("/api/sync/feishu", requireAuth, asyncHandler(async (req, res) => res.json(await syncFeishuForUser(currentUserId(req), req.body || {}))));
+app.post("/api/feedback", requireAuth, asyncHandler(async (req, res) => {
+  const user = currentUser(req);
+  const page = req.body?.page || req.get("referer") || "";
+  const result = await submitFeedbackToFeishu(currentUserId(req), { ...(req.body || {}), page }, user || {});
+  res.status(201).json(result);
+}));
 app.post("/api/admin/reset-regular-users-to-sample", requireAuth, (req, res) => {
   res.json(resetRegularUsersToSampleWorkspace());
 });
