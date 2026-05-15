@@ -50,6 +50,47 @@ describe("repository", () => {
     expect(repo.rawState(legacyUserId).products.filter((item) => !item.sample)).toHaveLength(1);
   });
 
+  it("keeps the first collected product cover when later auto updates include another image", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const product = repo.createProduct(legacyUserId, {
+      name: "Camera Grip",
+      image: "https://img.test/first.jpg",
+      thumbnail_url: "https://img.test/first-thumb.jpg",
+    });
+
+    const updated = repo.updateProduct(legacyUserId, product.id, {
+      image: "https://img.test/later.jpg",
+      thumbnail_url: "https://img.test/later-thumb.jpg",
+    });
+
+    expect(updated?.image).toBe("https://img.test/first.jpg");
+    expect(updated?.thumbnail_url).toBe("https://img.test/first-thumb.jpg");
+  });
+
+  it("allows manual product cover override and keeps it against later auto updates", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const product = repo.createProduct(legacyUserId, {
+      name: "Camera Grip",
+      image: "https://img.test/first.jpg",
+      thumbnail_url: "https://img.test/first-thumb.jpg",
+    });
+
+    const manual = repo.updateProduct(legacyUserId, product.id, {
+      image: "data:image/png;base64,manual-cover",
+      image_override: "manual",
+    });
+
+    const updated = repo.updateProduct(legacyUserId, product.id, {
+      image: "https://img.test/later.jpg",
+      thumbnail_url: "https://img.test/later-thumb.jpg",
+    });
+
+    expect(manual?.image).toBe("data:image/png;base64,manual-cover");
+    expect(manual?.thumbnail_url).toBe("data:image/png;base64,manual-cover");
+    expect(updated?.image).toBe("data:image/png;base64,manual-cover");
+    expect(updated?.thumbnail_url).toBe("data:image/png;base64,manual-cover");
+  });
+
   it("masks settings in bootstrap", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     expect(repo.bootstrap(legacyUserId).settings.llm_api_key).toBe("********");

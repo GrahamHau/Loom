@@ -27,6 +27,34 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function cleanProductImage(value, fallback = "") {
+  return cleanText(value, fallback);
+}
+
+function resolveProductImagePatch(item, patch) {
+  const hasIncomingImage = patch.image !== undefined || patch.thumbnail_url !== undefined;
+  if (!hasIncomingImage) return {};
+  const manualOverride = patch.image_override === "manual";
+  const incomingImage = cleanProductImage(
+    patch.image !== undefined ? patch.image : patch.thumbnail_url,
+    item.image || item.thumbnail_url || ""
+  );
+  const incomingThumbnail = cleanProductImage(
+    patch.thumbnail_url !== undefined ? patch.thumbnail_url : patch.image,
+    item.thumbnail_url || item.image || ""
+  );
+  const currentImage = cleanProductImage(item.image, "");
+  const currentThumbnail = cleanProductImage(item.thumbnail_url, "");
+  const hasExistingCover = Boolean(currentImage || currentThumbnail);
+  if (manualOverride || !hasExistingCover) {
+    return {
+      image: incomingImage,
+      thumbnail_url: incomingThumbnail,
+    };
+  }
+  return {};
+}
+
 function userSummaryFromState(state, fallback = {}) {
   const source = state?.user || {};
   return {
@@ -448,6 +476,8 @@ export function resetRegularUsersToSampleWorkspace() {
 
 export function createProduct(userId, input) {
   return mutateUserState(userId, (state) => {
+    const initialImage = cleanProductImage(input.image || input.thumbnail_url, "");
+    const initialThumbnail = cleanProductImage(input.thumbnail_url || input.image, "");
     const product = {
       id: input.id || nanoid(10),
       emoji: cleanText(input.emoji, "📦"),
@@ -460,8 +490,8 @@ export function createProduct(userId, input) {
       selling_points: cleanArray(input.selling_points),
       negative_keywords: cleanArray(input.negative_keywords),
       cost_estimate: cleanText(input.cost_estimate, ""),
-      image: cleanText(input.image || input.thumbnail_url, ""),
-      thumbnail_url: cleanText(input.thumbnail_url || input.image, ""),
+      image: initialImage,
+      thumbnail_url: initialThumbnail,
       note: cleanSummary(input.note),
       related_product_id: cleanText(input.related_product_id, ""),
       related_product_name: cleanText(input.related_product_name, ""),
@@ -482,6 +512,7 @@ export function updateProduct(userId, id, patch) {
   return mutateUserState(userId, (state) => {
     const item = (state.products || []).find((product) => product.id === id);
     if (!item) return null;
+    const imagePatch = resolveProductImagePatch(item, patch);
     const next = {
       ...(patch.name !== undefined ? { name: cleanTitle(patch.name, item.name) } : {}),
       ...(patch.brand !== undefined ? { brand: cleanTitle(patch.brand, item.brand || "") } : {}),
@@ -493,8 +524,7 @@ export function updateProduct(userId, id, patch) {
       ...(patch.selling_points !== undefined ? { selling_points: cleanArray(patch.selling_points) } : {}),
       ...(patch.negative_keywords !== undefined ? { negative_keywords: cleanArray(patch.negative_keywords) } : {}),
       ...(patch.cost_estimate !== undefined ? { cost_estimate: cleanText(patch.cost_estimate, item.cost_estimate || "") } : {}),
-      ...(patch.image !== undefined ? { image: cleanText(patch.image, item.image || "") } : {}),
-      ...(patch.thumbnail_url !== undefined ? { thumbnail_url: cleanText(patch.thumbnail_url, item.thumbnail_url || "") } : {}),
+      ...imagePatch,
       ...(patch.note !== undefined ? { note: cleanSummary(patch.note, item.note || "") } : {}),
       ...(patch.related_product_id !== undefined ? { related_product_id: cleanText(patch.related_product_id, item.related_product_id || "") } : {}),
       ...(patch.related_product_name !== undefined ? { related_product_name: cleanText(patch.related_product_name, item.related_product_name || "") } : {}),

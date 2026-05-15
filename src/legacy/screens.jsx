@@ -11,6 +11,12 @@ const PLATFORM_ICON = globalThis.PLATFORM_ICON;
 const PLATFORM_KEY = globalThis.PLATFORM_KEY;
 const { useState, useEffect, useMemo, useRef } = React;
 
+const NEWS_SOURCE_TYPE_LABEL = {
+  rss: "RSS",
+  atom: "Atom",
+  wechat_exporter: "公众号",
+};
+
 function EmptyState({ icon = "sparkles", title, children, action }) {
   return (
     <div className="empty">
@@ -24,6 +30,20 @@ function EmptyState({ icon = "sparkles", title, children, action }) {
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function splitTokenText(value) {
+  return String(value || "")
+    .split(/\s*[\/·,，;；]\s*/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeNewsSourceType(value) {
+  const normalized = String(value || "rss").trim().toLowerCase();
+  if (normalized === "wechat-exporter" || normalized === "wechat") return "wechat_exporter";
+  if (normalized === "atom") return "atom";
+  return normalized || "rss";
 }
 
 function clampPage(page, totalPages) {
@@ -70,6 +90,13 @@ function normalizeMonthlySales(value) {
     .replace(/\s*\/\s*(month|mo|mth|月)\s*$/i, "")
     .replace(/\s*(每月|月销)\s*$/i, "")
     .trim();
+}
+
+function normalizeMetricValue(value, prefix) {
+  const raw = String(value ?? "").trim();
+  if (!raw || !prefix || typeof prefix !== "string") return raw;
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return raw.replace(new RegExp(`^\\s*${escaped}\\s*`), "").trim();
 }
 
 function externalHref(url) {
@@ -321,15 +348,21 @@ function tagGroupByKey(tagGroups, key) {
   return safeArray(tagGroups).find((group) => group.key === normalizedKey) || { key: normalizedKey, name: normalizedKey, tone: "outline", tags: [] };
 }
 
-function MultiSelectField({ label, fieldKey, values, tagGroups, tone = "accent", single = false, onChange, onCreateOption }) {
+function MultiSelectField({ label, fieldKey, values, tagGroups, tone = "accent", single = false, compact = false, onChange, onCreateOption }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const rootRef = useRef(null);
+  const inputRef = useRef(null);
   const selected = safeArray(values).filter(Boolean);
   const group = tagGroupByKey(tagGroups, fieldKey);
   const options = Array.from(new Set([...safeArray(group.tags), ...selected])).filter(Boolean);
   const filtered = query ? options.filter((item) => item.toLowerCase().includes(query.toLowerCase())) : options;
   const hasExact = query && options.some((item) => item.toLowerCase() === query.toLowerCase());
+  const commitQuery = () => {
+    const value = query.trim();
+    if (!value) return;
+    toggle(value);
+  };
   const toggle = (value) => {
     if (!value) return;
     if (!options.includes(value)) onCreateOption?.(group.key, value);
@@ -340,6 +373,7 @@ function MultiSelectField({ label, fieldKey, values, tagGroups, tone = "accent",
       return;
     }
     onChange?.(selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]);
+    setQuery("");
   };
   useEffect(() => {
     if (!open) return undefined;
@@ -350,24 +384,59 @@ function MultiSelectField({ label, fieldKey, values, tagGroups, tone = "accent",
     return () => document.removeEventListener("mousedown", closeOnOutside);
   }, [open]);
   return (
-    <div className={`multi-field ${open ? "open" : ""}`} ref={rootRef}>
-      <div className="multi-field-head">
-        <div className="detail-section-label">{label}{single ? "" : " · 多选"}</div>
-        <button className="multi-field-trigger" type="button" onClick={() => setOpen(!open)}>
-          选择
-        </button>
-      </div>
-      <div className="multi-field-values">
-        {selected.length ? selected.map((item) =>
-          <button className={`tag removable ${tone}`} type="button" key={item} onClick={() => toggle(item)}>
+    <div className={`multi-field ${open ? "open" : ""}${compact ? " compact" : ""}`} ref={rootRef}>
+      <div
+        className="multi-field-shell"
+        onClick={() => {
+          setOpen(true);
+          queueMicrotask(() => inputRef.current?.focus());
+        }}
+      >
+        <div className="multi-field-values">
+          {selected.length ? selected.map((item) =>
+          <span className={`tag removable selected-token ${tone}`} key={item}>
             <span>{item}</span>
-            <Icon name="x" size={11} />
-          </button>
-        ) : <span className="multi-field-empty">未选择</span>}
+            <button
+              type="button"
+              className="selected-token-remove"
+              onClick={(event) => {
+                event.stopPropagation();
+                toggle(item);
+              }}
+            >
+              <Icon name="x" size={11} />
+            </button>
+          </span>
+        ) : null}
+          <input
+            ref={inputRef}
+            className={`multi-field-input${selected.length ? " has-selection" : ""}`}
+            value={query}
+            placeholder={selected.length ? "" : (single ? `输入${label}` : `输入${label}后回车`)}
+            onFocus={() => setOpen(true)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (!open) setOpen(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitQuery();
+              }
+              if (e.key === "Backspace" && !query && selected.length) {
+                const last = selected[selected.length - 1];
+                if (last) toggle(last);
+              }
+              if (e.key === "Escape") {
+                setOpen(false);
+                setQuery("");
+              }
+            }}
+          />
+        </div>
       </div>
       {open &&
         <div className="multi-picker">
-          <input className="multi-picker-search" autoFocus value={query} placeholder="搜索或新建选项" onChange={(e) => setQuery(e.target.value)} />
           <div className="multi-picker-list">
             {filtered.map((item) => {
               const checked = selected.includes(item);
@@ -380,7 +449,7 @@ function MultiSelectField({ label, fieldKey, values, tagGroups, tone = "accent",
               );
             })}
             {query && !hasExact &&
-              <button className="multi-option create" type="button" onClick={() => toggle(query.trim())}>
+              <button className="multi-option create" type="button" onClick={() => commitQuery()}>
                 <span className="multi-check">+</span>
                 <span>新建 “{query.trim()}”</span>
               </button>
@@ -631,6 +700,25 @@ function DemandTagList(props) {
 
 function RemovableTagList({ items, tone = "default", onChange, onRemove, addLabel = "+ 添加" }) {
   return <EditableTagList items={items} tone={tone} onChange={onChange} onRemove={onRemove} addLabel={addLabel} />;
+}
+
+function DetailFieldCard({ children, className = "" }) {
+  return <div className={`detail-field-card${className ? ` ${className}` : ""}`}>{children}</div>;
+}
+
+function MultiTagField({ label, fieldKey, values, tagGroups, tone = "outline", onChange, onCreateOption }) {
+  return (
+    <MultiSelectField
+      label={label}
+      fieldKey={fieldKey}
+      values={values}
+      tagGroups={tagGroups}
+      tone={tone}
+      compact
+      onChange={onChange}
+      onCreateOption={onCreateOption}
+    />
+  );
 }
 
 // ============ LOGIN ============
@@ -1140,6 +1228,7 @@ function ProductImageSlot({ product, onChange }) {
 
 // Compact text-input metric for platform card
 function PlatformInput({ label, value, onChange, prefix, suffix, inputMode = "text" }) {
+  const displayValue = normalizeMetricValue(value, prefix);
   return (
     <div className="metric">
       <div className="metric-label">{label}</div>
@@ -1147,7 +1236,7 @@ function PlatformInput({ label, value, onChange, prefix, suffix, inputMode = "te
         {prefix && <span className="metric-prefix">{prefix}</span>}
         <input
           className="metric-input"
-          value={value ?? ""}
+          value={displayValue}
           onChange={(e) => onChange(e.target.value)}
           placeholder="—"
           inputMode={inputMode} />
@@ -1166,7 +1255,7 @@ function ProductPlatformCard({ platform, index, onUpdate, onRemove }) {
         <span className={`platform-pill ${platformClass(platform.platform)}`}>{platformLabel(platform.platform)}</span>
         {url ?
           <a className="platform-card-link" href={externalHref(url)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title={url}>
-            {platformUrlLabel(url)}
+            打开链接
             <Icon name="external" size={12} />
           </a> :
           <span className="platform-card-link">{platformLabel(platform.platform)}</span>
@@ -1239,10 +1328,10 @@ function BulletListEditor({ items, onChange, tone = "default", placeholder = "�
     setDraft("");
   };
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden", background: "var(--surface)" }}>
+    <div style={{ borderRadius: 8, overflow: "hidden", background: "var(--surface-2)" }}>
       {items.map((t, i) =>
-      <div key={i} className="bullet-row" style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px 6px 10px", borderBottom: "1px solid var(--border-soft)", fontSize: 12.5 }}>
-          <span style={{ color: "var(--text-3)", fontSize: 11, fontVariantNumeric: "tabular-nums", width: 18, textAlign: "right", flexShrink: 0 }}>{i + 1}</span>
+      <div key={i} className="bullet-row" style={{ display: "grid", gridTemplateColumns: "12px minmax(0, 1fr) auto", alignItems: "center", columnGap: 4, padding: "6px 8px 6px 8px", borderBottom: "1px solid var(--border-soft)", fontSize: 12.5 }}>
+          <span style={{ color: "var(--text-3)", fontSize: 11, fontVariantNumeric: "tabular-nums", width: 12, textAlign: "left", flexShrink: 0 }}>{i + 1}</span>
           <input
           value={t}
           onChange={(e) => update(i, e.target.value)}
@@ -1255,8 +1344,8 @@ function BulletListEditor({ items, onChange, tone = "default", placeholder = "�
           </div>
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px 6px 10px" }}>
-        <span style={{ color: "var(--text-4)", fontSize: 11, width: 18, textAlign: "right", flexShrink: 0 }}>{items.length + 1}</span>
+      <div style={{ display: "grid", gridTemplateColumns: "12px minmax(0, 1fr) auto", alignItems: "center", columnGap: 4, padding: "6px 8px 6px 8px" }}>
+        <span style={{ color: "var(--text-4)", fontSize: 11, width: 12, textAlign: "left", flexShrink: 0 }}>{items.length + 1}</span>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -1284,7 +1373,8 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const updateSelected = async (patch) => {
     setProducts((ps) => ps.map((p) => p.id === selectedId ? { ...p, ...patch } : p));
     if (api && selectedId) {
-      await api(`/api/products/${selectedId}`, { method: "PATCH", body: JSON.stringify(patch) });
+      const nextPatch = patch.image !== undefined ? { ...patch, image_override: "manual" } : patch;
+      await api(`/api/products/${selectedId}`, { method: "PATCH", body: JSON.stringify(nextPatch) });
       await refreshData?.();
     }
   };
@@ -1400,7 +1490,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   };
 
   return (
-    <div className={`products-layout ${selected && !detailCollapsed ? "" : "no-detail"}`} style={{ height: "100%" }}>
+    <div className={`products-layout ${selected && !detailCollapsed ? "" : "no-detail"}`}>
       <div className="products-main">
         <div className={`products-toolbar ${selected && !detailCollapsed ? "with-detail" : ""}`}>
           <div className="products-toolbar-search">
@@ -1510,12 +1600,12 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
               }
             </tbody>
           </table>
+          {paged.total > pageSize && (
+            <div className="products-pagination-shell">
+              <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
+            </div>
+          )}
         </div>
-        {paged.total > pageSize && (
-          <div className="products-pagination-shell">
-            <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
-          </div>
-        )}
       </div>
 
       {selected && !detailCollapsed &&
@@ -1546,19 +1636,6 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
 
           <div className="detail-body">
             <div className="detail-section">
-              <div className="detail-section-label">品牌</div>
-              <MultiSelectField
-                label="品牌"
-                fieldKey="competitor_brands"
-                values={[selected.brand].filter(Boolean)}
-                tagGroups={data.settings?.tag_groups}
-                tone="outline"
-                single
-                onChange={(values) => updateSelected({ brand: values[0] || "" })}
-                onCreateOption={createTagOption}
-              />
-            </div>
-            <div className="detail-section">
               <div className="detail-section-label">
                 <Icon name="boxes" size={11} /> 平台信息 · {safeArray(selected.platforms).length} 个
               </div>
@@ -1574,61 +1651,71 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
               <AddPlatformControl existingPlatforms={selected.platforms} onAdd={addSelectedPlatform} />
             </div>
 
-            <div className="detail-section">
-              <div className="detail-section-label">参考成本 · 适用于所有平台</div>
-              <div className="metric-input-wrap" style={{ width: "100%" }}>
-                <span className="metric-prefix">¥</span>
-                <input
-                className="metric-input"
-                value={String(selected.cost_estimate || safeArray(selected.platforms)[0]?.cost || "").replace(/^[¥$￥]\s?/, "")}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  updateSelected({ cost_estimate: raw ? "¥" + raw : "" });
-                }}
-                placeholder="填入参考成本金额" />
+            <div className="detail-inline-grid">
+              <div className="detail-section detail-section-tight">
+                <div className="detail-section-label"><Icon name="tag" size={11} /> 品牌</div>
+                <MultiSelectField
+                  label="品牌"
+                  fieldKey="competitor_brands"
+                  values={splitTokenText(selected.brand)}
+                  tagGroups={data.settings?.tag_groups}
+                  tone="outline"
+                  compact
+                  onChange={(values) => updateSelected({ brand: values.join(" / ") })}
+                  onCreateOption={createTagOption}
+                />
+              </div>
+
+              <div className="detail-section detail-section-tight">
+                <div className="detail-section-label"><Icon name="tag" size={11} /> 品类</div>
+                <MultiSelectField
+                  label="品类"
+                  fieldKey="product_categories"
+                  values={splitTokenText(selected.category)}
+                  tagGroups={data.settings?.tag_groups}
+                  tone="default"
+                  compact
+                  onChange={(values) => updateSelected({ category: values.join(" / ") })}
+                  onCreateOption={createTagOption}
+                />
               </div>
             </div>
 
             <div className="detail-section">
-              <MultiSelectField
-                label="品类"
-                fieldKey="product_categories"
-                values={[selected.category].filter(Boolean)}
-                tagGroups={data.settings?.tag_groups}
-                tone="default"
-                single
-                onChange={(values) => updateSelected({ category: values[0] || "" })}
-                onCreateOption={createTagOption}
-              />
-            </div>
-
-            <div className="detail-section">
-              <div className="detail-section-label">标签</div>
-              <RemovableTagList
-                items={selected.tags}
-                onChange={(next) => updateSelected({ tags: next })}
-                onRemove={(value) => updateSelected({ tags: safeArray(selected.tags).filter((item) => item !== value) })}
-              />
+              <div className="detail-section-label"><Icon name="tag" size={11} /> 标签</div>
+              <DetailFieldCard>
+                <MultiTagField
+                  label="标签"
+                  fieldKey="custom_tags"
+                  values={safeArray(selected.tags)}
+                  tagGroups={data.settings?.tag_groups}
+                  tone="outline"
+                  onChange={(next) => updateSelected({ tags: next })}
+                  onCreateOption={createTagOption}
+                />
+              </DetailFieldCard>
             </div>
 
             <div className="detail-section">
               <div className="detail-section-label"><Icon name="sparkles" size={11} /> 核心卖点 · AI 总结 + 用户补充</div>
-              <BulletListEditor
-              items={safeArray(selected.selling_points)}
-              onChange={(next) => updateSelected({ selling_points: next })}
-              tone="success"
-              placeholder="输入卖点，回车添加" />
-            
+              <DetailFieldCard>
+                <BulletListEditor
+                items={safeArray(selected.selling_points)}
+                onChange={(next) => updateSelected({ selling_points: next })}
+                tone="success"
+                placeholder="输入卖点，回车添加" />
+              </DetailFieldCard>
             </div>
 
             <div className="detail-section">
-              <div className="detail-section-label">差评关键词</div>
-              <BulletListEditor
-              items={safeArray(selected.negative_keywords)}
-              onChange={(next) => updateSelected({ negative_keywords: next })}
-              tone="danger"
-              placeholder="输入差评关键词，回车添加" />
-            
+              <div className="detail-section-label"><Icon name="tag" size={11} /> 差评关键词</div>
+              <DetailFieldCard>
+                <BulletListEditor
+                items={safeArray(selected.negative_keywords)}
+                onChange={(next) => updateSelected({ negative_keywords: next })}
+                tone="danger"
+                placeholder="输入差评关键词，回车添加" />
+              </DetailFieldCard>
             </div>
 
             <div className="detail-section">
@@ -2196,7 +2283,8 @@ function ProductDetailDrawer({ product, onClose, api, refreshData }) {
     const next = { ...draft, ...patch };
     setDraft(next);
     if (api) {
-      await api(`/api/products/${product.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      const nextPatch = patch.image !== undefined ? { ...patch, image_override: "manual" } : patch;
+      await api(`/api/products/${product.id}`, { method: "PATCH", body: JSON.stringify(nextPatch) });
       await refreshData?.();
     }
   };
@@ -3202,31 +3290,27 @@ function SettingsScreen({ data, api, refreshData }) {
                 await saveSettings(next);
               }} />
             </div>
-            {sortedOfficialSources.map((s) =>
-            <div className="source-row" key={s.id}>
-                <div>
-                  <div style={{ fontWeight: 500 }}>{s.name}</div>
-                  <div className="url">{s.url}</div>
-                  <div className="muted text-sm">
-                    {s.last_fetched_at ? `上次采集 ${formatRelativeTime(s.last_fetched_at)}` : "未采集"}
-                    {` · 条数 ${s.last_item_count || 0}`}
-                    {s.last_error ? ` · 错误 ${s.last_error}` : ""}
-                  </div>
-                </div>
-                <div><Tag tone="outline">{NEWS_SOURCE_TYPE_LABEL[normalizeNewsSourceType(s.type)] || "RSS"}</Tag></div>
-                <div className="muted text-sm">{s.interval} min</div>
-                <div className="source-row-actions">
-                  <Btn size="sm" variant="ghost" icon="external" onClick={() => openSource(s)} />
-                </div>
-              </div>
-            )}
+            <div className="official-source-grid">
+              {sortedOfficialSources.map((s) =>
+                <button
+                  type="button"
+                  className="official-source-card"
+                  key={s.id}
+                  onClick={() => openSource(s)}
+                  title={s.name}
+                >
+                  <span className="official-source-name">{s.name}</span>
+                  <span className="official-source-type">{NEWS_SOURCE_TYPE_LABEL[normalizeNewsSourceType(s.type)] || "RSS"}</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="rss" size={14} style={{ color: "var(--accent)" }} />
-            <div><h3>自定义 News 数据源</h3><div className="desc">默认留空。只在你想补充额外 RSS / 公众号源时手动添加。</div></div>
+            <div><h3>添加自定义数据源</h3><div className="desc">默认留空。只在你想补充额外 RSS / 公众号源时手动添加。</div></div>
           </div>
           <div className="settings-section-body">
             {customSources.length === 0 && (
@@ -3264,14 +3348,21 @@ function SettingsScreen({ data, api, refreshData }) {
                 <Icon name={sourcesExpanded ? "chevron-up" : "chevron-down"} size={14} />
               </button>
             }
-            <div className="source-row" style={{ marginTop: 10 }}>
-              <div>
+            <div className="source-add-row">
+              <div className="source-add-fields">
                 <input className="input sm" style={{ width: "100%", marginBottom: 6 }} placeholder="源名称" value={newSource.name} onChange={(e) => setNewSource({ ...newSource, name: e.target.value })} />
                 <input className="input sm" style={{ width: "100%" }} placeholder="RSS URL" value={newSource.url} onChange={(e) => setNewSource({ ...newSource, url: e.target.value })} />
+                <div className="source-add-interval">
+                  <div className="source-add-interval-label">采集频率</div>
+                  <div className="source-add-interval-box">
+                    <input className="input sm source-add-interval-input" type="number" value={newSource.interval} onChange={(e) => setNewSource({ ...newSource, interval: Number(e.target.value) })} />
+                    <span className="source-add-interval-inline">每分钟</span>
+                  </div>
+                </div>
               </div>
-              <div><Tag tone="outline">RSS</Tag></div>
-              <input className="input sm" style={{ width: 82 }} type="number" value={newSource.interval} onChange={(e) => setNewSource({ ...newSource, interval: Number(e.target.value) })} />
-              <Btn size="sm" variant="primary" icon="plus" onClick={addSource}>添加</Btn>
+              <div className="source-add-actions">
+                <Btn size="sm" variant="primary" icon="plus" onClick={addSource}>添加</Btn>
+              </div>
             </div>
           </div>
         </div>
