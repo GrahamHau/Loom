@@ -206,20 +206,20 @@ describe("admin users", () => {
     const createWorkspaceResponse = await fetch(`${baseUrl}/api/admin/workspaces`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: ownerLogin.cookie },
-      body: JSON.stringify({ name: "GF Team", slug: "gf-team", type: "small_team" }),
+      body: JSON.stringify({ name: "Collins' workplace", slug: "collins-workplace", type: "small_team" }),
     });
     const workspace = await createWorkspaceResponse.json();
     expect(createWorkspaceResponse.status).toBe(201);
-    expect(workspace.slug).toBe("gf-team");
+    expect(workspace.slug).toBe("collins-workplace");
 
-    const assignResponse = await fetch(`${baseUrl}/api/admin/users/manual-user-test/workspaces/gf-team`, {
+    const assignResponse = await fetch(`${baseUrl}/api/admin/users/manual-user-test/workspaces/collins-workplace`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: ownerLogin.cookie },
       body: JSON.stringify({ role: "member" }),
     });
     const assigned = await assignResponse.json();
     expect(assignResponse.status).toBe(200);
-    expect(assigned.workspaces.some((item) => item.slug === "gf-team")).toBe(true);
+    expect(assigned.workspaces.some((item) => item.slug === "collins-workplace")).toBe(true);
   });
 
   it("auto-assigns Feishu users to the configured company workspace", async () => {

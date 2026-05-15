@@ -20,6 +20,7 @@
     "stream:sync-official": "npm run check:node && node scripts/sync-official-stream-from-remote.js",
     "news:configure-sources": "npm run check:node && node scripts/configure-news-sources.js",
     "news:seed-sources": "npm run check:node && node scripts/seed-news-sources.js",
+    "seal:apply": "npm run check:node && node scripts/apply-seal-config.js",
     "news:reclassify": "npm run check:node && node scripts/reclassify-news.js",
     "listen:loom": "npm run check:node && node scripts/loom-listener.js"
   },

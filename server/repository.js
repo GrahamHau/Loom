@@ -22,6 +22,7 @@ import { buildEmptyState } from "./seed.js";
 import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
 const STREAM_NEWS_MAX_AGE_DAYS = Math.max(1, Number(process.env.STREAM_NEWS_MAX_AGE_DAYS || 10));
+const ENABLE_PUBLIC_SAMPLE_DATA = process.env.LOOM_ENABLE_PUBLIC_SAMPLE_DATA === "true";
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -1575,7 +1576,7 @@ export function updateNewsSource(userId, id, patch) {
     patch.brand !== undefined ? cleanTitle(patch.brand, current.brand) : current.brand,
     patch.fetch_interval !== undefined || patch.interval !== undefined ? clampFetchInterval(patch.fetch_interval ?? patch.interval) : current.fetch_interval,
     patch.is_active !== undefined ? (patch.is_active ? 1 : 0) : (patch.active !== undefined ? (patch.active ? 1 : 0) : current.is_active),
-    patch.last_fetched_at ?? current.last_fetched_at,
+    patch.last_fetched_at !== undefined ? patch.last_fetched_at : current.last_fetched_at,
     patch.last_item_count !== undefined ? Number(patch.last_item_count || 0) : Number(current.last_item_count || 0),
     patch.last_error !== undefined ? cleanText(patch.last_error, current.last_error) : current.last_error,
     nowIso(),
@@ -1632,9 +1633,12 @@ export function ensureLegacyWorkspace() {
     role: "产品经理",
     auth_provider: "password",
   });
-  ensureSampleUserState(user, { force: true });
-  ensureSampleNewsSources(user.id);
-  ensureDefaultNewsSources(user.id);
+  ensureUserState(user);
+  if (ENABLE_PUBLIC_SAMPLE_DATA) {
+    ensureSampleUserState(user, { force: true });
+    ensureSampleNewsSources(user.id);
+    ensureDefaultNewsSources(user.id);
+  }
   return user;
 }
 

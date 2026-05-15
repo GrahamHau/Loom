@@ -696,26 +696,25 @@ describe("repository", () => {
     expect(repo.rawState(secondUser.id).products.map((item) => item.name)).toEqual(["Feishu Product"]);
   });
 
-  it("initializes visitor with a sample workspace and live news sources", () => {
+  it("initializes visitor as an empty public workspace by default", () => {
     const visitor = repo.ensureLegacyWorkspace();
     const state = repo.bootstrap(visitor.id);
 
-    expect(state.onboarding.sampleWorkspace).toBe(true);
-    expect(state.products.some((item) => item.sample)).toBe(true);
-    expect(state.demands.some((item) => item.sample)).toBe(true);
-    expect(state.research.some((item) => item.sample)).toBe(true);
-    expect(state.officialRssSources.length).toBeGreaterThan(0);
-    expect(state.officialRssSources.some((source) => source.source_group === "sample-live" || source.source_group === "official-default")).toBe(true);
+    expect(state.onboarding.sampleWorkspace).toBeFalsy();
+    expect(state.products).toEqual([]);
+    expect(state.demands).toEqual([]);
+    expect(state.research).toEqual([]);
+    expect(state.rssSources).toEqual([]);
+    expect(state.officialRssSources).toEqual([]);
   });
 
-  it("initializes regular users with empty custom sources and shared official sources", () => {
+  it("initializes regular users with empty custom and official sources", () => {
     const user = repo.ensureLocalUser({ id: "regular-user", name: "Regular User", auth_provider: "feishu" });
     const state = repo.bootstrap(user.id);
 
     expect(state.onboarding.sampleWorkspace).toBeFalsy();
     expect(state.rssSources).toEqual([]);
-    expect(state.officialRssSources.length).toBeGreaterThan(0);
-    expect(state.officialRssSources.some((source) => source.source_group === "sample-live" || source.source_group === "official-default")).toBe(true);
+    expect(state.officialRssSources).toEqual([]);
   });
 
   it("hides untranslated news from bootstrap", () => {
@@ -851,7 +850,7 @@ describe("repository", () => {
 
     expect(result.reset).toContain(user.id);
     expect(state.onboarding.sampleWorkspace).toBe(true);
-    expect(state.products.some((item) => item.sample)).toBe(true);
+    expect(state.products).toEqual([]);
     expect(state.news.map((item) => item.original_url)).toContain("https://sample.test/reset-seed");
   });
 
@@ -881,30 +880,30 @@ describe("repository", () => {
     const state = repo.bootstrap(visitor.id);
     expect(state.news.map((item) => item.original_url)).toContain("https://sample.test/recent");
     expect(state.news.map((item) => item.original_url)).not.toContain("https://sample.test/stale");
-    expect(state.onboarding.liveNewsReady).toBe(true);
+    expect(state.onboarding.liveNewsReady).toBeFalsy();
   });
 
-  it("keeps visitor permanently in sample workspace", () => {
+  it("keeps visitor empty instead of forcing public sample data", () => {
     const visitor = repo.ensureLegacyWorkspace();
     repo.finishSampleWorkspace(visitor.id);
     const state = repo.bootstrap(visitor.id);
 
-    expect(state.onboarding.sampleWorkspace).toBe(true);
-    expect(state.onboarding.visitorOnly).toBe(true);
-    expect(state.onboarding.canExitSample).toBe(false);
-    expect(state.products.some((item) => item.sample)).toBe(true);
+    expect(state.onboarding.sampleWorkspace).toBeFalsy();
+    expect(state.products).toEqual([]);
+    expect(state.demands).toEqual([]);
+    expect(state.research).toEqual([]);
   });
 
-  it("keeps old visitor seed data inside the sample workspace", () => {
+  it("keeps old visitor data as real data without marking it sample", () => {
     const visitor = repo.ensureLegacyWorkspace();
     repo.createProduct(visitor.id, { name: "Old Visitor Product" });
 
     const nextVisitor = repo.ensureLegacyWorkspace();
     const state = repo.bootstrap(nextVisitor.id);
 
-    expect(state.onboarding.sampleWorkspace).toBe(true);
+    expect(state.onboarding.sampleWorkspace).toBeFalsy();
     expect(state.products.map((item) => item.name)).toContain("Old Visitor Product");
-    expect(state.products.every((item) => item.sample)).toBe(true);
+    expect(state.products.some((item) => item.sample)).toBe(false);
   });
 
   it("lets real first-login users exit the sample workspace", () => {
@@ -917,7 +916,7 @@ describe("repository", () => {
     expect(state.demands).toEqual([]);
     expect(state.research).toEqual([]);
     expect(state.rssSources).toEqual([]);
-    expect(state.officialRssSources.length).toBeGreaterThan(0);
+    expect(state.officialRssSources).toEqual([]);
   });
 
   it("updates product relation fields", () => {

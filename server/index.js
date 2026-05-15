@@ -28,6 +28,7 @@ import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-ser
 import { analyzeResearch } from "./research-service.js";
 import { submitFeedbackToFeishu, syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
 import { loadInitialData } from "./seed.js";
+import { applySealConfig } from "./seal-config.js";
 import { isRecentSampleNews, isSampleWorkspace } from "./sample-workspace.js";
 import {
   bootstrap,
@@ -100,6 +101,10 @@ const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE === "true"
 validateAuthConfig();
 ensureSeed(loadInitialData());
 const legacyUser = ensureLegacyWorkspace();
+const sealConfigResult = applySealConfig();
+if (sealConfigResult.configured) {
+  console.log(`Loom seal config applied: workspaces=${sealConfigResult.workspaces} sources=${sealConfigResult.newsSources}`);
+}
 const sampleRefreshInFlight = new Set();
 const requestLogEnabled = ["1", "true", "yes"].includes(String(process.env.LOOM_REQUEST_LOG || "").toLowerCase());
 

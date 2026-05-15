@@ -2409,21 +2409,24 @@ a.platform-card-link:hover {
   width: 100%; height: 44px;
   display: flex; align-items: center; justify-content: center; gap: 10px;
   font-family: var(--font-sans); font-size: 14px; font-weight: 600;
-  background: var(--accent); color: var(--text-inverted);
-  border: none; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent) 22%);
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: background var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast);
+  transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast);
   box-shadow: var(--shadow-sm);
 }
 .login-feishu-btn:hover:not(:disabled) {
-  background: var(--accent-strong);
+  background: color-mix(in srgb, var(--surface) 76%, var(--accent) 24%);
+  border-color: color-mix(in srgb, var(--border) 56%, var(--accent) 44%);
   box-shadow: var(--shadow);
   transform: translateY(-1px);
 }
 .login-feishu-btn:disabled { opacity: .45; cursor: not-allowed; }
 .login-feishu-btn img {
   width: 22px; height: 22px; display: block; flex-shrink: 0;
-  filter: brightness(0) invert(1);
+  filter: none;
 }
 /* 次：演示模式 */
 .login-demo-btn {

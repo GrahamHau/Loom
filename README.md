@@ -4,6 +4,8 @@ Loom is a personal intelligence workspace for turning web pages, social posts, p
 
 It is built for product research, competitive tracking, market sensing, and long-running creative work. Instead of saving more links, Loom helps you capture source material into a consistent schema of fields, tags, summaries, entities, and research threads.
 
+This public repository is the application mechanism only. It intentionally ships with no private workspaces, source lists, production data, customer data, or default business-domain seed content. Private workspace configuration should live in a separate seal repository and be applied through `LOOM_SEAL_CONFIG_DIR`.
+
 ## What Loom Does
 
 - Capture product pages and social posts with a Chrome extension side panel.
@@ -45,8 +47,7 @@ server/                 Express API, auth, repository, RSS and fetch services
 scripts/                Local setup, maintenance, sync, and debugging scripts
 loom-extension/         Chrome extension source
 landing/                Public landing page
-docs/                   Product and implementation notes
-demos/                  Demo data and examples
+docs/                   Public product and implementation notes
 ```
 
 ## Requirements
@@ -136,6 +137,18 @@ FEISHU_OAUTH_ALLOWED_TENANT_KEYS=
 FEISHU_OAUTH_ALLOWED_EMAIL_DOMAINS=
 ```
 
+Optional seal/private overlay:
+
+```text
+LOOM_SEAL_CONFIG_DIR=/path/to/loom-seal/config
+```
+
+The seal config directory can include `workspaces.json`, `workspace-members.json`, and `news-sources.json`. Apply it with:
+
+```bash
+npm run seal:apply
+```
+
 ## Chrome Extension
 
 The extension source lives in `loom-extension/`.
@@ -163,6 +176,10 @@ curl http://127.0.0.1:3000/api/health
 ```
 
 SQLite data and sessions are stored under `./data` by default. That directory is intentionally ignored by Git.
+
+## Public / Seal Boundary
+
+Keep this repo safe to publish. Do not add default RSS sources, private workspaces, company-specific docs, deployment overlays, or generated extension bundles here. Put those in the seal repo and apply them through the JSON import mechanism.
 
 ## Security Notes
 

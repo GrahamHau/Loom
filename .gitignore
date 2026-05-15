@@ -27,3 +27,7 @@ test-results/
 .claude/
 claude-design-pack/
 README_LOCAL.md
+
+deploy/
+docs/
+landing/public/downloads/*.zip
