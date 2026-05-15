@@ -964,24 +964,21 @@ function LoginScreen({ onLogin, onDemoLogin, onFeishuLogin, error, providers = {
   const [user, setUser] = useState("");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPw, setShowPw] = useState(false);
   const passwordEnabled = providers.password !== false;
   const feishuEnabled = Boolean(providers.feishu);
+
   const submit = async () => {
     setBusy(true);
-    try {
-      await onLogin?.({ username: user, password: pw });
-    } finally {
-      setBusy(false);
-    }
+    try { await onLogin?.({ username: user, password: pw }); }
+    finally { setBusy(false); }
   };
   const enterDemoMode = async () => {
     setBusy(true);
-    try {
-      await onDemoLogin?.();
-    } finally {
-      setBusy(false);
-    }
+    try { await onDemoLogin?.(); }
+    finally { setBusy(false); }
   };
+
   return (
     <div className="login-stage">
       <div className="login-card">
@@ -991,73 +988,61 @@ function LoginScreen({ onLogin, onDemoLogin, onFeishuLogin, error, providers = {
             <div className="sub">Link · Observe · Organize · Make</div>
           </div>
         </div>
-        <div className="col" style={{ gap: 14 }}>
-          {passwordEnabled && (
-            <>
+
+        <div className="login-actions">
+
+          {/* ① 飞书登录 — 主要入口 */}
+          {feishuEnabled && (
+            <button className="login-feishu-btn" type="button"
+              onClick={() => onFeishuLogin?.()} disabled={busy}>
+              <img src="/feishu.png" alt="" />
+              使用飞书登录
+            </button>
+          )}
+
+          {/* ② 演示模式 — 次要入口 */}
+          <button className="login-demo-btn" type="button"
+            onClick={enterDemoMode} disabled={busy}>
+            进入演示模式
+          </button>
+
+          {error && <div className="login-error-inline">{error}</div>}
+
+          {/* ③ 账号密码 — 折叠式隐性入口 */}
+          {passwordEnabled && !showPw && (
+            <button className="login-pw-toggle" type="button"
+              onClick={() => setShowPw(true)}>
+              使用账号密码登录
+            </button>
+          )}
+          {passwordEnabled && showPw && (
+            <div className="login-pw-form">
               <div>
                 <label className="field-label">账号</label>
-                <input
-                  className="input lg"
-                  style={{ width: "100%" }}
-                  value={user}
-                  placeholder="请输入你的账号"
-                  autoComplete="username"
-                  onChange={(e) => setUser(e.target.value)}
-                />
+                <input className="input" style={{ width: "100%" }} value={user}
+                  placeholder="请输入你的账号" autoComplete="username"
+                  onChange={(e) => setUser(e.target.value)} />
               </div>
               <div>
                 <label className="field-label">密码</label>
-                <input
-                  className="input lg"
-                  style={{ width: "100%" }}
-                  type="password"
-                  value={pw}
-                  placeholder="请输入你的密码"
-                  autoComplete="current-password"
-                  onChange={(e) => setPw(e.target.value)}
-                />
+                <input className="input" style={{ width: "100%" }} type="password" value={pw}
+                  placeholder="请输入你的密码" autoComplete="current-password"
+                  onChange={(e) => setPw(e.target.value)} />
               </div>
-            </>
-          )}
-          {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
-          {passwordEnabled && (
-            <button className="btn primary" style={{ height: 38, justifyContent: "center" }} onClick={submit} disabled={busy || !user || !pw}>
-              {busy ? "登录中..." : "登录 LOOM"}
-            </button>
-          )}
-          <div className="login-oauth">
-            <div className="login-oauth-divider"><span>其他方式</span></div>
-            <div className="login-oauth-actions">
-              <button
-                className="login-oauth-btn"
-                type="button"
-                title="使用飞书登录"
-                aria-label="使用飞书登录"
-                onClick={() => onFeishuLogin?.()}
-                disabled={busy || !feishuEnabled}
-              >
-                <img src="/feishu.png" alt="飞书" />
+              <button className="btn primary" style={{ height: 36, justifyContent: "center" }}
+                onClick={submit} disabled={busy || !user || !pw}>
+                {busy ? "登录中..." : "登录"}
               </button>
             </div>
-          </div>
-          <button
-            className="login-demo-link"
-            type="button"
-            onClick={enterDemoMode}
-            disabled={busy}
-          >
-            进入演示模式
-          </button>
-          <div className="login-inline-tip">
-            {feishuEnabled ? "演示模式可直接体验示例工作区；公司成员可使用飞书登录个人账号。" : "演示模式可直接体验示例工作区；飞书登录完成 OAuth 配置后即可启用。"}
-          </div>
+          )}
         </div>
-        <div style={{ borderTop: "1px solid var(--border)", marginTop: 22, paddingTop: 14, fontSize: 11, color: "var(--text-3)", textAlign: "center" }}>
+
+        <div className="login-card-foot">
           LOOM v2.0 · 支持演示、账号密码与飞书登录
         </div>
       </div>
-    </div>);
-
+    </div>
+  );
 }
 window.LoginScreen = LoginScreen;
 

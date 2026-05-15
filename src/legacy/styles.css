@@ -18,8 +18,10 @@
 
   /* accent — soft indigo by default */
   --accent: oklch(0.55 0.13 258);
+  --accent-strong: oklch(0.48 0.15 258);
   --accent-soft: oklch(0.95 0.03 258);
   --accent-text: oklch(0.4 0.13 258);
+  --text-inverted: oklch(0.985 0.003 80);
 
   /* semantic */
   --success: oklch(0.62 0.13 155);
@@ -68,6 +70,8 @@
   --text-3: oklch(0.62 0.008 260);
   --text-4: oklch(0.5 0.008 260);
   --accent-soft: oklch(0.28 0.05 258);
+  --accent-strong: oklch(0.72 0.15 258);
+  --text-inverted: oklch(0.16 0.005 260);
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
   --shadow: 0 1px 3px rgba(0,0,0,0.35), 0 4px 12px rgba(0,0,0,0.25);
   --shadow-lg: 0 8px 24px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.3);
@@ -2394,87 +2398,69 @@ a.platform-card-link:hover {
   padding: 32px 32px 24px;
   box-shadow: var(--shadow-lg);
 }
-.login-inline-tip {
-  font-size: 11.5px;
-  color: var(--text-3);
-  line-height: 1.6;
-}
-.login-oauth {
-  margin-top: 8px;
+/* ── Login — new priority layout ─────────────────────────── */
+.login-actions {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-}
-.login-oauth-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
   gap: 10px;
 }
-.login-oauth-divider {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 10.5px;
-  color: var(--text-3);
-  opacity: 0.6;
-  letter-spacing: 0.05em;
-}
-.login-oauth-divider::before,
-.login-oauth-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-.login-oauth-btn {
-  width: 38px;
-  height: 38px;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  background: white;
-  display: grid;
-  place-items: center;
+/* 主：飞书登录 */
+.login-feishu-btn {
+  width: 100%; height: 44px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-family: var(--font-sans); font-size: 14px; font-weight: 600;
+  background: var(--accent); color: var(--text-inverted);
+  border: none; border-radius: var(--radius);
   cursor: pointer;
-  padding: 0;
-  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  transition: background var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast);
+  box-shadow: var(--shadow-sm);
 }
-.login-oauth-btn:hover:not(:disabled) {
-  border-color: var(--text-3);
+.login-feishu-btn:hover:not(:disabled) {
+  background: var(--accent-strong);
+  box-shadow: var(--shadow);
   transform: translateY(-1px);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
 }
-.login-oauth-btn:disabled {
-  cursor: not-allowed;
-  opacity: .45;
+.login-feishu-btn:disabled { opacity: .45; cursor: not-allowed; }
+.login-feishu-btn img {
+  width: 22px; height: 22px; display: block; flex-shrink: 0;
+  filter: brightness(0) invert(1);
 }
-.login-oauth-btn img {
-  width: 22px;
-  height: 22px;
-  display: block;
-  object-fit: contain;
-}
-.login-demo-link {
-  align-self: flex-start;
-  appearance: none;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: var(--text-3);
-  font-size: 11.5px;
-  line-height: 1.4;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+/* 次：演示模式 */
+.login-demo-btn {
+  width: 100%; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-sans); font-size: 13px; font-weight: 500;
+  background: var(--surface); color: var(--text-2);
+  border: 1px solid var(--border); border-radius: var(--radius);
   cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
 }
-.login-demo-link:hover:not(:disabled) {
-  color: var(--text-2);
+.login-demo-btn:hover:not(:disabled) {
+  background: var(--hover); border-color: var(--border-strong);
 }
-.login-demo-link:disabled {
-  cursor: not-allowed;
-  opacity: .45;
+.login-demo-btn:disabled { opacity: .45; cursor: not-allowed; }
+/* 末：账号密码折叠 */
+.login-pw-toggle {
+  appearance: none; border: 0; background: transparent; padding: 2px 0;
+  font-family: var(--font-sans);
+  color: var(--text-4); font-size: 11.5px;
+  text-decoration: underline; text-underline-offset: 3px;
+  cursor: pointer; align-self: center; margin-top: 2px;
+  transition: color var(--dur-fast);
+}
+.login-pw-toggle:hover { color: var(--text-3); }
+.login-pw-form {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.login-error-inline {
+  font-size: 12px; color: var(--danger);
+}
+.login-card-foot {
+  border-top: 1px solid var(--border);
+  margin-top: 22px; padding-top: 14px;
+  font-size: 11px; color: var(--text-3); text-align: center;
 }
 
 /* Scrollbars */

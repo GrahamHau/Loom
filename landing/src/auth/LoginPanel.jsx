@@ -85,17 +85,14 @@ export default function LoginPanel() {
     }
   };
 
+  const [showPw, setShowPw] = useState(false);
   const submitting = status === "submitting";
-  const succeeded = status === "success";
+  const succeeded  = status === "success";
   const feishuEnabled = providers.feishu && !submitting && !succeeded;
+  const passwordEnabled = providers.password !== false;
 
   return (
-    <form
-      className="login-card"
-      onSubmit={onSubmit}
-      noValidate
-      aria-label="登录 LOOM"
-    >
+    <div className="login-card" aria-label="登录 LOOM">
       <div className="login-brand">
         <div>
           <div className="login-brand-name">LOOM</div>
@@ -110,110 +107,75 @@ export default function LoginPanel() {
         </p>
       </div>
 
-      <div className="login-field">
-        <label className="login-label" htmlFor="login-username">
-          账号
-        </label>
-        <input
-          id="login-username"
-          className="login-input"
-          type="text"
-          name="username"
-          autoComplete="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          aria-invalid={fieldErrors.username ? "true" : "false"}
-          aria-describedby={
-            fieldErrors.username ? `${fieldId}-username-err` : undefined
-          }
-          disabled={submitting || succeeded}
-          placeholder="请输入你的账号"
-        />
-        {fieldErrors.username && (
-          <div id={`${fieldId}-username-err`} className="login-fielderror">
-            {fieldErrors.username}
-          </div>
-        )}
-      </div>
+      <div className="login-actions">
 
-      <div className="login-field">
-        <label className="login-label" htmlFor="login-password">
-          密码
-        </label>
-        <input
-          id="login-password"
-          className="login-input"
-          type="password"
-          name="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          aria-invalid={fieldErrors.password ? "true" : "false"}
-          aria-describedby={
-            fieldErrors.password ? `${fieldId}-password-err` : undefined
-          }
-          disabled={submitting || succeeded}
-          placeholder="请输入你的密码"
-        />
-        {fieldErrors.password && (
-          <div id={`${fieldId}-password-err`} className="login-fielderror">
-            {fieldErrors.password}
-          </div>
-        )}
-      </div>
-
-      <button
-        type="submit"
-        className="login-submit"
-        disabled={submitting || succeeded}
-      >
-        {submitting && <span className="login-spinner" aria-hidden="true" />}
-        {succeeded ? "已登录 ✓" : submitting ? "登录中…" : "登录 LOOM"}
-      </button>
-
-      <div className="login-oauth">
-        <div className="login-oauth-divider">
-          <span>其他方式</span>
-        </div>
-        <div className="login-oauth-actions">
-          <button
-            className="login-oauth-btn"
-            type="button"
-            title="使用飞书登录"
-            aria-label="使用飞书登录"
-            disabled={!feishuEnabled}
-            onClick={startFeishuLogin}
-          >
-            <img src="/feishu.png" alt="飞书" />
+        {/* ① 飞书登录 — 主要入口 */}
+        {feishuEnabled && (
+          <button className="login-feishu-btn" type="button"
+            onClick={startFeishuLogin} disabled={submitting || succeeded}>
+            <img src="/feishu.png" alt="" />
+            使用飞书登录
           </button>
-        </div>
+        )}
+
+        {/* ② 演示模式 — 次要入口 */}
+        <button className="login-demo-btn" type="button"
+          onClick={onDemoLogin} disabled={submitting || succeeded}>
+          {submitting ? "进入中…" : "进入演示模式"}
+        </button>
+
+        {/* ③ 账号密码 — 折叠式隐性入口 */}
+        {passwordEnabled && !showPw && (
+          <button className="login-pw-toggle" type="button"
+            onClick={() => setShowPw(true)}>
+            使用账号密码登录
+          </button>
+        )}
+        {passwordEnabled && showPw && (
+          <form className="login-pw-form" onSubmit={onSubmit} noValidate>
+            <div className="login-field">
+              <label className="login-label" htmlFor="login-username">账号</label>
+              <input id="login-username" className="login-input" type="text"
+                name="username" autoComplete="username" value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                disabled={submitting || succeeded} placeholder="请输入你的账号" />
+              {fieldErrors.username && (
+                <div id={`${fieldId}-username-err`} className="login-fielderror">
+                  {fieldErrors.username}
+                </div>
+              )}
+            </div>
+            <div className="login-field">
+              <label className="login-label" htmlFor="login-password">密码</label>
+              <input id="login-password" className="login-input" type="password"
+                name="password" autoComplete="current-password" value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={submitting || succeeded} placeholder="请输入你的密码" />
+              {fieldErrors.password && (
+                <div id={`${fieldId}-password-err`} className="login-fielderror">
+                  {fieldErrors.password}
+                </div>
+              )}
+            </div>
+            <button type="submit" className="login-submit"
+              disabled={submitting || succeeded}>
+              {submitting && <span className="login-spinner" aria-hidden="true" />}
+              {succeeded ? "已登录 ✓" : submitting ? "登录中…" : "登录"}
+            </button>
+          </form>
+        )}
       </div>
-
-      <button
-        className="login-demo-link"
-        type="button"
-        disabled={submitting || succeeded}
-        onClick={onDemoLogin}
-      >
-        进入演示模式
-      </button>
-
-      <div className="login-inline-tip">演示模式可体验示例工作区。</div>
 
       {status === "error" && (
-        <div role="alert" className="login-error">
-          {errorMessage}
-        </div>
+        <div role="alert" className="login-error">{errorMessage}</div>
       )}
       {status === "success" && (
-        <div role="status" className="login-success">
-          登录成功，正在跳转…
-        </div>
+        <div role="status" className="login-success">登录成功，正在跳转…</div>
       )}
 
       <div className="login-card-foot">
         LOOM v2.0 · 支持演示、账号密码与飞书登录
       </div>
-    </form>
+    </div>
   );
 }

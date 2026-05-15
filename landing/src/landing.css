@@ -1168,106 +1168,63 @@ a {
   font-size: 13px;
   border-left: 3px solid var(--success);
 }
-.login-oauth {
-  margin-top: 18px;
+/* ── Login — new priority layout ─────────────────────────── */
+.login-actions {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-}
-.login-oauth-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
   gap: 10px;
+  margin-bottom: 4px;
 }
-.login-divider {
-  width: 100%;
-  margin-top: 18px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 10.5px;
-  color: var(--text-3);
-  opacity: 0.65;
-  letter-spacing: 0.05em;
-}
-.login-divider::before,
-.login-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-.login-oauth-divider {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 10.5px;
-  color: var(--text-3);
-  opacity: 0.6;
-  letter-spacing: 0.05em;
-}
-.login-oauth-divider::before,
-.login-oauth-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-.login-oauth-btn {
-  width: 38px;
-  height: 38px;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  display: grid;
-  place-items: center;
+/* 主：飞书登录 */
+.login-feishu-btn {
+  width: 100%; height: 46px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-family: var(--font-sans); font-size: 14.5px; font-weight: 600;
+  background: var(--accent); color: var(--text-inverted);
+  border: none; border-radius: var(--radius);
   cursor: pointer;
-  padding: 0;
-  transition: border-color 0.15s ease, transform 0.15s ease,
-    box-shadow 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  box-shadow: var(--shadow-sm);
 }
-.login-oauth-btn:hover:not(:disabled) {
-  border-color: var(--text-3);
-  transform: translateY(-1px);
+.login-feishu-btn:hover:not(:disabled) {
+  background: var(--accent-strong);
   box-shadow: var(--shadow);
+  transform: translateY(-1px);
 }
-.login-oauth-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
+.login-feishu-btn:disabled { opacity: .45; cursor: not-allowed; }
+.login-feishu-btn img {
+  width: 22px; height: 22px; display: block; flex-shrink: 0;
+  filter: brightness(0) invert(1);
 }
-.login-oauth-btn img {
-  width: 22px;
-  height: 22px;
-  display: block;
-  object-fit: contain;
-}
-.login-demo-link {
-  align-self: flex-start;
-  appearance: none;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: var(--text-3);
-  font-size: 11.5px;
-  line-height: 1.4;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+/* 次：演示模式 */
+.login-demo-btn {
+  width: 100%; height: 42px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-sans); font-size: 13.5px; font-weight: 500;
+  background: var(--surface); color: var(--text-2);
+  border: 1px solid var(--border); border-radius: var(--radius);
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
-.login-demo-link:hover:not(:disabled) {
-  color: var(--text-2);
+.login-demo-btn:hover:not(:disabled) {
+  background: var(--hover); border-color: var(--border-strong);
 }
-.login-demo-link:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
+.login-demo-btn:disabled { opacity: .45; cursor: not-allowed; }
+/* 末：账号密码折叠 */
+.login-pw-toggle {
+  appearance: none; border: 0; background: transparent; padding: 3px 0;
+  font-family: var(--font-sans);
+  color: var(--text-4); font-size: 12px;
+  text-decoration: underline; text-underline-offset: 3px;
+  cursor: pointer; align-self: center; margin-top: 4px;
+  transition: color 0.12s ease;
 }
-.login-inline-tip {
-  font-size: 11.5px;
-  color: var(--text-3);
-  line-height: 1.6;
+.login-pw-toggle:hover { color: var(--text-3); }
+.login-pw-form {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  margin-top: 2px;
 }
 .login-hint {
   margin-top: 12px;

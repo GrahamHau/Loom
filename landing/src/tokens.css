@@ -27,9 +27,11 @@
 
   /* accent — soft indigo, matching main app default */
   --accent: oklch(0.55 0.13 258);
+  --accent-strong: oklch(0.48 0.15 258);
   --accent-soft: oklch(0.95 0.03 258);
   --accent-text: oklch(0.4 0.13 258);
   --accent-ink: oklch(0.36 0.13 258);
+  --text-inverted: oklch(0.985 0.003 80);
 
   /* semantic */
   --success: oklch(0.62 0.13 155);
@@ -74,9 +76,11 @@
     --text-3: oklch(0.62 0.008 260);
     --text-4: oklch(0.5 0.008 260);
     --accent: oklch(0.78 0.14 258);
+    --accent-strong: oklch(0.72 0.15 258);
     --accent-soft: oklch(0.3 0.07 258);
     --accent-text: oklch(0.86 0.13 258);
     --accent-ink: oklch(0.92 0.06 258);
+    --text-inverted: oklch(0.16 0.005 260);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.35),
       0 4px 12px rgba(0, 0, 0, 0.25);
