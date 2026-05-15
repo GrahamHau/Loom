@@ -836,8 +836,9 @@ if (process.env.NODE_ENV === "production") {
   };
   const noCacheHtmlOptions = {
     index: false,
-    etag: true,
-    lastModified: true,
+    etag: false,
+    lastModified: false,
+    redirect: false,
     setHeaders(res, filePath) {
       if (filePath.endsWith(".html")) {
         Object.entries(htmlShellHeaders).forEach(([key, value]) => res.setHeader(key, value));
@@ -852,8 +853,12 @@ if (process.env.NODE_ENV === "production") {
   });
 
   app.use("/app/assets", express.static(path.join(appDistDir, "assets"), immutableStaticOptions));
+  app.get("/app", (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
+  app.get("/app/", (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
   app.use("/app", express.static(appDistDir, noCacheHtmlOptions));
   app.get(/^\/app(?:\/.*)?$/, (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
+  app.get("/admin", (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
+  app.get("/admin/", (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
   app.get(/^\/admin(?:\/.*)?$/, (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
 
   app.use("/assets", express.static(path.join(landingDistDir, "assets"), immutableStaticOptions));
