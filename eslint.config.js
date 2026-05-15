@@ -3,7 +3,17 @@ import js from "@eslint/js";
 export default [
   js.configs.recommended,
   {
-    ignores: ["dist/**", "node_modules/**", "data/**", "uploads/**"],
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "data/**",
+      "uploads/**",
+      "landing/dist/**",
+      ".claude/**",
+      ".codex-artifacts/**",
+      ".codex-tmp/**",
+      "claude-design-pack/**",
+    ],
   },
   {
     files: ["**/*.{js,jsx}"],

@@ -191,7 +191,10 @@ describe("content-fetcher", () => {
       if (String(url).includes("batchexecute")) {
         return {
           ok: true,
-          text: async () => `)]}'\n\n[[\"wrb.fr\",\"Fbv4je\",\"[\\\"garturlres\\\",\\\"https://www.gadgetguy.com.au/sony-alpha-7r-vi-camera-australia-price-details/\\\",1]\",null,null,null,\"generic\"]]`,
+          text: async () => {
+            const payload = JSON.stringify(["garturlres", "https://www.gadgetguy.com.au/sony-alpha-7r-vi-camera-australia-price-details/", 1]);
+            return `)]}'\n\n${JSON.stringify([["wrb.fr", "Fbv4je", payload, null, null, null, "generic"]])}`;
+          },
         };
       }
       return {
@@ -247,7 +250,10 @@ describe("content-fetcher", () => {
       if (String(url).includes("batchexecute")) {
         return {
           ok: true,
-          text: async () => `)]}'\n\n[[\"wrb.fr\",\"Fbv4je\",\"[\\\"garturlres\\\",\\\"https://www.digitalcameraworld.com/cameras/sony-alpha-7r-vi-leak\\\",1]\",null,null,null,\"generic\"]]`,
+          text: async () => {
+            const payload = JSON.stringify(["garturlres", "https://www.digitalcameraworld.com/cameras/sony-alpha-7r-vi-leak", 1]);
+            return `)]}'\n\n${JSON.stringify([["wrb.fr", "Fbv4je", payload, null, null, null, "generic"]])}`;
+          },
         };
       }
       return {

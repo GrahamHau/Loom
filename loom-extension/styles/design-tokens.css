@@ -16,10 +16,11 @@
   --border-strong: oklch(0.84  0.009 250);
 
   /* --- text ladder --- */
-  --text:    oklch(0.2  0.012 250);
-  --text-2:  oklch(0.42 0.01  250);
-  --text-3:  oklch(0.58 0.009 250);
-  --text-4:  oklch(0.72 0.007 250);
+  --text:          oklch(0.2  0.012 250);
+  --text-2:        oklch(0.42 0.01  250);
+  --text-3:        oklch(0.58 0.009 250);
+  --text-4:        oklch(0.72 0.007 250);
+  --text-inverted: #fff;
 
   /* --- brand (single blue, matches loom-spiral.png) --- */
   --accent:        oklch(0.56 0.16 252);
@@ -36,10 +37,11 @@
   --danger-soft:   oklch(0.965 0.035 25);
 
   /* --- radii (tightened, more instrument-like) --- */
-  --radius-xs: 4px;
-  --radius-sm: 5px;
-  --radius:    6px;
-  --radius-lg: 10px;
+  --radius-xs:   4px;
+  --radius-sm:   5px;
+  --radius:      6px;
+  --radius-lg:   10px;
+  --radius-full: 9999px;
 
   /* --- shadows (hairline-first; shadow used sparingly) --- */
   --shadow-sm: 0 1px 0 rgba(15, 19, 36, 0.025);

@@ -1,126 +1,111 @@
 # Loom
 
-> 把网页、资讯、社交内容和调研线索沉淀成属于你自己行业与认知框架的结构化上下文。
+Loom is a personal intelligence workspace for turning web pages, social posts, product research, RSS feeds, and loose notes into structured context you can search, compare, and reuse.
 
-Loom 是一个面向个人创作者、产品团队和增长团队的行业语料沉淀与情报工作台。
+It is built for product research, competitive tracking, market sensing, and long-running creative work. Instead of saving more links, Loom helps you capture source material into a consistent schema of fields, tags, summaries, entities, and research threads.
 
-它的核心不是「收藏更多链接」，而是把日常看到的产品、用户需求、行业资讯、社交内容和调研线索持续收进同一个工作空间，再通过字段、标签、AI 整理和结构化视图，把零散材料变成可检索、可复用、可分析的数据资产。
+## What Loom Does
 
-当你持续使用 Loom，沉淀下来的不只是资料库，而是一套越来越贴近你所在行业、产品方向和认知框架的上下文：哪些产品在变化，用户反复表达什么痛点，市场叙事如何迁移，哪些线索值得继续追踪。
+- Capture product pages and social posts with a Chrome extension side panel.
+- Store competitor products with brand, category, platform, price, media, notes, and custom tag fields.
+- Store user需求 / inspirations from social content, including original text, metrics, comments, scenarios, pain points, and tags.
+- Collect and classify RSS/news sources into a Stream view.
+- Organize research projects that connect products, demands, notes, and news.
+- Keep fields and tag groups configurable, so the workspace can adapt to different industries.
+- Optionally use an OpenAI-compatible LLM for summaries, translation, classification, and extraction.
 
-## 核心价值
+## Main Modules
 
-| 你看到的原始材料 | Loom 帮你沉淀成 |
+| Module | Purpose |
 | --- | --- |
-| 商品页、众筹页、竞品链接 | 结构化竞品档案、价格、卖点、平台信息 |
-| 小红书笔记、评论区、社区讨论 | 用户语言、场景、痛点、需求线索 |
-| RSS、行业新闻、官方动态 | 可追踪的行业资讯流 |
-| 临时想法和调研线索 | 可复用的研究上下文 |
-| 分散标签和分类习惯 | 统一的字段体系和标签 schema |
+| Stream | Industry news and RSS intelligence feed |
+| Lens | Competitor/product library |
+| Spark | User需求, inspiration, and social research library |
+| Weave | Research projects that connect multiple records |
+| Chrome extension | Web clipping entry point for supported product/social pages |
+| Landing | Public landing page for the product |
 
-## Loom 适合谁
+## Tech Stack
 
-- **产品经理 / 创始人**：持续追踪竞品、用户反馈和市场机会。
-- **增长 / 运营团队**：把内容平台、评论区和社媒讨论沉淀成可分析语料。
-- **研究型创作者**：围绕一个领域长期积累素材、案例和判断依据。
-- **小型团队**：让多人围绕同一套行业上下文讨论、筛选和行动。
+| Layer | Technology |
+| --- | --- |
+| Web app | React 18 + Vite |
+| API server | Express |
+| Database | SQLite + `better-sqlite3` |
+| Extension | Chrome Extension Manifest V3 |
+| Tests | Vitest |
+| Deployment | Docker Compose compatible |
 
-## 典型工作流
+## Repository Layout
 
 ```text
-看到线索
-  ↓
-Chrome 插件 / RSS / 手动录入
-  ↓
-字段化：来源、品牌、品类、场景、痛点、标签
-  ↓
-AI 辅助整理：摘要、分类、翻译、去重、结构化
-  ↓
-沉淀为 Stream / Lens / Spark / Weave 中的长期上下文
+src/                    Web app source
+src/legacy/             Main app screens and shared UI
+server/                 Express API, auth, repository, RSS and fetch services
+scripts/                Local setup, maintenance, sync, and debugging scripts
+loom-extension/         Chrome extension source
+landing/                Public landing page
+docs/                   Product and implementation notes
+demos/                  Demo data and examples
 ```
 
-## 主要模块
+## Requirements
 
-| 模块 | 用途 | 沉淀的上下文 |
-| --- | --- | --- |
-| **Stream** | 行业资讯流 | 新品发布、竞品动态、渠道消息、趋势线索 |
-| **Lens** | 竞品库 | 产品信息、价格、图片、卖点、平台链接、标签字段 |
-| **Spark** | 灵感 / 需求库 | 用户原话、内容笔记、互动数据、场景、痛点 |
-| **Weave** | 调研工坊 | 围绕主题串联竞品、需求、资讯和笔记 |
-| **Chrome 插件** | 网页采集入口 | 从详情页快速抽取可编辑表单并保存到 Loom |
-
-## 能做什么
-
-- 保存竞品商品的名称、品牌、价格、图片、卖点、平台链接和相关标签。
-- 把小红书等内容平台里的用户表达沉淀为可分析语料。
-- 订阅或采集行业资讯，形成自己的行业动态上下文。
-- 围绕一个方向建立轻量调研项目，把相关竞品、需求、资讯和笔记串起来。
-- 用 Chrome 插件从网页侧边栏快速采集，减少复制粘贴。
-- 用可配置字段维护自己的标签体系，而不是被固定模板限制。
-
-## 技术栈
-
-| 层 | 技术 |
-| --- | --- |
-| 前端 | React 18 + Vite |
-| 后端 | Express |
-| 数据库 | SQLite + `better-sqlite3` |
-| 浏览器插件 | Chrome Extension Manifest V3 |
-| 部署 | Docker Compose |
-| 可选集成 | OpenAI 兼容 LLM、飞书 OAuth、飞书同步 |
-
-## 项目结构
-
-```text
-src/                    Web 应用源码
-src/legacy/             主要页面和通用 UI
-server/                 Express API、鉴权、数据库、采集服务
-scripts/                初始化、同步、维护和调试脚本
-loom-extension/         Chrome 插件源码
-landing/                官网 / Landing 页
-demos/                  示例和演示素材
-docs/                   产品说明和架构文档
-```
-
-## 本地运行
-
-这个项目需要 Node.js 22。因为 SQLite 依赖 `better-sqlite3` 原生模块，Node 版本不匹配时可能会出现 native module 相关错误。
+Use Node.js 22.x. The SQLite dependency uses a native module, so mismatched Node versions can cause install/runtime errors.
 
 ```bash
+node --version
 npm install
+```
+
+## Local Development
+
+Create local environment config:
+
+```bash
 cp .env.example .env
+```
+
+Seed the database and start the API server:
+
+```bash
 npm run db:seed
 npm run server:dev
 ```
 
-再开一个终端：
+In another terminal, start the web app:
 
 ```bash
 npm run dev
 ```
 
-默认前端地址通常是：
+The Vite app usually runs at:
 
 ```text
 http://127.0.0.1:5173
 ```
 
-如果你在 macOS 上使用 Homebrew 的 Node 22，可以这样运行命令：
+Useful checks:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+If you use Homebrew Node 22 on macOS:
 
 ```bash
 PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run check:node
 PATH=/opt/homebrew/opt/node@22/bin:$PATH npm test
 ```
 
-## 环境变量
+## Environment Variables
 
-先复制示例文件：
+Start from `.env.example` and only fill what you need locally.
 
-```bash
-cp .env.example .env
-```
-
-常用配置：
+Common settings:
 
 ```text
 APP_USERNAME=
@@ -129,7 +114,7 @@ SESSION_SECRET=
 DATABASE_PATH=
 ```
 
-可选的 LLM 配置：
+Optional LLM settings:
 
 ```text
 LLM_API_URL=
@@ -140,7 +125,7 @@ LLM_VISION_API_KEY=
 LLM_VISION_MODEL=
 ```
 
-可选的飞书 OAuth 配置：
+Optional Feishu OAuth/sync settings:
 
 ```text
 FEISHU_OAUTH_APP_ID=
@@ -151,18 +136,25 @@ FEISHU_OAUTH_ALLOWED_TENANT_KEYS=
 FEISHU_OAUTH_ALLOWED_EMAIL_DOMAINS=
 ```
 
-请不要把真实 `.env`、数据库、上传文件、API Key、Cookie、Session Secret 或设计交接包提交到 Git。
+## Chrome Extension
 
-## 常用命令
+The extension source lives in `loom-extension/`.
 
-```bash
-npm run lint
-npm run typecheck
-npm run test
-npm run build
+To load it locally:
+
+1. Open `chrome://extensions`.
+2. Enable Developer mode.
+3. Click Load unpacked.
+4. Select the `loom-extension` directory.
+5. Open the extension options page and configure the Loom API base URL.
+
+The downloadable extension bundle used by the landing page is stored at:
+
+```text
+landing/public/downloads/loom-extension.zip
 ```
 
-Docker 启动：
+## Docker
 
 ```bash
 cp .env.example .env.production
@@ -170,20 +162,14 @@ docker compose up -d --build
 curl http://127.0.0.1:3000/api/health
 ```
 
-SQLite 数据和 Session 默认放在 `./data`，这个目录不会进入 Git。
+SQLite data and sessions are stored under `./data` by default. That directory is intentionally ignored by Git.
 
-## 加载 Chrome 插件
+## Security Notes
 
-插件源码在 `loom-extension/`。
+Do not commit real `.env` files, SQLite databases, uploaded files, API keys, cookies, session secrets, production data, private runbooks, or design handoff packages.
 
-本地加载方式：
-
-1. 打开 `chrome://extensions`
-2. 开启「开发者模式」
-3. 点击「加载已解压的扩展程序」
-4. 选择 `loom-extension` 目录
-5. 打开插件设置页，配置 Loom API 地址
+Local-only notes can live in `README_LOCAL.md`, which is ignored by Git.
 
 ## License
 
-目前还没有声明开源许可证。在添加 License 之前，默认保留所有权利。
+No open-source license has been declared yet. Until a license is added, all rights are reserved.

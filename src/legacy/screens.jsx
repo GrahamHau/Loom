@@ -3093,12 +3093,14 @@ function CreateResearchModal({ api, refreshData, onClose }) {
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const canSubmit = title.trim().length > 0;
   const submit = async () => {
+    if (!canSubmit) return;
     setBusy(true);setError("");
     try {
       await api("/api/research", {
         method: "POST",
-        body: JSON.stringify({ title, desc, status: "草稿" }),
+        body: JSON.stringify({ title: title.trim(), desc, status: "草稿" }),
       });
       await refreshData?.();
       onClose();
@@ -3131,7 +3133,7 @@ function CreateResearchModal({ api, refreshData, onClose }) {
         </div>
         <div className="modal-foot">
           <Btn variant="ghost" onClick={onClose}>取消</Btn>
-          <Btn variant="primary" icon="check" onClick={submit} disabled={busy || !title || !desc}>{busy ? "创建中..." : "创建项目"}</Btn>
+          <Btn variant="primary" icon="check" onClick={submit} disabled={busy || !canSubmit}>{busy ? "创建中..." : "创建项目"}</Btn>
         </div>
       </div>
     </div>);

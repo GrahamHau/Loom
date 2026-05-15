@@ -83,9 +83,11 @@ const state = {
   lastSeenTabId: null,
   lastSeenUrl: "",
   page: null,
+  pageSignature: "",
   mode: "product",
   processed: null,
   form: null,
+  formDirty: false,
   busy: false,
   reloading: false,
   message: "",
@@ -107,6 +109,8 @@ const state = {
 
 let autoSyncTimer = null;
 let autoSyncPoller = null;
+let quietRefreshTimer = null;
+let runtimeMessageBound = false;
 let commentCollectorTimer = null;
 let pendingUrlSync = false;
 let loginStatusTimer = null;
@@ -303,6 +307,8 @@ async function loadCurrentPage(defaultMode = "auto") {
     stopCommentCollector();
     state.processed = { ...result.data, __loom_ai_processed: false };
     state.form = buildDraft(state.mode, state.processed);
+    state.formDirty = false;
+    state.pageSignature = pageDataSignature(result);
     state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
     debugEvent("collect:read-ok", {
       platform: result.platform,
@@ -453,8 +459,10 @@ function clearSuccessReturnTimer() {
 
 function clearCapturedPageState() {
   state.page = null;
+  state.pageSignature = "";
   state.processed = null;
   state.form = null;
+  state.formDirty = false;
   state.message = "";
   state.tagPicker = null;
   state.relationPickerOpen = false;
@@ -492,6 +500,7 @@ async function processRaw() {
     });
     state.processed = { ...state.page.data, ...data, __loom_ai_processed: true };
     state.form = buildDraft(state.mode, state.processed);
+    state.formDirty = false;
     state.message = "AI 结构化完成";
     debugEvent("parse-raw:ok", {
       endpoint,
@@ -501,6 +510,7 @@ async function processRaw() {
   } catch (error) {
     state.processed = { ...state.page.data, __loom_ai_processed: false };
     state.form = buildDraft(state.mode, state.processed);
+    state.formDirty = false;
     debugEvent("parse-raw:error", { endpoint, code: error.code || "", error: error.message || "parse failed" });
     if (error.code === "llm_not_configured") {
       state.llmConfigured = false;
@@ -541,6 +551,8 @@ async function reloadCurrentPage() {
     state.processed = { ...result.data, __loom_ai_processed: false };
     stopCommentCollector();
     state.form = buildDraft(state.mode, state.processed);
+    state.formDirty = false;
+    state.pageSignature = pageDataSignature(result);
     state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
     debugEvent("collect:reload-ok", {
       platform: result.platform,
@@ -564,6 +576,7 @@ async function reloadCurrentPage() {
 function bindAutoSync() {
   if (autoSyncBound) return;
   autoSyncBound = true;
+  bindRuntimePageSignals();
   chrome.tabs.onActivated.addListener(async () => {
     await scheduleAutoSync(0);
   });
@@ -583,7 +596,74 @@ function bindAutoSync() {
   if (!autoSyncPoller) {
     autoSyncPoller = setInterval(() => {
       void scheduleAutoSync();
-    }, 500);
+    }, 5000);
+  }
+}
+
+function bindRuntimePageSignals() {
+  if (runtimeMessageBound || !chrome.runtime?.onMessage) return;
+  runtimeMessageBound = true;
+  chrome.runtime.onMessage.addListener((message, sender) => {
+    if (!["LOOM_PAGE_URL_CHANGED", "LOOM_PAGE_STATE_CHANGED"].includes(message?.type)) return undefined;
+    const tabId = sender.tab?.id || null;
+    const url = message.url || sender.tab?.url || "";
+    if (!tabId || !url || !shouldAutoSyncUrl(url)) return undefined;
+    if (tabId !== state.lastSeenTabId && state.lastSeenTabId !== null) return undefined;
+    if (message.type === "LOOM_PAGE_URL_CHANGED") {
+      void scheduleAutoSync(0);
+    } else {
+      void scheduleQuietRefresh(0);
+    }
+    return undefined;
+  });
+}
+
+function pageDataSignature(result) {
+  const data = result?.data || {};
+  const comments = safeArray(data.visible_comments);
+  return JSON.stringify({
+    ok: Boolean(result?.ok),
+    platform: result?.platform || data.platform || "",
+    url: data.url || "",
+    title: data.title || data.name || "",
+    content: data.content || data.original_content || data.summary || data.description || "",
+    image: data.image || data.thumbnail_url || "",
+    likes: data.likes || 0,
+    collects: data.collects || data.favorites || 0,
+    comments: data.comments || comments.length || 0,
+    visibleCommentCount: comments.length,
+  });
+}
+
+async function scheduleQuietRefresh(delayMs = 500) {
+  if (quietRefreshTimer) clearTimeout(quietRefreshTimer);
+  quietRefreshTimer = setTimeout(async () => {
+    quietRefreshTimer = null;
+    await quietRefreshCurrentPage();
+  }, delayMs);
+}
+
+async function quietRefreshCurrentPage() {
+  if (state.busy || state.reloading || !state.page || state.formDirty || isEditingForm()) return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || tab.id !== state.lastSeenTabId || (tab.url || "") !== state.lastSeenUrl) {
+    await scheduleAutoSync(0);
+    return;
+  }
+  try {
+    const result = await readPageData(tab);
+    if (!result?.ok) return;
+    const nextSignature = pageDataSignature(result);
+    if (nextSignature === state.pageSignature) return;
+    state.page = result;
+    state.pageSignature = nextSignature;
+    state.processed = { ...result.data, __loom_ai_processed: false };
+    state.form = buildDraft(state.mode, state.processed);
+    state.formDirty = false;
+    state.message = "页面内容已更新，可继续编辑或保存。";
+    renderMain();
+  } catch {
+    // Quiet refresh is a best-effort freshness path; manual reload remains available.
   }
 }
 
@@ -723,6 +803,8 @@ async function clearAuthState() {
   state.page = null;
   state.processed = null;
   state.form = null;
+  state.formDirty = false;
+  state.pageSignature = "";
   state.message = "";
   await chrome.storage.local.remove([TOKEN_KEY, USER_KEY, "pmcopilot_token", "pmcopilot_user"]);
 }
@@ -1181,6 +1263,7 @@ async function switchMode(mode, supported, message) {
     related_product_id: previous.related_product_id || "",
     related_product_name: previous.related_product_name || "",
   };
+  state.formDirty = false;
   state.message = "模式已切换，可直接保存；如需摘要和标签，再点 AI 整理。";
   renderMain();
 }
@@ -1326,6 +1409,7 @@ function buildDraft(mode, item) {
 
 function setField(key, value) {
   state.form = { ...(state.form || {}), [key]: value };
+  state.formDirty = true;
 }
 
 function fieldsForEntity(entity) {
@@ -1357,6 +1441,7 @@ function schemaFieldsView(entity, item) {
         ${fieldSelect(field.key, field.name, fieldValues(item, field), field.tone || "outline", {
           single: field.multi === false,
           groupKey: field.legacyKey || field.key,
+          official: field.official,
         })}
       `).join("")}
       </div>
@@ -1384,6 +1469,7 @@ function setTagValue(key, values) {
   if (key === "scenarios") next.scenarios = nextValues;
   if (key === "painpoints") next.painpoints = nextValues;
   state.form = next;
+  state.formDirty = true;
 }
 
 function normalizeComment(item) {
@@ -1515,6 +1601,7 @@ function pickRelation(productId) {
     related_product_id: product.id,
     related_product_name: product.name || "",
   };
+  state.formDirty = true;
   state.message = `已关联同一产品：${product.name || "未命名竞品"}`;
   closeRelationPicker();
 }
@@ -1742,12 +1829,17 @@ function fieldSelect(key, label, selectedValues, tone = "accent", options = {}) 
   const group = tagGroupByKey(options.groupKey || key);
   const selected = safeArray(selectedValues).filter(Boolean);
   const active = state.tagPicker?.key === key;
+  const isCustom = options.official === false;
   return `
     <div class="field-select ${active ? "open" : ""}" data-field-select="${escapeAttr(key)}">
       <div class="field-select-head">
-        <div class="cl-section-label">${escapeHtml(label)}${options.single ? "" : " · 多选"}</div>
+        <div class="cl-section-label">
+          ${isCustom ? `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent);flex-shrink:0"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>` : ""}
+          ${escapeHtml(label)}
+          ${isCustom ? `<span class="field-custom-chip">自定义</span>` : ""}
+        </div>
         <button class="field-select-trigger" type="button" data-open-tag-picker="${escapeAttr(key)}">
-          选择
+          ${selected.length ? `${selected.length} 项` : "选择"}
         </button>
       </div>
       <div class="field-selected-row">
@@ -2022,6 +2114,7 @@ function handleGlobalClick(event) {
     const index = Number(row?.getAttribute("data-index"));
     if (!key || Number.isNaN(index)) return;
     state.form = { ...(state.form || {}), [key]: safeArray(state.form?.[key]).filter((_, i) => i !== index) };
+    state.formDirty = true;
     renderMain();
     return;
   }
@@ -2036,6 +2129,7 @@ function handleGlobalClick(event) {
     const next = safeArray(state.form?.[key]);
     next.push(value);
     state.form = { ...(state.form || {}), [key]: next };
+    state.formDirty = true;
     renderMain();
   }
 }
@@ -2060,6 +2154,7 @@ document.addEventListener("input", (event) => {
     current[field] = el.value;
     platforms[index] = current;
     state.form = { ...(state.form || {}), platforms };
+    state.formDirty = true;
     if (index === 0 && ["price", "sales", "url", "creator", "pledged_amount", "goal_amount", "backers"].includes(field)) {
       const linkedKey = field === "sales" ? "monthly_sales" : field;
       state.form = { ...state.form, [linkedKey]: el.value };
@@ -2071,6 +2166,7 @@ document.addEventListener("input", (event) => {
   if (key === "scenarios" || key === "painpoints") return;
   if (key === "selling_points") {
     state.form = { ...(state.form || {}), [key]: String(el.value || "").split(/[\n,，；;]+/).map((item) => item.trim()).filter(Boolean) };
+    state.formDirty = true;
     return;
   }
   setField(key, el.value);
@@ -2202,6 +2298,7 @@ async function saveCurrent() {
       body: JSON.stringify(payload),
     });
     state.message = "保存成功";
+    state.formDirty = false;
     debugEvent("save:ok", { mode: state.mode, title: payload.name || payload.title || "" });
     renderSuccess(payload);
   } catch (error) {

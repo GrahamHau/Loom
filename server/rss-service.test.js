@@ -350,7 +350,9 @@ describe("rss-service classification", () => {
           item.thumbnail_url = page.image;
           break;
         }
-      } catch {}
+      } catch {
+        // Keep trying the next candidate image URL.
+      }
     }
 
     expect(calls).toContain("https://news.google.com/rss/articles/CBMi-demo?oc=5");

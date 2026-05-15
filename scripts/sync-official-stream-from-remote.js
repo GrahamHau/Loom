@@ -49,7 +49,9 @@ function main() {
   } finally {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      // Temporary cleanup is best effort.
+    }
   }
 }
 
