@@ -11,6 +11,7 @@ import {
   adminListWorkspaces,
   adminUpdateUser,
 } from "./admin-service.js";
+import { listLLMLogs, summarizeLLMLogs } from "./llm-log-service.js";
 
 function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -26,6 +27,16 @@ router.get("/dashboard", asyncHandler(async (_req, res) => {
 
 router.get("/workspaces", asyncHandler(async (_req, res) => {
   const items = adminListWorkspaces();
+  res.json({ items, total: items.length });
+}));
+
+router.get("/observability/llm/summary", asyncHandler(async (req, res) => {
+  res.json(summarizeLLMLogs({ days: req.query.days }));
+}));
+
+router.get("/observability/llm/logs", asyncHandler(async (req, res) => {
+  const { user_id, workspace_id, kind, purpose, status, limit } = req.query;
+  const items = listLLMLogs({ userId: user_id, workspaceId: workspace_id, kind, purpose, status, limit });
   res.json({ items, total: items.length });
 }));
 

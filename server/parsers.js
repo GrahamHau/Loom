@@ -42,6 +42,7 @@ export async function parseProductUrl(userId, { url, platform }) {
   const searchContext = await buildSearchContext(userId, `${page.title} ${detectedPlatform} product review specs`, { limit: 4 });
   const result = await callLLM({
     userId,
+    purpose: "products:parse_url",
     system: "你是产品经理的竞品信息结构化助手。只返回 JSON，不要解释。",
     user: `从以下网页内容中提取商品信息。允许字段为 null。返回 JSON：
 {
@@ -123,6 +124,7 @@ export async function parseProductRaw(userId, { platform, data }) {
   }
   const result = await callLLM({
     userId,
+    purpose: "products:parse_raw",
     system: "你是竞品分析助手，服务于摄影配件品牌产品经理。只返回 JSON，不要解释。",
     user: `从插件采集的商品信息中提取结构化数据。字段缺失可返回 null。
 
@@ -197,6 +199,7 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets }) {
   const detailImages = compactUrlArray(source.detail_images);
   const result = await callRoutedLLM({
     userId,
+    purpose: "products:parse_taobao_raw",
     system: "你是淘宝/天猫商品详情页的竞品识别助手，服务于摄影配件品牌产品经理。只返回 JSON，不要解释。",
     visionSystem: "你是淘宝/天猫商品详情页的视觉信息提取助手。只根据图片提取可见信息，严格返回 JSON，不要解释。",
     visionUser: `请从淘宝/天猫商品详情图中提取可见信息，优先识别价格、品牌、规格、卖点、限制和月销相关线索。字段缺失就返回空字符串或空数组。
@@ -287,6 +290,7 @@ export async function parseDemandUrl(userId, { url }) {
   const searchContext = await buildSearchContext(userId, `${page.title} creator problem use case trend`, { limit: 4 });
   const result = await callLLM({
     userId,
+    purpose: "demands:parse_url",
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
     user: `请对以下内容进行结构化打标。
 
@@ -343,6 +347,7 @@ export async function parseDemandRaw(userId, { platform, data }) {
   const source = data || {};
   const result = await callLLM({
     userId,
+    purpose: "demands:parse_raw",
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
     user: `请对插件采集的内容进行需求结构化打标。
 

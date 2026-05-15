@@ -27,6 +27,10 @@ export const adminApi = {
     list: () => adminFetch("/workspaces"),
     create: (body) => adminFetch("/workspaces", { method: "POST", body }),
   },
+  observability: {
+    llmSummary: (params = {}) => adminFetch(`/observability/llm/summary?${query(params)}`),
+    llmLogs: (params = {}) => adminFetch(`/observability/llm/logs?${query(params)}`),
+  },
   users: {
     list: (params = {}) => adminFetch(`/users?${query(params)}`),
     get: (id) => adminFetch(`/users/${id}`),

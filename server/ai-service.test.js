@@ -7,6 +7,7 @@ const aiService = await import("./ai-service.js");
 
 beforeEach(() => {
   dbModule.migrate();
+  dbModule.db.prepare("DELETE FROM llm_call_logs").run();
   dbModule.db.prepare("DELETE FROM app_data").run();
   dbModule.ensureSeed({
     user: { name: "Graham", role: "管理员", initials: "GR" },
@@ -59,6 +60,9 @@ describe("ai-service routing", () => {
     });
 
     expect(calls).toHaveLength(2);
+    const logs = dbModule.db.prepare("SELECT kind, purpose, status FROM llm_call_logs ORDER BY created_at ASC, id ASC").all();
+    expect(logs.map((log) => log.kind)).toEqual(["vision", "text"]);
+    expect(logs.every((log) => log.status === "ok")).toBe(true);
   });
 
   it("uses the text model directly when no images are present", async () => {
@@ -79,5 +83,28 @@ describe("ai-service routing", () => {
     });
 
     expect(calls).toHaveLength(1);
+    const log = dbModule.db.prepare("SELECT kind, purpose, status FROM llm_call_logs").get();
+    expect(log.kind).toBe("text");
+    expect(log.status).toBe("ok");
+  });
+
+  it("records failed LLM calls without storing prompt content", async () => {
+    vi.stubGlobal("fetch", async () => ({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { message: "rate limited" } }),
+    }));
+
+    await expect(aiService.callLLM({
+      userId: dbModule.getLegacyUserId(),
+      purpose: "test:failure",
+      system: "secret system",
+      user: "secret user",
+    })).rejects.toMatchObject({ code: "llm_request_failed" });
+
+    const log = dbModule.db.prepare("SELECT * FROM llm_call_logs").get();
+    expect(log.status).toBe("error");
+    expect(log.http_status).toBe(429);
+    expect(JSON.stringify(log)).not.toContain("secret user");
   });
 });

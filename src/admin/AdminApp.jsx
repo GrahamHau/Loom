@@ -20,6 +20,8 @@ export default function AdminApp() {
   const [activeView, setActiveView] = useState("dashboard");
   const [dashboard, setDashboard] = useState(null);
   const [workspaces, setWorkspaces] = useState([]);
+  const [llmSummary, setLlmSummary] = useState(null);
+  const [llmLogs, setLlmLogs] = useState([]);
   const [users, setUsers] = useState([]);
   const [selected, setSelected] = useState(null);
   const [filters, setFilters] = useState({ q: "", status: "", role: "", auth_provider: "" });
@@ -61,6 +63,20 @@ export default function AdminApp() {
     }
   }, []);
 
+  const loadObservability = useCallback(async () => {
+    try {
+      const [summary, logs] = await Promise.all([
+        adminApi.observability.llmSummary({ days: 7 }),
+        adminApi.observability.llmLogs({ limit: 20 }),
+      ]);
+      setLlmSummary(summary);
+      setLlmLogs(logs.items || []);
+      setError("");
+    } catch (err) {
+      setError(err.message || "加载 AI 观测失败");
+    }
+  }, []);
+
   useEffect(() => {
     fetch("/api/me", { credentials: "same-origin" })
       .then(async (response) => {
@@ -78,7 +94,8 @@ export default function AdminApp() {
     loadDashboard();
     loadUsers();
     loadWorkspaces();
-  }, [me, loadDashboard, loadUsers, loadWorkspaces]);
+    loadObservability();
+  }, [me, loadDashboard, loadUsers, loadWorkspaces, loadObservability]);
 
   async function refreshSelected(userId) {
     try {
@@ -142,6 +159,7 @@ export default function AdminApp() {
         <a className="admin-brand" href="/app">Loom Admin</a>
         <button className={`admin-nav ${activeView === "dashboard" ? "active" : ""}`} type="button" onClick={() => setActiveView("dashboard")}>总览看板</button>
         <button className={`admin-nav ${activeView === "workspaces" ? "active" : ""}`} type="button" onClick={() => setActiveView("workspaces")}>工作区</button>
+        <button className={`admin-nav ${activeView === "observability" ? "active" : ""}`} type="button" onClick={() => setActiveView("observability")}>AI 观测</button>
         <button className={`admin-nav ${activeView === "users" ? "active" : ""}`} type="button" onClick={() => setActiveView("users")}>用户管理</button>
         {me && <div className="admin-user">{me.name} · {ROLE_LABEL[me.role_code] || "管理员"}</div>}
       </aside>
@@ -184,6 +202,68 @@ export default function AdminApp() {
               <button className="admin-button primary" type="button" onClick={loadWorkspaces}>刷新</button>
             </header>
             <WorkspaceTable workspaces={workspaces} />
+          </>
+        )}
+
+        {activeView === "observability" && (
+          <>
+            <header className="admin-header">
+              <div>
+                <h1>AI 观测</h1>
+                <p>只记录调用元数据，不保存 prompt 或模型返回内容。</p>
+              </div>
+              <button className="admin-button primary" type="button" onClick={loadObservability}>刷新</button>
+            </header>
+
+            <div className="admin-metrics">
+              <Metric label="7日调用" value={llmSummary?.total?.calls || 0} />
+              <Metric label="错误数" value={llmSummary?.total?.errors || 0} tone={llmSummary?.total?.errors ? "warn" : ""} />
+              <Metric label="Token" value={llmSummary?.total?.tokens || 0} />
+              <Metric label="平均耗时 ms" value={llmSummary?.total?.avg_duration_ms || 0} />
+            </div>
+
+            <div className="admin-observability-grid">
+              <SummaryList title="按用途" items={(llmSummary?.by_purpose || []).map((item) => ({
+                key: item.purpose,
+                title: item.purpose,
+                meta: `${item.calls} 次 / ${item.errors} 错误 / ${item.tokens || 0} tokens`,
+              }))} />
+              <SummaryList title="按工作区" items={(llmSummary?.by_workspace || []).map((item) => ({
+                key: item.workspace_id || "unassigned",
+                title: item.workspace_name,
+                meta: `${item.calls} 次 / ${item.errors} 错误 / ${item.tokens || 0} tokens`,
+              }))} />
+            </div>
+
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>用户</th>
+                    <th>工作区</th>
+                    <th>类型</th>
+                    <th>用途</th>
+                    <th>状态</th>
+                    <th>耗时</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {llmLogs.map((log) => (
+                    <tr key={log.id}>
+                      <td>{fmtDate(log.created_at)}</td>
+                      <td>{log.user_name || log.user_id || "-"}</td>
+                      <td>{log.workspace_name || "未分配"}</td>
+                      <td>{log.kind}</td>
+                      <td>{log.purpose}</td>
+                      <td><Badge tone={log.status === "ok" ? "active" : "suspended"}>{log.status}</Badge></td>
+                      <td>{log.duration_ms ?? "-"} ms</td>
+                    </tr>
+                  ))}
+                  {llmLogs.length === 0 && <tr><td colSpan="7">暂无 AI 调用日志</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
 
@@ -358,6 +438,20 @@ function WorkspaceTable({ workspaces }) {
           {workspaces.length === 0 && <tr><td colSpan="5">暂无工作区。飞书用户登录后会自动创建公司工作区。</td></tr>}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function SummaryList({ title, items }) {
+  return (
+    <div className="admin-summary-card">
+      <h2>{title}</h2>
+      {items.length ? items.map((item) => (
+        <div className="admin-summary-row" key={item.key}>
+          <strong>{item.title}</strong>
+          <span>{item.meta}</span>
+        </div>
+      )) : <p className="admin-muted">暂无数据</p>}
     </div>
   );
 }

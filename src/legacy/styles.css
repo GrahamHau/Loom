@@ -2625,6 +2625,38 @@ a.platform-card-link:hover {
   border-color: oklch(0.78 0.12 75);
   background: oklch(0.97 0.03 80);
 }
+.admin-observability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.admin-summary-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px;
+}
+.admin-summary-card h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.admin-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.admin-summary-row strong {
+  overflow-wrap: anywhere;
+}
+.admin-summary-row span {
+  color: var(--text-3);
+  white-space: nowrap;
+}
 .admin-filters {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) repeat(3, 150px);
@@ -2786,7 +2818,8 @@ a.platform-card-link:hover {
   .admin-shell,
   .admin-layout,
   .admin-filters,
-  .admin-metrics {
+  .admin-metrics,
+  .admin-observability-grid {
     grid-template-columns: 1fr;
   }
   .admin-sidebar {

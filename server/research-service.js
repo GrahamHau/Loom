@@ -58,6 +58,7 @@ export async function analyzeResearch(userId, id) {
 
   const result = await callLLM({
     userId,
+    purpose: "research:analyze",
     system: "你是产品经理的市场调研分析助手。只返回 JSON。",
     user: `基于产品想法、关联竞品和关联需求，生成市场调研报告。返回 JSON：
 {

@@ -194,6 +194,30 @@ export function migrate() {
     CREATE INDEX IF NOT EXISTS idx_news_items_url ON news_items(original_url);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_feishu_open_id ON users(feishu_open_id) WHERE feishu_open_id IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_feishu_union_id ON users(feishu_union_id) WHERE feishu_union_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS llm_call_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      workspace_id TEXT,
+      kind TEXT NOT NULL DEFAULT 'text',
+      purpose TEXT NOT NULL DEFAULT 'unknown',
+      model TEXT,
+      api_url TEXT,
+      status TEXT NOT NULL,
+      http_status INTEGER,
+      duration_ms INTEGER,
+      prompt_tokens INTEGER,
+      completion_tokens INTEGER,
+      total_tokens INTEGER,
+      error_code TEXT,
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_logs_user_date ON llm_call_logs(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_llm_logs_workspace_date ON llm_call_logs(workspace_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_llm_logs_status ON llm_call_logs(status);
+    CREATE INDEX IF NOT EXISTS idx_llm_logs_kind ON llm_call_logs(kind);
+    CREATE INDEX IF NOT EXISTS idx_llm_logs_created ON llm_call_logs(created_at DESC);
   `);
 
   const newsSourceColumns = new Set(db.prepare("PRAGMA table_info(news_sources)").all().map((column) => column.name));

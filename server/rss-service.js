@@ -797,6 +797,7 @@ export async function processNewsWithLlm(userId, limit = 20) {
     try {
       const result = await callLLM({
         userId,
+        purpose: "news:process_llm",
         system: NEWS_LLM_SYSTEM_PROMPT,
         user: content,
         maxTokens: NEWS_LLM_MAX_TOKENS,

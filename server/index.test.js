@@ -261,6 +261,37 @@ describe("admin users", () => {
     expect(member.role).toBe("admin");
     expect(member.is_default).toBe(1);
   });
+
+  it("exposes LLM observability summary and logs to admins", async () => {
+    process.env.LOOM_OWNER_EMAIL = process.env.APP_USERNAME;
+    dbModule.migrate();
+    const ownerLogin = await login();
+
+    dbModule.db.prepare(`
+      INSERT INTO llm_call_logs (
+        id, user_id, workspace_id, kind, purpose, model, api_url, status,
+        http_status, duration_ms, total_tokens, created_at
+      ) VALUES (
+        'llm-log-test', ?, NULL, 'text', 'products:parse_raw', 'm', 'https://llm.test/v1', 'ok',
+        200, 123, 45, CURRENT_TIMESTAMP
+      )
+    `).run(ownerLogin.body.user.id);
+
+    const summaryResponse = await fetch(`${baseUrl}/api/admin/observability/llm/summary`, {
+      headers: { Cookie: ownerLogin.cookie },
+    });
+    const summary = await summaryResponse.json();
+    expect(summaryResponse.status).toBe(200);
+    expect(summary.total.calls).toBeGreaterThanOrEqual(1);
+    expect(summary.by_purpose.some((item) => item.purpose === "products:parse_raw")).toBe(true);
+
+    const logsResponse = await fetch(`${baseUrl}/api/admin/observability/llm/logs`, {
+      headers: { Cookie: ownerLogin.cookie },
+    });
+    const logs = await logsResponse.json();
+    expect(logsResponse.status).toBe(200);
+    expect(logs.items.some((item) => item.id === "llm-log-test")).toBe(true);
+  });
 });
 
 describe("scheduler timezones", () => {

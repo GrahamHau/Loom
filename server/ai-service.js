@@ -1,4 +1,5 @@
 import { rawState, updateSettings } from "./repository.js";
+import { recordLLMCall } from "./llm-log-service.js";
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const FETCH_TIMEOUT_MS = 30000;
@@ -92,10 +93,12 @@ function compactImageUrls(value, limit = 8) {
   return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, limit);
 }
 
-async function requestLLM(settings, { system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
+async function requestLLM(settings, { userId, kind = "text", purpose = "unknown", system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
   const timeoutMs = Number(settings.llm_timeout_ms || process.env.LLM_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
   const images = compactImageUrls(imageUrls);
   const model = settings.llm_model;
+  const apiUrl = chatCompletionsUrl(settings.llm_api_url);
+  const startedAt = Date.now();
   const userContent = images.length
     ? [
         { type: "text", text: user },
@@ -103,7 +106,7 @@ async function requestLLM(settings, { system, user, imageUrls = [], responseForm
       ]
     : user;
   try {
-    const response = await fetchWithTimeout(chatCompletionsUrl(settings.llm_api_url), {
+    const response = await fetchWithTimeout(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -123,8 +126,35 @@ async function requestLLM(settings, { system, user, imageUrls = [], responseForm
 
     const body = await response.json().catch(async () => ({ raw: await response.text().catch(() => "") }));
     if (!response.ok) {
+      recordLLMCall({
+        userId,
+        kind,
+        purpose,
+        model,
+        apiUrl,
+        status: "error",
+        httpStatus: response.status,
+        durationMs: Date.now() - startedAt,
+        errorCode: "llm_request_failed",
+        errorMessage: body?.error?.message || body?.message,
+      });
       throw new AppError(response.status, "llm_request_failed", "LLM 请求失败。", body);
     }
+
+    const usage = body?.usage || {};
+    recordLLMCall({
+      userId,
+      kind,
+      purpose,
+      model,
+      apiUrl,
+      status: "ok",
+      httpStatus: response.status,
+      durationMs: Date.now() - startedAt,
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+      totalTokens: usage.total_tokens,
+    });
 
     const content = body?.choices?.[0]?.message?.content ?? body?.choices?.[0]?.text ?? body?.output_text ?? "";
     if (responseFormat === "json") {
@@ -133,21 +163,42 @@ async function requestLLM(settings, { system, user, imageUrls = [], responseForm
     return { text: content, raw: body };
   } catch (error) {
     if (error.name === "AbortError") {
+      recordLLMCall({
+        userId,
+        kind,
+        purpose,
+        model,
+        apiUrl,
+        status: "timeout",
+        durationMs: Date.now() - startedAt,
+        errorCode: "llm_timeout",
+      });
       throw new AppError(504, "llm_timeout", `LLM 请求超过 ${Math.round(timeoutMs / 1000)} 秒。`);
     }
     if (error instanceof AppError) throw error;
+    recordLLMCall({
+      userId,
+      kind,
+      purpose,
+      model,
+      apiUrl,
+      status: "error",
+      durationMs: Date.now() - startedAt,
+      errorCode: "llm_unavailable",
+      errorMessage: error.message,
+    });
     throw new AppError(502, "llm_unavailable", "LLM 服务不可用。", { message: error.message });
   }
 }
 
-export async function callLLM({ userId, system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
+export async function callLLM({ userId, purpose = "text", system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
   const settings = configuredSettings(userId, "text");
-  return requestLLM(settings, { system, user, imageUrls, responseFormat, temperature, maxTokens });
+  return requestLLM(settings, { userId, kind: "text", purpose, system, user, imageUrls, responseFormat, temperature, maxTokens });
 }
 
-export async function callVisionLLM({ userId, system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
+export async function callVisionLLM({ userId, purpose = "vision", system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
   const settings = configuredSettings(userId, "vision");
-  return requestLLM(settings, { system, user, imageUrls, responseFormat, temperature, maxTokens });
+  return requestLLM(settings, { userId, kind: "vision", purpose, system, user, imageUrls, responseFormat, temperature, maxTokens });
 }
 
 export async function callRoutedLLM({
@@ -158,21 +209,23 @@ export async function callRoutedLLM({
   responseFormat = "json",
   temperature = 0.2,
   maxTokens,
+  purpose = "routed",
   visionSystem,
   visionUser,
   visionResponseFormat = "json",
 }) {
   const images = compactImageUrls(imageUrls);
   if (!images.length) {
-    return callLLM({ userId, system, user, responseFormat, temperature, maxTokens });
+    return callLLM({ userId, purpose, system, user, responseFormat, temperature, maxTokens });
   }
 
   if (!isVisionLLMConfigured(userId)) {
-    return callLLM({ userId, system, user, imageUrls: images, responseFormat, temperature, maxTokens });
+    return callLLM({ userId, purpose: `${purpose}:vision_fallback`, system, user, imageUrls: images, responseFormat, temperature, maxTokens });
   }
 
   const visionResult = await callVisionLLM({
     userId,
+    purpose: `${purpose}:vision_extract`,
     system: visionSystem || system,
     user: visionUser || user,
     imageUrls: images,
@@ -184,12 +237,13 @@ export async function callRoutedLLM({
     ? JSON.stringify(visionResult, null, 2)
     : String(visionResult?.text || visionResult?.raw || "");
   const routedUser = `${user}\n\n视觉模型提取结果：\n${visionText}`;
-  return callLLM({ userId, system, user: routedUser, responseFormat, temperature, maxTokens });
+  return callLLM({ userId, purpose: `${purpose}:text_finalize`, system, user: routedUser, responseFormat, temperature, maxTokens });
 }
 
 export async function testLLM(userId) {
   const result = await callLLM({
     userId,
+    purpose: "settings:test_text",
     system: "你是连接测试助手，只返回 JSON。",
     user: '返回 {"ok":true,"message":"pong"}',
   });
@@ -200,6 +254,7 @@ export async function testLLM(userId) {
 export async function testVisionLLM(userId) {
   const result = await callVisionLLM({
     userId,
+    purpose: "settings:test_vision",
     system: "你是视觉连接测试助手，只返回 JSON。",
     user: '返回 {"ok":true,"message":"vision pong"}',
   });
