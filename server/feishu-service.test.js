@@ -9,6 +9,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.FEISHU_OAUTH_APP_ID;
   delete process.env.FEISHU_OAUTH_APP_SECRET;
+  delete process.env.FEISHU_FEEDBACK_APP_ID;
+  delete process.env.FEISHU_FEEDBACK_APP_SECRET;
 });
 
 describe("feishu-service", () => {
@@ -105,5 +107,29 @@ describe("feishu-service", () => {
       "描述": "希望支持快捷反馈",
       "登录方式": "飞书 OAuth",
     });
+  });
+
+  it("prefers dedicated feedback app credentials over Feishu OAuth credentials", async () => {
+    dbModule.migrate();
+    process.env.FEISHU_OAUTH_APP_ID = "cli_oauth";
+    process.env.FEISHU_OAUTH_APP_SECRET = "oauth-secret";
+    process.env.FEISHU_FEEDBACK_APP_ID = "cli_feedback";
+    process.env.FEISHU_FEEDBACK_APP_SECRET = "feedback-secret";
+    const calls = [];
+    vi.stubGlobal("fetch", async (url, options = {}) => {
+      calls.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
+      if (String(url).includes("/auth/v3/tenant_access_token/internal")) {
+        return Response.json({ code: 0, tenant_access_token: "tenant-token" });
+      }
+      return Response.json({ code: 0, data: { record: { record_id: "rec-feedback" } } });
+    });
+
+    await expect(submitFeedbackToFeishu(
+      "regular-user",
+      { type: "Bug", content: "反馈专用 App 测试", page: "/app" },
+      { id: "regular-user", name: "User", auth_provider: "feishu" }
+    )).resolves.toEqual({ ok: true, record_id: "rec-feedback" });
+
+    expect(calls[0].body).toMatchObject({ app_id: "cli_feedback", app_secret: "feedback-secret" });
   });
 });
