@@ -22,10 +22,16 @@ function query(params = {}) {
 }
 
 export const adminApi = {
+  dashboard: () => adminFetch("/dashboard"),
+  workspaces: {
+    list: () => adminFetch("/workspaces"),
+    create: (body) => adminFetch("/workspaces", { method: "POST", body }),
+  },
   users: {
     list: (params = {}) => adminFetch(`/users?${query(params)}`),
     get: (id) => adminFetch(`/users/${id}`),
     update: (id, body) => adminFetch(`/users/${id}`, { method: "PATCH", body }),
     forceSignout: (id) => adminFetch(`/users/${id}/force-signout`, { method: "POST" }),
+    assignWorkspace: (id, workspaceId, body) => adminFetch(`/users/${id}/workspaces/${workspaceId}`, { method: "POST", body }),
   },
 };

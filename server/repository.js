@@ -12,6 +12,8 @@ import {
   revokeUserApiTokens,
   upsertApiToken,
   saveUserState,
+  ensureCompanyAdminWorkspaceForUser,
+  ensureFeishuWorkspaceForUser,
 } from "./db.js";
 import { DEFAULT_FIELDS, normalizeFields, normalizeSettingsFields } from "./field-config.js";
 import { normalizeDemandInputTags, normalizeProductInputTags } from "./field-matcher.js";
@@ -451,6 +453,12 @@ export function ensureLocalUser(input = {}) {
     user.created_at, user.updated_at, user.last_login_at
   );
   const saved = findUserById(user.id);
+  if (["owner", "admin"].includes(saved.role_code)) {
+    ensureCompanyAdminWorkspaceForUser(saved);
+  }
+  if (saved.auth_provider === "feishu") {
+    ensureFeishuWorkspaceForUser(saved);
+  }
   if (input.withSampleWorkspace) {
     ensureSampleUserState(saved);
   } else {

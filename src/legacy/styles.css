@@ -2598,6 +2598,33 @@ a.platform-card-link:hover {
   color: var(--bg);
   border-color: var(--text);
 }
+.admin-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.admin-metric {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px;
+}
+.admin-metric span {
+  display: block;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.admin-metric strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 24px;
+  line-height: 1;
+}
+.admin-metric.warn {
+  border-color: oklch(0.78 0.12 75);
+  background: oklch(0.97 0.03 80);
+}
 .admin-filters {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) repeat(3, 150px);
@@ -2619,6 +2646,9 @@ a.platform-card-link:hover {
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 16px;
   align-items: start;
+}
+.admin-layout.single {
+  grid-template-columns: 1fr;
 }
 .admin-table-wrap,
 .admin-detail {
@@ -2683,6 +2713,10 @@ a.platform-card-link:hover {
 .admin-badge.deleted {
   background: var(--danger-soft);
   color: var(--danger);
+}
+.admin-muted {
+  color: var(--text-3);
+  font-size: 12px;
 }
 .admin-detail {
   padding: 16px;
@@ -2751,7 +2785,8 @@ a.platform-card-link:hover {
 @media (max-width: 900px) {
   .admin-shell,
   .admin-layout,
-  .admin-filters {
+  .admin-filters,
+  .admin-metrics {
     grid-template-columns: 1fr;
   }
   .admin-sidebar {

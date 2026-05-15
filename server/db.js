@@ -32,6 +32,40 @@ function userStateKey(userId) {
   return `state:user:${userId}`;
 }
 
+function slugifyWorkspace(value, fallback = "workspace") {
+  const slug = String(value || fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return slug || fallback;
+}
+
+function workspaceIdForSlug(slug) {
+  return `ws-${slug}`;
+}
+
+function workspaceMemberId(workspaceId, userId) {
+  const safe = `${workspaceId}-${userId}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  return `wm-${safe}`;
+}
+
+function feishuWorkspaceDefaults() {
+  const slug = slugifyWorkspace(process.env.LOOM_FEISHU_WORKSPACE_SLUG || "company", "company");
+  return {
+    id: workspaceIdForSlug(slug),
+    slug,
+    name: String(process.env.LOOM_FEISHU_WORKSPACE_NAME || "Company Workspace").trim() || "Company Workspace",
+    type: "company",
+    default_ai_policy: "platform",
+  };
+}
+
 export function migrate() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_data (
@@ -74,9 +108,38 @@ export function migrate() {
     CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
     CREATE INDEX IF NOT EXISTS idx_api_tokens_revoked_at ON api_tokens(revoked_at);
 
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'personal',
+      status TEXT NOT NULL DEFAULT 'active',
+      default_ai_policy TEXT NOT NULL DEFAULT 'platform',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspaces_slug ON workspaces(slug);
+    CREATE INDEX IF NOT EXISTS idx_workspaces_status ON workspaces(status);
+
+    CREATE TABLE IF NOT EXISTS workspace_members (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      status TEXT NOT NULL DEFAULT 'active',
+      is_default INTEGER NOT NULL DEFAULT 0,
+      joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(workspace_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_id ON workspace_members(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_workspace_members_user_id ON workspace_members(user_id);
+    CREATE INDEX IF NOT EXISTS idx_workspace_members_default ON workspace_members(user_id, is_default);
+
     CREATE TABLE IF NOT EXISTS news_sources (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL DEFAULT '${LEGACY_USER_ID}',
+      workspace_id TEXT,
       name TEXT NOT NULL,
       url TEXT NOT NULL,
       type TEXT DEFAULT 'rss',
@@ -97,6 +160,7 @@ export function migrate() {
     CREATE TABLE IF NOT EXISTS news_items (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL DEFAULT '${LEGACY_USER_ID}',
+      workspace_id TEXT,
       source_id TEXT NOT NULL,
       source_name TEXT NOT NULL,
       source_authority TEXT DEFAULT 'watchlist',
@@ -124,6 +188,7 @@ export function migrate() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_news_items_user_date ON news_items(user_id, published_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_news_items_workspace_date ON news_items(workspace_id, published_at DESC);
     CREATE INDEX IF NOT EXISTS idx_news_items_type ON news_items(type);
     CREATE INDEX IF NOT EXISTS idx_news_items_starred ON news_items(is_starred);
     CREATE INDEX IF NOT EXISTS idx_news_items_url ON news_items(original_url);
@@ -132,9 +197,15 @@ export function migrate() {
   `);
 
   const newsSourceColumns = new Set(db.prepare("PRAGMA table_info(news_sources)").all().map((column) => column.name));
+  if (!newsSourceColumns.has("workspace_id")) db.exec("ALTER TABLE news_sources ADD COLUMN workspace_id TEXT;");
   if (!newsSourceColumns.has("source_group")) db.exec("ALTER TABLE news_sources ADD COLUMN source_group TEXT DEFAULT 'custom';");
   if (!newsSourceColumns.has("brand")) db.exec("ALTER TABLE news_sources ADD COLUMN brand TEXT DEFAULT '';");
   if (!newsSourceColumns.has("last_item_count")) db.exec("ALTER TABLE news_sources ADD COLUMN last_item_count INTEGER DEFAULT 0;");
+
+  const newsItemColumns = new Set(db.prepare("PRAGMA table_info(news_items)").all().map((column) => column.name));
+  if (!newsItemColumns.has("workspace_id")) db.exec("ALTER TABLE news_items ADD COLUMN workspace_id TEXT;");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_news_sources_workspace_id ON news_sources(workspace_id);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_news_items_workspace_date ON news_items(workspace_id, published_at DESC);");
 
   const userColumns = new Set(db.prepare("PRAGMA table_info(users)").all().map((column) => column.name));
   if (!userColumns.has("role_code")) {
@@ -207,6 +278,7 @@ export function migrate() {
   }
 
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_news_items_user_url ON news_items(user_id, original_url);");
+  syncFeishuWorkspaceMemberships();
 }
 
 export function readJson(key, fallback) {
@@ -245,6 +317,91 @@ export function getUserState(userId) {
 
 export function saveUserState(userId, state) {
   writeJson(userStateKey(userId), state);
+}
+
+export function ensureWorkspace(input = {}) {
+  const slug = slugifyWorkspace(input.slug || input.name, "workspace");
+  const workspace = {
+    id: input.id || workspaceIdForSlug(slug),
+    slug,
+    name: String(input.name || slug).trim() || slug,
+    type: String(input.type || "personal").trim() || "personal",
+    status: String(input.status || "active").trim() || "active",
+    default_ai_policy: String(input.default_ai_policy || "platform").trim() || "platform",
+  };
+  db.prepare(`
+    INSERT INTO workspaces (
+      id, slug, name, type, status, default_ai_policy, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(slug) DO UPDATE SET
+      name = excluded.name,
+      type = excluded.type,
+      status = excluded.status,
+      default_ai_policy = excluded.default_ai_policy,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    workspace.id,
+    workspace.slug,
+    workspace.name,
+    workspace.type,
+    workspace.status,
+    workspace.default_ai_policy
+  );
+  return db.prepare("SELECT * FROM workspaces WHERE slug = ?").get(workspace.slug);
+}
+
+export function addWorkspaceMember(workspaceId, userId, { role = "member", status = "active", isDefault = true } = {}) {
+  if (!workspaceId || !userId) return null;
+  if (isDefault) {
+    db.prepare("UPDATE workspace_members SET is_default = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?").run(userId);
+  }
+  db.prepare(`
+    INSERT INTO workspace_members (
+      id, workspace_id, user_id, role, status, is_default, joined_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(workspace_id, user_id) DO UPDATE SET
+      role = excluded.role,
+      status = excluded.status,
+      is_default = excluded.is_default,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    workspaceMemberId(workspaceId, userId),
+    workspaceId,
+    userId,
+    String(role || "member"),
+    String(status || "active"),
+    isDefault ? 1 : 0
+  );
+  return db.prepare("SELECT * FROM workspace_members WHERE workspace_id = ? AND user_id = ?").get(workspaceId, userId);
+}
+
+export function ensureFeishuWorkspaceForUser(user) {
+  if (!user || user.id === LEGACY_USER_ID || user.auth_provider !== "feishu") return null;
+  const workspace = ensureWorkspace(feishuWorkspaceDefaults());
+  return addWorkspaceMember(workspace.id, user.id, { role: "member", status: "active", isDefault: true });
+}
+
+export function ensureCompanyAdminWorkspaceForUser(user) {
+  if (!user || user.id === LEGACY_USER_ID) return null;
+  if (!["owner", "admin"].includes(user.role_code)) return null;
+  const workspace = ensureWorkspace(feishuWorkspaceDefaults());
+  return addWorkspaceMember(workspace.id, user.id, { role: "admin", status: "active", isDefault: true });
+}
+
+function syncFeishuWorkspaceMemberships() {
+  const users = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE id <> ?
+      AND (auth_provider = 'feishu' OR role_code IN ('owner', 'admin'))
+  `).all(LEGACY_USER_ID);
+  for (const user of users) {
+    if (["owner", "admin"].includes(user.role_code)) {
+      ensureCompanyAdminWorkspaceForUser(user);
+    } else {
+      ensureFeishuWorkspaceForUser(user);
+    }
+  }
 }
 
 export function upsertApiToken(token, userId) {

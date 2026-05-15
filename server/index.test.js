@@ -181,6 +181,86 @@ describe("admin users", () => {
 
     expect(response.status).toBe(409);
   });
+
+  it("keeps password users unassigned until admin assigns a workspace", async () => {
+    process.env.LOOM_OWNER_EMAIL = process.env.APP_USERNAME;
+    dbModule.migrate();
+    const ownerLogin = await login();
+
+    dbModule.db.prepare(`
+      INSERT INTO users (
+        id, email, name, initials, role, role_code, status, auth_provider, created_at, updated_at
+      ) VALUES (
+        'manual-user-test', 'manual@example.com', 'Manual', 'MA', '成员', 'member', 'active', 'password', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+    `).run();
+
+    const dashboardResponse = await fetch(`${baseUrl}/api/admin/dashboard`, {
+      headers: { Cookie: ownerLogin.cookie },
+    });
+    const dashboardBody = await dashboardResponse.json();
+    expect(dashboardResponse.status).toBe(200);
+    expect(dashboardBody.totals.unassigned_users).toBeGreaterThanOrEqual(1);
+    expect(dashboardBody.unassigned_users.some((user) => user.id === "manual-user-test")).toBe(true);
+
+    const createWorkspaceResponse = await fetch(`${baseUrl}/api/admin/workspaces`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: ownerLogin.cookie },
+      body: JSON.stringify({ name: "GF Team", slug: "gf-team", type: "small_team" }),
+    });
+    const workspace = await createWorkspaceResponse.json();
+    expect(createWorkspaceResponse.status).toBe(201);
+    expect(workspace.slug).toBe("gf-team");
+
+    const assignResponse = await fetch(`${baseUrl}/api/admin/users/manual-user-test/workspaces/gf-team`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: ownerLogin.cookie },
+      body: JSON.stringify({ role: "member" }),
+    });
+    const assigned = await assignResponse.json();
+    expect(assignResponse.status).toBe(200);
+    expect(assigned.workspaces.some((item) => item.slug === "gf-team")).toBe(true);
+  });
+
+  it("auto-assigns Feishu users to the configured company workspace", async () => {
+    const { ensureLocalUser } = await import("./repository.js");
+    ensureLocalUser({
+      id: "feishu-user-test",
+      email: "feishu@example.com",
+      name: "Feishu User",
+      auth_provider: "feishu",
+      feishu_open_id: "ou_test",
+    });
+
+    const member = dbModule.db.prepare(`
+      SELECT w.slug, wm.role, wm.is_default
+      FROM workspace_members wm
+      JOIN workspaces w ON w.id = wm.workspace_id
+      WHERE wm.user_id = ?
+    `).get("feishu-user-test");
+
+    expect(member.slug).toBe("company");
+    expect(member.role).toBe("member");
+    expect(member.is_default).toBe(1);
+  });
+
+  it("assigns the configured password owner as company workspace admin", async () => {
+    process.env.LOOM_OWNER_EMAIL = process.env.APP_USERNAME;
+    dbModule.migrate();
+    const ownerLogin = await login();
+    expect(ownerLogin.body.user.is_owner).toBe(true);
+
+    const member = dbModule.db.prepare(`
+      SELECT w.slug, wm.role, wm.is_default
+      FROM workspace_members wm
+      JOIN workspaces w ON w.id = wm.workspace_id
+      WHERE wm.user_id = ?
+    `).get(ownerLogin.body.user.id);
+
+    expect(member.slug).toBe("company");
+    expect(member.role).toBe("admin");
+    expect(member.is_default).toBe(1);
+  });
 });
 
 describe("scheduler timezones", () => {

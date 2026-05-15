@@ -2,9 +2,13 @@ import { Router } from "express";
 import { AppError } from "./ai-service.js";
 import { requireAdmin } from "./access-control.js";
 import {
+  adminAssignUserToWorkspace,
+  adminCreateWorkspace,
+  adminDashboard,
   adminForceSignout,
   adminGetUser,
   adminListUsers,
+  adminListWorkspaces,
   adminUpdateUser,
 } from "./admin-service.js";
 
@@ -15,6 +19,19 @@ function asyncHandler(handler) {
 const router = Router();
 
 router.use(requireAdmin);
+
+router.get("/dashboard", asyncHandler(async (_req, res) => {
+  res.json(adminDashboard());
+}));
+
+router.get("/workspaces", asyncHandler(async (_req, res) => {
+  const items = adminListWorkspaces();
+  res.json({ items, total: items.length });
+}));
+
+router.post("/workspaces", asyncHandler(async (req, res) => {
+  res.status(201).json(adminCreateWorkspace(req.body || {}));
+}));
 
 router.get("/users", asyncHandler(async (req, res) => {
   const { q, status, role, auth_provider } = req.query;
@@ -34,6 +51,10 @@ router.patch("/users/:id", asyncHandler(async (req, res) => {
 
 router.post("/users/:id/force-signout", asyncHandler(async (req, res) => {
   res.json(adminForceSignout(req.adminUser, req.params.id));
+}));
+
+router.post("/users/:id/workspaces/:workspaceId", asyncHandler(async (req, res) => {
+  res.json(adminAssignUserToWorkspace(req.params.id, req.params.workspaceId, req.body || {}));
 }));
 
 export default router;
