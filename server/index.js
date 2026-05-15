@@ -820,6 +820,11 @@ function startWechatScheduler() {
 if (process.env.NODE_ENV === "production") {
   const appDistDir = path.join(projectRoot, "dist");
   const landingDistDir = path.join(projectRoot, "landing", "dist");
+  const htmlShellHeaders = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    Pragma: "no-cache",
+    Expires: "0",
+  };
   const immutableStaticOptions = {
     index: false,
     etag: true,
@@ -833,19 +838,25 @@ if (process.env.NODE_ENV === "production") {
     lastModified: true,
     setHeaders(res, filePath) {
       if (filePath.endsWith(".html")) {
-        res.setHeader("Cache-Control", "no-cache");
+        Object.entries(htmlShellHeaders).forEach(([key, value]) => res.setHeader(key, value));
       }
     },
   };
+  const sendFreshHtml = (res, filePath) => res.sendFile(filePath, {
+    etag: false,
+    lastModified: false,
+    cacheControl: false,
+    headers: htmlShellHeaders,
+  });
 
   app.use("/app/assets", express.static(path.join(appDistDir, "assets"), immutableStaticOptions));
   app.use("/app", express.static(appDistDir, noCacheHtmlOptions));
-  app.get(/^\/app(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(appDistDir, "index.html")));
-  app.get(/^\/admin(?:\/.*)?$/, (_req, res) => res.sendFile(path.join(appDistDir, "index.html")));
+  app.get(/^\/app(?:\/.*)?$/, (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
+  app.get(/^\/admin(?:\/.*)?$/, (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
 
   app.use("/assets", express.static(path.join(landingDistDir, "assets"), immutableStaticOptions));
   app.use(express.static(landingDistDir, noCacheHtmlOptions));
-  app.get(/^\/(?:extension)?$/, (_req, res) => res.sendFile(path.join(landingDistDir, "index.html")));
+  app.get(/^\/(?:extension)?$/, (_req, res) => sendFreshHtml(res, path.join(landingDistDir, "index.html")));
 }
 
 app.use("/api", (_req, res) => {
