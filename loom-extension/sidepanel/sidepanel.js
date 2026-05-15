@@ -3,6 +3,11 @@ const LEGACY_API_BASE_HOSTS = new Set([
   "ulanzi-copilot.my1panelsite.xyz",
   "loom.43.156.166.134.sslip.io",
 ]);
+const LOOM_WEB_HOSTS = new Set([
+  "loom.my1panelsite.xyz",
+  "127.0.0.1",
+  "localhost",
+]);
 const API_BASE_KEY = "loom_api_base";
 const TOKEN_KEY = "loom_token";
 const USER_KEY = "loom_user";
@@ -201,6 +206,10 @@ function isVisitorUser(user) {
   return Boolean(user?.is_visitor || id === "visitor" || name === "visitor");
 }
 
+function isEditingForm() {
+  return Boolean(document.activeElement?.matches?.("[data-tag-query], .ghost-input, .metric-input, .platform-card-link, textarea, input"));
+}
+
 document.addEventListener("DOMContentLoaded", init);
 document.addEventListener("click", handleGlobalClick);
 window.addEventListener("focus", () => {
@@ -396,10 +405,21 @@ function isLoomWebUrl(url) {
   try {
     const parsed = new URL(url);
     const api = new URL(apiOrigin() || state.apiBase || DEFAULT_API_BASE);
-    return parsed.hostname === api.hostname;
+    if (parsed.hostname === api.hostname) return true;
+    return LOOM_WEB_HOSTS.has(parsed.hostname) && /^\/app(?:\/|$)/.test(parsed.pathname);
   } catch {
     return false;
   }
+}
+
+function loomWebOriginFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (isLoomWebUrl(url)) return parsed.origin;
+  } catch {
+    // Ignore malformed tab URLs.
+  }
+  return "";
 }
 
 function shouldAutoSyncUrl(url) {
@@ -456,7 +476,7 @@ async function activeTabChangedSince(tab) {
 }
 
 async function resyncAuthWhenIdle(payload = {}) {
-  if (state.busy || state.reloading || syncInFlight) return;
+  if (state.busy || state.reloading || syncInFlight || isEditingForm()) return;
   debugEvent("auth:resync-request", payload);
   await syncAuthFromWebSession({ silent: false, force: true });
 }
@@ -615,6 +635,7 @@ async function syncIfUrlChanged() {
     pendingUrlSync = true;
     return;
   }
+  if (isEditingForm()) return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
   const nextUrl = tab.url || "";
@@ -723,6 +744,7 @@ async function applyExtensionSession(data, sessionCookie = "") {
   state.user = data.user || null;
   state.syncedSessionCookie = sessionCookie || state.sessionCookie || "";
   debugEvent("auth:token-ok", { userId: data.user?.id || "", userName: data.user?.name || "" });
+  if (isEditingForm() && state.page && state.form) return true;
   bindAutoSync();
   await loadTagGroups();
   await loadCurrentPage((await getStoredSettings())[DEFAULT_MODE_KEY] || "auto");
@@ -730,18 +752,18 @@ async function applyExtensionSession(data, sessionCookie = "") {
 }
 
 async function trySyncAuthFromLoomTab() {
-  const origin = apiOrigin();
-  if (!origin || !chrome.scripting?.executeScript) return false;
+  if (!chrome.scripting?.executeScript) return false;
   let tabs = [];
   try {
-    tabs = await chrome.tabs.query({ url: [`${origin}/*`] });
-  } catch {
     tabs = await chrome.tabs.query({});
+  } catch {
+    return false;
   }
   const candidates = safeArray(tabs)
-    .filter((tab) => tab?.id && isLoomWebUrl(tab.url || ""))
+    .map((tab) => ({ tab, origin: loomWebOriginFromUrl(tab?.url || "") }))
+    .filter((item) => item.tab?.id && item.origin)
     .sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)));
-  for (const tab of candidates) {
+  for (const { tab, origin } of candidates) {
     try {
       const [injection] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -769,6 +791,7 @@ async function trySyncAuthFromLoomTab() {
         tabId: tab.id,
       });
       if (result?.ok && result.data?.token) {
+        state.apiBase = normalizeApiBase(origin);
         return applyExtensionSession(result.data, state.sessionCookie || "loom-tab");
       }
     } catch (error) {
@@ -874,7 +897,8 @@ function bindLoginStateSync() {
       if (!apiOrigin()) return;
       try {
         const cookieUrl = `${changeInfo.cookie.secure ? "https" : "http"}://${changeInfo.cookie.domain.replace(/^\./, "")}${changeInfo.cookie.path || "/"}`;
-        if (new URL(cookieUrl).hostname !== new URL(apiOrigin()).hostname) return;
+        const hostname = new URL(cookieUrl).hostname;
+        if (hostname !== new URL(apiOrigin()).hostname && !LOOM_WEB_HOSTS.has(hostname)) return;
       } catch {
         return;
       }
@@ -885,6 +909,7 @@ function bindLoginStateSync() {
 
   if (!loginStatusTimer) {
     loginStatusTimer = setInterval(() => {
+      if (isEditingForm()) return;
       const shouldForce = !state.token;
       void syncAuthFromWebSession({ silent: true, force: shouldForce });
     }, 4000);
@@ -1412,6 +1437,7 @@ async function collectVisibleComments({ silent = false } = {}) {
     const result = await readInjectedPageData(state.tab.id, "xiaohongshu");
     if (!result?.ok) throw new Error(result?.error || "评论读取失败");
     const incoming = safeArray(result.data?.visible_comments);
+    const previousCount = safeArray(state.form?.visible_comments).length;
     const next = mergeComments(state.form?.visible_comments, incoming);
     state.page = { ...state.page, data: { ...state.page.data, visible_comments: next } };
     state.processed = { ...(state.processed || {}), visible_comments: next };
@@ -1421,7 +1447,7 @@ async function collectVisibleComments({ silent = false } = {}) {
         ? `已采集 ${next.length} 条当前可见评论。`
         : "当前可见评论还没有读到，向下滚动评论区后再试。";
     }
-    renderMain();
+    if (!silent || (!isEditingForm() && next.length !== previousCount)) renderMain();
   } catch (error) {
     if (!silent) {
       state.message = `评论采集失败：${error.message}`;
@@ -1738,32 +1764,52 @@ function fieldSelect(key, label, selectedValues, tone = "accent", options = {}) 
 
 function tagPickerPanel(key, group, selected, tone, options = {}) {
   const query = String(state.tagPicker?.query || "").trim();
+  return `
+    <div class="field-picker">
+      <input class="field-picker-search" data-tag-query="${escapeAttr(key)}" value="${escapeAttr(query)}" placeholder="搜索或新建选项" autofocus>
+      ${tagPickerOptionsHtml(key, group, selected, tone, options, query)}
+    </div>
+  `;
+}
+
+function tagPickerOptionsHtml(key, group, selected, tone, options = {}, rawQuery = "") {
+  const query = String(rawQuery || "").trim();
   const allOptions = Array.from(new Set([...safeArray(group.tags), ...selected])).filter(Boolean);
   const filtered = query ? allOptions.filter((item) => item.toLowerCase().includes(query.toLowerCase())) : allOptions;
   const hasExact = query && allOptions.some((item) => item.toLowerCase() === query.toLowerCase());
   return `
-    <div class="field-picker">
-      <input class="field-picker-search" data-tag-query="${escapeAttr(key)}" value="${escapeAttr(query)}" placeholder="搜索或新建选项" autofocus>
-      <div class="field-picker-list">
-        ${filtered.map((item) => {
-          const checked = selected.includes(item);
-          return `
-            <button class="field-option ${checked ? "selected" : ""}" type="button" data-toggle-tag="${escapeAttr(key)}" data-value="${escapeAttr(item)}" data-single="${options.single ? "1" : "0"}">
-              <span class="field-check">${checked ? "✓" : ""}</span>
-              <span class="tag ${tone}">${escapeHtml(item)}</span>
-              ${checked ? `<span class="field-option-x">×</span>` : ""}
-            </button>
-          `;
-        }).join("")}
-        ${query && !hasExact ? `
-          <button class="field-option create" type="button" data-toggle-tag="${escapeAttr(key)}" data-value="${escapeAttr(query)}" data-single="${options.single ? "1" : "0"}">
-            <span class="field-check">+</span>
-            <span>新建 “${escapeHtml(query)}”</span>
+    <div class="field-picker-list">
+      ${filtered.map((item) => {
+        const checked = selected.includes(item);
+        return `
+          <button class="field-option ${checked ? "selected" : ""}" type="button" data-toggle-tag="${escapeAttr(key)}" data-value="${escapeAttr(item)}" data-single="${options.single ? "1" : "0"}">
+            <span class="field-check">${checked ? "✓" : ""}</span>
+            <span class="tag ${tone}">${escapeHtml(item)}</span>
+            ${checked ? `<span class="field-option-x">×</span>` : ""}
           </button>
-        ` : ""}
-      </div>
+        `;
+      }).join("")}
+      ${query && !hasExact ? `
+        <button class="field-option create" type="button" data-toggle-tag="${escapeAttr(key)}" data-value="${escapeAttr(query)}" data-single="${options.single ? "1" : "0"}">
+          <span class="field-check">+</span>
+          <span>新建 “${escapeHtml(query)}”</span>
+        </button>
+      ` : ""}
     </div>
   `;
+}
+
+function refreshTagPickerOptions(input) {
+  const key = input.getAttribute("data-tag-query");
+  if (!key) return;
+  const fieldSelectEl = input.closest("[data-field-select]");
+  const listEl = fieldSelectEl?.querySelector(".field-picker-list");
+  if (!fieldSelectEl || !listEl) return;
+  const group = tagGroupByKey(key);
+  const field = safeArray(state.fields).find((item) => item.key === key || item.legacyKey === key);
+  const selected = field ? fieldValues(state.form || {}, field) : safeArray(state.form?.tag_values?.[key] || state.form?.[key]);
+  const tone = field?.tone || group.tone || "outline";
+  listEl.outerHTML = tagPickerOptionsHtml(key, group, selected, tone, { single: field?.multi === false }, input.value);
 }
 
 function sourceMetric(label, value) {
@@ -2000,7 +2046,7 @@ document.addEventListener("input", (event) => {
   const tagQueryKey = el.getAttribute("data-tag-query");
   if (tagQueryKey) {
     state.tagPicker = { key: tagQueryKey, query: el.value };
-    renderMain();
+    refreshTagPickerOptions(el);
     return;
   }
   const key = el.getAttribute("data-key");

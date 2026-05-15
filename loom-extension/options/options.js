@@ -3,6 +3,11 @@ const LEGACY_API_BASE_HOSTS = new Set([
   "ulanzi-copilot.my1panelsite.xyz",
   "loom.43.156.166.134.sslip.io",
 ]);
+const LOOM_WEB_HOSTS = new Set([
+  "loom.my1panelsite.xyz",
+  "127.0.0.1",
+  "localhost",
+]);
 
 const DEFAULTS = {
   loom_api_base: DEFAULT_API_BASE,
@@ -99,6 +104,32 @@ function normalizeApiBase(value) {
   } catch {
     return DEFAULT_API_BASE;
   }
+}
+
+function isLoomWebUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const configured = new URL(currentApiBaseFromForm(DEFAULTS.loom_api_base));
+    if (parsed.hostname === configured.hostname) return true;
+    return LOOM_WEB_HOSTS.has(parsed.hostname) && /^\/app(?:\/|$)/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function loomWebOriginFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return isLoomWebUrl(url) ? parsed.origin : "";
+  } catch {
+    return "";
+  }
+}
+
+function isVisitorUser(user) {
+  const id = String(user?.id || "").toLowerCase();
+  const name = String(user?.name || "").trim().toLowerCase();
+  return Boolean(user?.is_visitor || id === "visitor" || name === "visitor");
 }
 
 async function load() {
@@ -266,14 +297,27 @@ function fillVisionLlmForm(settings) {
 
 async function refreshConnectionState(stored = null) {
   const data = stored || await getSettings();
-  const apiBase = normalizeApiBase(document.getElementById("api-base")?.value.trim() || data.loom_api_base || DEFAULTS.loom_api_base);
+  let apiBase = normalizeApiBase(document.getElementById("api-base")?.value.trim() || data.loom_api_base || DEFAULTS.loom_api_base);
+  let token = data.loom_token || "";
+  if (!token) {
+    setConnection("正在同步 Web 登录态…");
+    const synced = await syncAuthFromOpenWebTab();
+    if (synced?.token) {
+      token = synced.token;
+      apiBase = synced.apiBase || apiBase;
+    }
+  }
   if (!data.loom_token) {
-    setConnection("等待 Web 端登录");
-    return;
+    const latest = await getSettings();
+    token = token || latest.loom_token || "";
+    if (!token) {
+      setConnection("等待 Web 端登录");
+      return;
+    }
   }
   try {
     const res = await fetch(`${apiBase}/api/me`, {
-      headers: { Authorization: `Bearer ${data.loom_token}` },
+      headers: { Authorization: `Bearer ${token}` },
     });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
@@ -281,6 +325,63 @@ async function refreshConnectionState(stored = null) {
   } catch (error) {
     setConnection(`登录态已失效：${error.message}`);
   }
+}
+
+async function syncAuthFromOpenWebTab() {
+  if (!chrome.tabs?.query || !chrome.scripting?.executeScript) return null;
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({});
+  } catch {
+    return null;
+  }
+  const candidates = tabs
+    .map((tab) => ({ tab, origin: loomWebOriginFromUrl(tab?.url || "") }))
+    .filter((item) => item.tab?.id && item.origin)
+    .sort((a, b) => Number(Boolean(b.tab.active)) - Number(Boolean(a.tab.active)));
+  for (const { tab, origin } of candidates) {
+    try {
+      const [injection] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: async (apiBase) => {
+          try {
+            const res = await fetch(`${apiBase}/api/auth/extension/session-token`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),
+            });
+            const data = await res.json().catch(() => ({}));
+            return { ok: res.ok, status: res.status, data };
+          } catch (error) {
+            return { ok: false, status: 0, error: error?.message || "loom_tab_sync_failed" };
+          }
+        },
+        args: [origin],
+      });
+      const result = injection?.result || null;
+      if (!result?.ok || !result.data?.token) continue;
+      if (isVisitorUser(result.data.user)) {
+        await chrome.storage.local.remove(["loom_token", "loom_user", "pmcopilot_token", "pmcopilot_user"]);
+        setConnection("检测到 Web 端是访客账号，请先登录正式账号");
+        return null;
+      }
+      const normalizedOrigin = normalizeApiBase(origin);
+      await chrome.storage.local.set({
+        loom_api_base: normalizedOrigin,
+        loom_token: result.data.token,
+        loom_user: result.data.user || null,
+      });
+      const apiBaseInput = document.getElementById("api-base");
+      if (apiBaseInput) apiBaseInput.value = normalizedOrigin;
+      syncWebLinks(normalizedOrigin);
+      return { ...result.data, apiBase: normalizedOrigin };
+    } catch {
+      // Try the next open LOOM tab.
+    }
+  }
+  return null;
 }
 
 async function authedFetch(path, options = {}) {
