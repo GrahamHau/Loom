@@ -42,8 +42,8 @@ function requireFeedbackSettings(userId) {
   const userSettings = settings(userId);
   const ownerSettings = settings(LEGACY_USER_ID);
   const s = mergedSettings(userId);
-  const appId = userSettings.feishu_app_id || ownerSettings.feishu_app_id || process.env.FEISHU_APP_ID;
-  const appSecret = userSettings.feishu_app_secret || ownerSettings.feishu_app_secret || process.env.FEISHU_APP_SECRET;
+  const appId = userSettings.feishu_app_id || ownerSettings.feishu_app_id || process.env.FEISHU_APP_ID || process.env.FEISHU_OAUTH_APP_ID;
+  const appSecret = userSettings.feishu_app_secret || ownerSettings.feishu_app_secret || process.env.FEISHU_APP_SECRET || process.env.FEISHU_OAUTH_APP_SECRET;
   const baseToken = userSettings.feishu_feedback_base_token ||
     ownerSettings.feishu_feedback_base_token ||
     process.env.FEISHU_FEEDBACK_BASE_TOKEN ||

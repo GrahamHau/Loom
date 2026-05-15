@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 process.env.DATABASE_PATH = ":memory:";
 
-const { feedbackRecordFieldsFor, syncableRecordsFor } = await import("./feishu-service.js");
+const dbModule = await import("./db.js");
+const { feedbackRecordFieldsFor, submitFeedbackToFeishu, syncableRecordsFor } = await import("./feishu-service.js");
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env.FEISHU_OAUTH_APP_ID;
+  delete process.env.FEISHU_OAUTH_APP_SECRET;
+});
 
 describe("feishu-service", () => {
   it("skips sample records for real sync", () => {
@@ -70,5 +77,33 @@ describe("feishu-service", () => {
     expect(fields["严重程度"]).toBe("一般");
     expect(fields["描述"]).toBe("一个想法 可以更快");
     expect(fields["登录方式"]).toBe("访客/体验");
+  });
+
+  it("can submit feedback with Feishu OAuth app credentials from production env", async () => {
+    dbModule.migrate();
+    process.env.FEISHU_OAUTH_APP_ID = "cli_test";
+    process.env.FEISHU_OAUTH_APP_SECRET = "secret";
+    const calls = [];
+    vi.stubGlobal("fetch", async (url, options = {}) => {
+      calls.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
+      if (String(url).includes("/auth/v3/tenant_access_token/internal")) {
+        return Response.json({ code: 0, tenant_access_token: "tenant-token" });
+      }
+      return Response.json({ code: 0, data: { record: { record_id: "rec-test" } } });
+    });
+
+    await expect(submitFeedbackToFeishu(
+      "regular-user",
+      { type: "功能建议", content: "希望支持快捷反馈", page: "/app" },
+      { id: "regular-user", name: "User", auth_provider: "feishu" }
+    )).resolves.toEqual({ ok: true, record_id: "rec-test" });
+
+    expect(calls[0].body).toMatchObject({ app_id: "cli_test", app_secret: "secret" });
+    expect(calls[1].url).toContain("/bitable/v1/apps/OeS5bT8kjalJnEs85Qgcs5jQnIg/tables/tblfN7MErcVmepYF/records");
+    expect(calls[1].body.fields).toMatchObject({
+      "类型": "功能建议",
+      "描述": "希望支持快捷反馈",
+      "登录方式": "飞书 OAuth",
+    });
   });
 });
