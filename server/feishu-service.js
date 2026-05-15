@@ -202,23 +202,6 @@ function loginMethodLabel(provider) {
   return "账号密码";
 }
 
-function formatFeishuDateTime(date) {
-  const pad = (value) => String(value).padStart(2, "0");
-  return [
-    date.getFullYear(),
-    "-",
-    pad(date.getMonth() + 1),
-    "-",
-    pad(date.getDate()),
-    " ",
-    pad(date.getHours()),
-    ":",
-    pad(date.getMinutes()),
-    ":",
-    pad(date.getSeconds()),
-  ].join("");
-}
-
 export function feedbackRecordFieldsFor(feedback = {}, user = {}, now = new Date()) {
   const type = FEEDBACK_TYPES.has(String(feedback.type || "")) ? String(feedback.type) : "其他";
   const content = cleanFeedbackText(feedback.content || feedback.description, 2000);
@@ -240,7 +223,7 @@ export function feedbackRecordFieldsFor(feedback = {}, user = {}, now = new Date
     "登录方式": loginMethodLabel(authProvider),
     "状态": "新反馈",
     "来源": "Web App",
-    "提交时间": formatFeishuDateTime(now),
+    "提交时间": now.getTime(),
   };
 }
 

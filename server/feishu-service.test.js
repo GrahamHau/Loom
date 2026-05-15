@@ -65,7 +65,7 @@ describe("feishu-service", () => {
       "状态": "新反馈",
       "来源": "Web App",
     });
-    expect(fields["提交时间"]).toMatch(/2026-05-(14|15) \d{2}:02:03/);
+    expect(fields["提交时间"]).toBe(new Date("2026-05-15T01:02:03+08:00").getTime());
   });
 
   it("keeps the feedback form tolerant and defaults unknown types", () => {
