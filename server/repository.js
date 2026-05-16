@@ -131,6 +131,36 @@ function mapUserRow(row) {
   };
 }
 
+function listUserWorkspaces(userId) {
+  if (!userId || userId === getLegacyUserId()) return [];
+  return db.prepare(`
+    SELECT
+      w.id,
+      w.slug,
+      w.name,
+      w.type,
+      w.status,
+      w.default_ai_policy,
+      wm.role AS current_user_role,
+      wm.status AS member_status,
+      wm.is_default
+    FROM workspace_members wm
+    JOIN workspaces w ON w.id = wm.workspace_id
+    WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
+    ORDER BY wm.is_default DESC, w.name ASC
+  `).all(userId).map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    type: row.type,
+    status: row.status,
+    default_ai_policy: row.default_ai_policy,
+    current_user_role: row.current_user_role || "member",
+    member_status: row.member_status || "active",
+    is_default: Boolean(row.is_default),
+  }));
+}
+
 function requireState(userId) {
   const state = getUserState(userId);
   if (state) return normalizeWorkspaceState(clone(state));
@@ -532,6 +562,7 @@ export function visibleNewsItems(userId) {
 export function bootstrap(userId) {
   const state = requireState(userId);
   if (!state) return null;
+  const workspaces = listUserWorkspaces(userId);
   const news = visibleNewsItems(userId);
   state.news = news.slice(0, 30);
   state.newsCounts = newsCountsFrom(news);
@@ -539,6 +570,8 @@ export function bootstrap(userId) {
   state.officialRssSources = listNewsSources(getLegacyUserId()).filter((source) => isOfficialSourceLike(source));
   state.onboarding = onboardingMeta(state, news);
   state.user = userSummaryFromState(state, findUserById(userId) || { id: userId });
+  state.workspaces = workspaces;
+  state.workspace = workspaces[0] || null;
   if (state.settings) {
     const llmConfigured = Boolean(state.settings.llm_api_url && state.settings.llm_model && state.settings.llm_api_key);
     const llmVisionConfigured = Boolean(state.settings.llm_vision_api_url && state.settings.llm_vision_model && state.settings.llm_vision_api_key);

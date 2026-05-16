@@ -194,6 +194,22 @@ describe("admin users", () => {
     expect(loginResult.body.user.role_code).toBe("member");
   });
 
+  it("exposes the default workspace in bootstrap", async () => {
+    process.env.APP_PASSWORD_ACCOUNTS = "collins:0719";
+    dbModule.ensureWorkspace({ name: "Collins' workplace", slug: "collins-workplace", type: "small_team" });
+    dbModule.addWorkspaceMember("ws-collins-workplace", "password-collins", { role: "member", isDefault: true });
+
+    const loginResult = await login("collins", "0719");
+    const bootstrapResponse = await fetch(`${baseUrl}/api/bootstrap`, {
+      headers: { Cookie: loginResult.cookie },
+    });
+    const body = await bootstrapResponse.json();
+
+    expect(bootstrapResponse.status).toBe(200);
+    expect(body.workspace).toMatchObject({ slug: "collins-workplace", name: "Collins' workplace" });
+    expect(body.workspaces).toHaveLength(1);
+  });
+
   it("keeps password users unassigned until admin assigns a workspace", async () => {
     process.env.LOOM_OWNER_EMAIL = process.env.APP_USERNAME;
     dbModule.migrate();
