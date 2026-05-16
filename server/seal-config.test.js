@@ -40,8 +40,12 @@ describe("seal config", () => {
       { slug: "company", name: "Company Workspace", type: "company" },
       { slug: "collins-workplace", name: "Collins' workplace", type: "small_team" },
     ], null, 2));
+    writeFileSync(join(dir, "users.json"), JSON.stringify([
+      { username: "seal-user", name: "Seal User", role_code: "member" },
+    ], null, 2));
     writeFileSync(join(dir, "workspace-members.json"), JSON.stringify([
       { email: "collins@example.com", workspace_slug: "collins-workplace", role: "admin" },
+      { user_id: "password-seal-user", workspace_slug: "collins-workplace", role: "member" },
     ], null, 2));
     writeFileSync(join(dir, "news-sources.json"), JSON.stringify([
       {
@@ -68,10 +72,12 @@ describe("seal config", () => {
     expect(result).toMatchObject({
       configured: true,
       workspaces: 2,
-      workspaceMembers: 1,
+      users: 1,
+      workspaceMembers: 2,
       newsSources: 1,
     });
     expect(source?.name).toBe("Private Test Feed");
     expect(member).toMatchObject({ slug: "collins-workplace", role: "admin" });
+    expect(repo.findUserById("password-seal-user")?.name).toBe("Seal User");
   });
 });

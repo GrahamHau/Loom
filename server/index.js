@@ -17,6 +17,7 @@ import {
   createOauthState,
   exchangeFeishuCode,
   fetchFeishuUserInfo,
+  findPasswordAuthAccount,
   getFeishuOauthConfig,
   getPasswordAuthConfig,
   isFeishuUserAllowed,
@@ -77,6 +78,7 @@ import {
   updateSettings,
   removeFieldOption,
   visibleNewsItems,
+  removeSourceFromFeedGroup,
 } from "./repository.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

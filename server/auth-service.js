@@ -10,11 +10,57 @@ function splitEnvList(value) {
     .filter(Boolean);
 }
 
+function normalizeUsername(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 export function getPasswordAuthConfig() {
   return {
     username: process.env.APP_USERNAME || "visitor",
     password: process.env.APP_PASSWORD || "password",
   };
+}
+
+export function parsePasswordAccountList(value = "") {
+  const accounts = [];
+  for (const rawEntry of splitEnvList(value)) {
+    const parts = rawEntry.split(":");
+    const username = String(parts.shift() || "").trim();
+    const password = parts.join(":");
+    if (!username || !password) continue;
+    accounts.push({
+      username,
+      normalizedUsername: normalizeUsername(username),
+      password,
+    });
+  }
+  return accounts;
+}
+
+export function getPasswordAuthAccounts() {
+  const primary = getPasswordAuthConfig();
+  const accounts = [
+    {
+      username: primary.username,
+      normalizedUsername: normalizeUsername(primary.username),
+      password: primary.password,
+    },
+    ...parsePasswordAccountList(process.env.APP_PASSWORD_ACCOUNTS),
+  ];
+  const deduped = new Map();
+  for (const account of accounts) {
+    if (!account.normalizedUsername) continue;
+    deduped.set(account.normalizedUsername, account);
+  }
+  return [...deduped.values()];
+}
+
+export function findPasswordAuthAccount(username, password) {
+  const normalizedUsername = normalizeUsername(username);
+  return getPasswordAuthAccounts().find((account) =>
+    account.normalizedUsername === normalizedUsername &&
+    account.password === String(password || "")
+  ) || null;
 }
 
 export function validateAuthConfig() {

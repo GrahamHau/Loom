@@ -4,6 +4,7 @@ process.env.NODE_ENV = "test";
 process.env.DATABASE_PATH = ":memory:";
 process.env.APP_USERNAME = "tester@example.com";
 process.env.APP_PASSWORD = "secret123";
+process.env.APP_PASSWORD_ACCOUNTS = "";
 process.env.LOOM_OWNER_EMAIL = "";
 
 const dbModule = await import("./db.js");
@@ -19,6 +20,7 @@ function extractCookie(headers) {
 
 beforeEach(async () => {
   process.env.LOOM_OWNER_EMAIL = "";
+  process.env.APP_PASSWORD_ACCOUNTS = "";
   dbModule.migrate();
   dbModule.db.prepare("DELETE FROM news_items").run();
   dbModule.db.prepare("DELETE FROM news_sources").run();
@@ -180,6 +182,16 @@ describe("admin users", () => {
     });
 
     expect(response.status).toBe(409);
+  });
+
+  it("allows secondary password accounts from private config", async () => {
+    process.env.APP_PASSWORD_ACCOUNTS = "collins:0719";
+
+    const loginResult = await login("collins", "0719");
+
+    expect(loginResult.response.status).toBe(200);
+    expect(loginResult.body.user.name).toBe("collins");
+    expect(loginResult.body.user.role_code).toBe("member");
   });
 
   it("keeps password users unassigned until admin assigns a workspace", async () => {

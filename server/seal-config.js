@@ -9,6 +9,7 @@ import {
   createNewsSource,
   findUserByEmail,
   findUserById,
+  ensureLocalUser,
   updateNewsSource,
 } from "./repository.js";
 
@@ -25,6 +26,14 @@ function sealConfigDir(inputDir = "") {
 function cleanText(value, fallback = "") {
   const text = String(value ?? "").trim();
   return text || fallback;
+}
+
+function passwordUserId(username) {
+  const safe = cleanText(username)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return safe ? `password-${safe}` : "";
 }
 
 function findUser(ref = {}) {
@@ -44,6 +53,26 @@ function applyWorkspaces(entries = []) {
   for (const entry of entries) {
     const workspace = ensureWorkspace(entry);
     if (workspace) applied.push(workspace);
+  }
+  return applied;
+}
+
+function applyUsers(entries = []) {
+  const applied = [];
+  for (const entry of entries) {
+    const username = cleanText(entry.username || entry.email || entry.id);
+    if (!username) continue;
+    const user = ensureLocalUser({
+      id: entry.id || passwordUserId(username) || undefined,
+      email: entry.email || (username.includes("@") ? username : ""),
+      name: entry.name || username,
+      initials: entry.initials || username.slice(0, 2).toUpperCase(),
+      role: entry.role || "成员",
+      role_code: entry.role_code || "member",
+      status: entry.status || "active",
+      auth_provider: entry.auth_provider || "password",
+    });
+    if (user) applied.push(user);
   }
   return applied;
 }
@@ -111,6 +140,7 @@ export function loadSealConfig(inputDir = "") {
   return {
     dir,
     workspaces: readJsonFile(path.join(dir, "workspaces.json"), []),
+    users: readJsonFile(path.join(dir, "users.json"), []),
     workspaceMembers: readJsonFile(path.join(dir, "workspace-members.json"), []),
     newsSources: readJsonFile(path.join(dir, "news-sources.json"), []),
   };
@@ -122,6 +152,7 @@ export function applySealConfig(inputDir = "") {
     return {
       configured: false,
       workspaces: 0,
+      users: 0,
       workspaceMembers: 0,
       skippedMembers: [],
       newsSources: 0,
@@ -129,12 +160,14 @@ export function applySealConfig(inputDir = "") {
     };
   }
   const workspaces = applyWorkspaces(config.workspaces);
+  const users = applyUsers(config.users);
   const members = applyWorkspaceMembers(config.workspaceMembers);
   const newsSources = applyNewsSources(config.newsSources);
   return {
     configured: true,
     dir: config.dir,
     workspaces: workspaces.length,
+    users: users.length,
     workspaceMembers: members.applied.length,
     skippedMembers: members.skipped,
     newsSources: newsSources.applied.length,
