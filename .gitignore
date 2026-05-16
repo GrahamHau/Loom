@@ -29,5 +29,10 @@ claude-design-pack/
 README_LOCAL.md
 
 deploy/
-docs/
+docs/*
+!docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/specs/
+docs/superpowers/specs/*
+!docs/superpowers/specs/*.md
 landing/public/downloads/*.zip
