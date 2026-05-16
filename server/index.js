@@ -291,8 +291,8 @@ function passwordUserId(username) {
   return safe ? `password-${safe}` : `password-user`;
 }
 
-function ensurePasswordUser() {
-  const { username } = getPasswordAuthConfig();
+function ensurePasswordUser(account = getPasswordAuthConfig()) {
+  const { username } = account;
   const normalizedEmail = String(username || "").trim().toLowerCase();
   const ownerEmail = String(process.env.LOOM_OWNER_EMAIL || "").trim().toLowerCase();
   const existing = normalizedEmail ? findUserByEmail(normalizedEmail) : null;
@@ -309,8 +309,8 @@ function ensurePasswordUser() {
   });
 }
 
-function signInPasswordUser(req, res) {
-  const user = ensurePasswordUser();
+function signInPasswordUser(req, res, account) {
+  const user = ensurePasswordUser(account);
   if (accountDisabledResponse(user, res)) return;
   const token = apiToken();
   revokeUserApiTokens(user.id);
@@ -421,11 +421,11 @@ app.get("/api/auth/providers", (_req, res) => {
 });
 
 app.post("/api/auth/login", (req, res) => {
-  const { username, password } = getPasswordAuthConfig();
-  if (req.body?.username !== username || req.body?.password !== password) {
+  const account = findPasswordAuthAccount(req.body?.username, req.body?.password);
+  if (!account) {
     return res.status(401).json({ error: "用户名或密码不正确" });
   }
-  signInPasswordUser(req, res);
+  signInPasswordUser(req, res, account);
 });
 
 app.post("/api/auth/visitor", (req, res) => {
