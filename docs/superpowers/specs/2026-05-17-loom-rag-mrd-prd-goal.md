@@ -32,6 +32,7 @@ Project / Document / Knowledge 统一模型
 - 产品类型不写死，使用公司可配置模板。
 - 飞书 Bot 是接口，不是对话大脑；不默认接 Hermes。
 - 飞书 Base 是协作镜像，不是主库。
+- 模型使用分层路由：便宜快模型做抽取/标准化/普通草稿，强模型做关键判断和审校，权限必须由代码控制。
 - 如果旧字段兼容代码被触碰，顺手收敛，但不要做破坏性大迁移。
 
 ## 旧字段兼容清理规则
@@ -203,6 +204,7 @@ server/knowledge-query-service.test.js
 - SQLite FTS5 检索。
 - 简单 rerank。
 - 调用现有 `callLLM`，只传 filtered chunks。
+- 增加模型路由：普通问答优先 fast model；高风险场景升级 strong model；没有 strong model 时标记 needs_review，不假装已审校。
 - 返回 answer / citations / confidence / gaps / mode。
 - 无资料或权限不足时 refused + KnowledgeGap。
 - 写 `knowledge_query_logs`。
@@ -239,6 +241,7 @@ server/document-generation-service.test.js
 - PRD 从 product type template + pack 生成硬件 PRD sections。
 - PRD 禁止 MVP/backlog/sprint 语言。
 - 包装需求作为可配置模块。
+- 模型路由：非关键章节可用 fast model；机会判断、风险判断、结构/工艺/认证/测试/供应商交付建议使用 strong model 或进入 needs_review。
 - 每节必须有 source_refs 或 open_questions。
 - publish 后重新 index。
 
@@ -274,6 +277,7 @@ server/feishu-base-sync-service.js
 - 更新 document / section access policy。
 - section policy 继承到 chunk。
 - 内部版 / 供应商版 / 销售版导出过滤。
+- 导出权限由代码规则决定，不能让模型决定哪些内容可供应商/销售可见。
 - Feishu Docs export P0 先生成 markdown/html payload，可后接真实 API。
 - KnowledgeGap 同步 Base P0 先封装 service 接口，可后接真实 API。
 
@@ -392,6 +396,43 @@ PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build
 
 如果 lint/typecheck 因无关旧代码失败，记录失败点，不要扩大修复范围。
 
+## 模型路由规则
+
+配置目标：
+
+```text
+llm_fast_model
+llm_strong_model
+llm_judge_model
+llm_vision_model
+llm_routing_policy_json
+```
+
+可用 fast model：
+
+- 飞书文档章节识别。
+- raw blocks 标准化。
+- chunk 摘要和标签。
+- 普通 RAG 问答。
+- MRD/PRD 非关键草稿。
+- KnowledgeGap 归类。
+
+必须 strong model 或 needs_review：
+
+- MRD 机会判断、风险判断、建议方向。
+- PRD 功能属性、结构、工艺、认证、测试、供应商交付。
+- 供应商版导出前审校。
+- 飞书群聊和销售/供应商场景的高风险回答。
+- source_refs 不足、confidence 低、来源冲突。
+
+必须代码处理，不能交给模型：
+
+- 权限过滤。
+- RAG/Bot 是否可引用。
+- 供应商版/销售版导出范围。
+- 是否下载图片。
+- 是否写入/删除主数据。
+
 ## 自动推进规则
 
 - 每完成一个 milestone，运行对应测试。
@@ -401,4 +442,3 @@ PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build
 - 如果遇到字段兼容问题，按“旧字段兼容清理规则”局部修复。
 - 不删除生产数据，不清空 `data/`，不重置 git。
 - 不提交 `.env`、数据库、uploads、生产数据。
-

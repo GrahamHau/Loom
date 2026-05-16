@@ -968,7 +968,101 @@ documents.exported_at
 documents.export_version
 ```
 
-## 11. API 总表
+## 11. 模型分层路由
+
+Loom 不应使用一个模型处理所有任务。第一阶段要预留模型分层配置：
+
+```text
+fast_model：便宜、快，用于抽取、分类、标准化、普通问答和草稿。
+strong_model：更强，用于复杂判断、硬件 PRD/MRD 关键章节、最终审校。
+vision_model：后续用于 OCR、图片、结构图、包装图理解；P0 不启用。
+judge_model：用于评测、质检、答案一致性检查；可与 strong_model 相同。
+```
+
+### 11.1 可使用快模型的任务
+
+这些任务可以用 DeepSeek V4 Flash 或同类便宜快模型：
+
+- 飞书文档导入后的章节识别。
+- 文本和表格标准化。
+- raw blocks 映射到 document template。
+- Knowledge chunk 摘要。
+- 标签和关键词提取。
+- 普通 RAG 问答初稿。
+- MRD/PRD 草稿的非关键章节初稿。
+- KnowledgeGap 初步归类。
+
+快模型适合作为“工人模型”，负责把大量材料整理成结构化草稿。
+
+### 11.2 应升级强模型的任务
+
+这些任务应使用 strong_model，或至少由 strong_model 二次审校：
+
+- MRD 的机会判断、风险判断、建议方向。
+- PRD 的功能属性、结构要求、工艺材料、认证、测试、供应商交付建议。
+- 供应商可见版本生成前的内容审校。
+- 销售或飞书群聊中高风险问题回答。
+- 低 confidence、source_refs 不足、来源冲突的问题。
+- 涉及成本、认证、安全、法规、专利、供应链承诺的问题。
+
+强模型也不能替代 PM 发布。发布仍需人工确认。
+
+### 11.3 绝不能交给模型判断的任务
+
+这些必须由代码规则控制：
+
+- 用户/团队/角色权限。
+- `rag_enabled`、`bot_enabled` 过滤。
+- `supplier_visible`、`sales_visible` 导出范围。
+- 是否允许飞书 Bot 引用某个 chunk。
+- 是否下载图片或附件。
+- 是否写入/删除主数据。
+
+模型可以解释内容，但不能决定权限。
+
+### 11.4 路由策略
+
+默认策略：
+
+```text
+1. fast_model 先处理抽取、标准化、普通回答。
+2. 如果命中高风险场景，升级 strong_model。
+3. 如果 strong_model 仍然缺少证据，必须 refused 或生成 KnowledgeGap。
+4. 发布 MRD/PRD 前必须人工确认。
+5. P0 不启用 vision_model，因为不下载图片、不做 OCR。
+```
+
+高风险触发条件：
+
+```text
+confidence < 0.7
+source_refs 为空
+多个来源冲突
+audience = supplier 或 sales_external
+channel = feishu_group
+section 包含 certification / testing / electronics / cost / risk / supplier_delivery
+```
+
+### 11.5 配置形态
+
+第一阶段可先放入 settings：
+
+```text
+llm_fast_model
+llm_strong_model
+llm_judge_model
+llm_vision_model
+llm_routing_policy_json
+```
+
+如果没有配置 strong_model：
+
+```text
+普通草稿可继续生成。
+高风险任务必须降级为 needs_review，不应假装强模型审校完成。
+```
+
+## 12. API 总表
 
 ### 项目和文档
 
@@ -1031,7 +1125,7 @@ POST /api/knowledge/gaps/:id/sync-feishu
 POST /api/documents/:id/sync-review-base
 ```
 
-## 12. 文件边界
+## 13. 文件边界
 
 建议新增：
 
@@ -1061,7 +1155,7 @@ src/legacy/documents/
 src/legacy/projects/
 ```
 
-## 13. 并行实施计划
+## 14. 并行实施计划
 
 ### 线 1：知识地基
 
@@ -1159,7 +1253,7 @@ src/legacy/projects/
 - Gap 同步 Base。
 - PRD/MRD 导出 Docs。
 
-## 14. 第一阶段 Demo 验收
+## 15. 第一阶段 Demo 验收
 
 用一个真实摄影配件项目：
 
@@ -1178,7 +1272,7 @@ src/legacy/projects/
 13. 飞书 Bot 问问题，权限过滤生效。
 14. 答不上来的问题进入 KnowledgeGap。
 
-## 15. 风险和防线
+## 16. 风险和防线
 
 ### 飞书文档读不到
 
@@ -1220,7 +1314,7 @@ src/legacy/projects/
 - 只保存图片占位和飞书原链接。
 - OCR / 图片解析后置。
 
-## 16. 后续扩展
+## 17. 后续扩展
 
 第二阶段可做：
 
@@ -1233,4 +1327,3 @@ src/legacy/projects/
 - knowledge_answers。
 - 更细团队权限。
 - PRD/MRD 飞书双向同步。
-
