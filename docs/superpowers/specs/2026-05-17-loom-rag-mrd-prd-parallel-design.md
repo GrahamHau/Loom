@@ -974,10 +974,11 @@ Loom 不应使用一个模型处理所有任务。第一阶段要预留模型分
 
 ```text
 fast_model：便宜、快，用于抽取、分类、标准化、普通问答和草稿。
-strong_model：更强，用于复杂判断、硬件 PRD/MRD 关键章节、最终审校。
+strong_model：更强，用于复杂判断、硬件 PRD/MRD 关键章节、最终审校和质检。
 vision_model：后续用于 OCR、图片、结构图、包装图理解；P0 不启用。
-judge_model：用于评测、质检、答案一致性检查；可与 strong_model 相同。
 ```
+
+P0 只配置 `fast_model` 和 `strong_model`。不要单独配置 `judge_model`，避免模型体系过早复杂化。后续如果问答量很大或需要更独立的质检链路，再把 judge model 拆出来。
 
 ### 11.1 可使用快模型的任务
 
@@ -1050,7 +1051,6 @@ section 包含 certification / testing / electronics / cost / risk / supplier_de
 ```text
 llm_fast_model
 llm_strong_model
-llm_judge_model
 llm_vision_model
 llm_routing_policy_json
 ```

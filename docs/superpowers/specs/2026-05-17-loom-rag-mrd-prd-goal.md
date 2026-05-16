@@ -403,10 +403,11 @@ PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build
 ```text
 llm_fast_model
 llm_strong_model
-llm_judge_model
 llm_vision_model
 llm_routing_policy_json
 ```
+
+P0 不单独配置 `judge_model`。`strong_model` 同时承担复杂生成、审校和质检。后续如果量大或需要独立质检，再拆出 judge model。
 
 可用 fast model：
 
