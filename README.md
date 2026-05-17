@@ -1,12 +1,12 @@
-# Loom
+# LOOM
 
-Loom is a personal intelligence workspace for turning web pages, social posts, product research, RSS feeds, and loose notes into structured context you can search, compare, and reuse.
+LOOM is a personal intelligence workspace for turning web pages, social posts, product research, RSS feeds, and loose notes into structured context you can search, compare, and reuse.
 
-It is built for product research, competitive tracking, market sensing, and long-running creative work. Instead of saving more links, Loom helps you capture source material into a consistent schema of fields, tags, summaries, entities, and research threads.
+It is built for product research, competitive tracking, market sensing, and long-running creative work. Instead of saving more links, LOOM helps you capture source material into a consistent schema of fields, tags, summaries, entities, and research threads.
 
 This public repository is the application mechanism only. It intentionally ships with no private workspaces, source lists, production data, customer data, or default business-domain seed content. Private workspace configuration should live in a separate seal repository and be applied through `LOOM_SEAL_CONFIG_DIR`.
 
-## What Loom Does
+## What LOOM Does
 
 - Capture product pages and social posts with a Chrome extension side panel.
 - Store competitor products with brand, category, platform, price, media, notes, and custom tag fields.
@@ -159,7 +159,9 @@ To load it locally:
 2. Enable Developer mode.
 3. Click Load unpacked.
 4. Select the `loom-extension` directory.
-5. Open the extension options page and configure the Loom API base URL.
+5. Open the extension options page and configure the LOOM API base URL.
+
+For extension E2E debugging, prefer Codex's native Chrome plugin and backend logs. Use `npm run listen:loom` only as an explicit fallback because raw Chrome remote debugging can trigger Chrome's permission dialog.
 
 The downloadable extension bundle used by the landing page is stored at:
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 
 const DEFAULT_REMOTE = "tencent-sg-2222";
@@ -150,16 +153,17 @@ function printSnapshot(data) {
 
 async function pollChromeDebugEvents() {
   try {
-    const targets = await fetchJson(`${cdpUrl.replace(/\/$/, "")}/json/list`);
-    const target = findExtensionTarget(targets);
-    if (!target?.webSocketDebuggerUrl) {
+    const target = await findChromeExtensionTarget();
+    if (!target?.webSocketDebuggerUrl && !target?.targetId) {
       if (!chromeWarned) {
-        console.log("[chrome] 未找到 Loom 插件调试目标。请打开插件 sidepanel，或用 --remote-debugging-port=9222 启动 Chrome。");
+        console.log("[chrome] 未找到 LOOM 插件调试目标。请打开插件 sidepanel，或用 --remote-debugging-port=9222 启动 Chrome。");
         chromeWarned = true;
       }
       return;
     }
-    const events = await readExtensionEvents(target.webSocketDebuggerUrl);
+    const events = target.webSocketDebuggerUrl
+      ? await readExtensionEvents(target.webSocketDebuggerUrl)
+      : await readExtensionEventsViaBrowserTarget(target);
     chromeWarned = false;
     printNewDebugEvents(events);
   } catch (error) {
@@ -169,6 +173,56 @@ async function pollChromeDebugEvents() {
       chromeWarned = true;
     }
   }
+}
+
+async function findChromeExtensionTarget() {
+  try {
+    const targets = await fetchJson(`${cdpUrl.replace(/\/$/, "")}/json/list`);
+    return findExtensionTarget(targets);
+  } catch (error) {
+    if (!/HTTP 404|fetch failed|ECONNREFUSED/i.test(error.message || "")) throw error;
+    const browser = await connectChromeBrowserTarget();
+    try {
+      const response = await browser.client.send("Target.getTargets");
+      const target = findExtensionTarget(response.targetInfos || []);
+      return target ? { ...target, browserClient: browser.client } : null;
+    } catch (innerError) {
+      browser.client.close();
+      throw innerError;
+    }
+  }
+}
+
+async function connectChromeBrowserTarget() {
+  const configured = cdpUrl.replace(/\/$/, "");
+  try {
+    const version = await fetchJson(`${configured}/json/version`);
+    if (version.webSocketDebuggerUrl) {
+      return { client: await CdpClient.connect(version.webSocketDebuggerUrl) };
+    }
+  } catch {
+    // Chrome 144+ may expose only DevToolsActivePort for the selected profile.
+  }
+  const wsUrl = readDevToolsActivePortWsUrl();
+  if (!wsUrl) throw new Error("DevToolsActivePort not found");
+  return { client: await CdpClient.connect(wsUrl) };
+}
+
+function readDevToolsActivePortWsUrl() {
+  const candidates = [
+    path.join(os.homedir(), "Library/Application Support/Google/Chrome/DevToolsActivePort"),
+    path.join(os.homedir(), "Library/Application Support/Google/Chrome/Profile 1/DevToolsActivePort"),
+    path.join(os.homedir(), "Library/Application Support/Google/Chrome/Default/DevToolsActivePort"),
+  ];
+  for (const file of candidates) {
+    try {
+      const [port, browserPath] = fs.readFileSync(file, "utf8").trim().split(/\r?\n/);
+      if (port && browserPath) return `ws://127.0.0.1:${port}${browserPath}`;
+    } catch {
+      // Try the next profile.
+    }
+  }
+  return "";
 }
 
 function findExtensionTarget(targets) {
@@ -193,6 +247,28 @@ async function readExtensionEvents(webSocketDebuggerUrl) {
     });
     return response.result?.value || [];
   } finally {
+    client.close();
+  }
+}
+
+async function readExtensionEventsViaBrowserTarget(target) {
+  const client = target.browserClient;
+  if (!client) return [];
+  let sessionId = "";
+  try {
+    const attached = await client.send("Target.attachToTarget", { targetId: target.targetId, flatten: true });
+    sessionId = attached.sessionId || "";
+    const expression = `new Promise((resolve) => chrome.storage.local.get({ loom_debug_events: [] }, (result) => resolve(result.loom_debug_events || [])))`;
+    const response = await client.send("Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+    }, sessionId);
+    return response.result?.value || [];
+  } finally {
+    if (sessionId) {
+      await client.send("Target.detachFromTarget", { sessionId }).catch(() => {});
+    }
     client.close();
   }
 }
@@ -256,10 +332,11 @@ class CdpClient {
     ws.addEventListener("message", (event) => this.handleMessage(event));
   }
 
-  send(method, params = {}) {
+  send(method, params = {}, sessionId = "") {
     const id = this.nextId;
     this.nextId += 1;
     const payload = { id, method, params };
+    if (sessionId) payload.sessionId = sessionId;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.ws.send(JSON.stringify(payload));
