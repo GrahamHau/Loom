@@ -6,6 +6,7 @@ process.env.APP_USERNAME = "tester@example.com";
 process.env.APP_PASSWORD = "secret123";
 process.env.APP_PASSWORD_ACCOUNTS = "";
 process.env.LOOM_OWNER_EMAIL = "";
+process.env.REMOTE_MEDIA_CACHE_TIMEOUT_MS = "1000";
 
 const dbModule = await import("./db.js");
 const repo = await import("./repository.js");
@@ -146,6 +147,52 @@ describe("document imports", () => {
     const readBody = await readResponse.json();
     expect(readResponse.status).toBe(200);
     expect(readBody.document.id).toBe(body.document.id);
+  });
+});
+
+describe("media cache", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers) };
+  }
+
+  it("caches remote demand cover images during creation", async () => {
+    const { cookie } = await login();
+    const imageResponse = new Response(new Uint8Array([1, 2, 3, 4]), {
+      status: 200,
+      headers: { "Content-Type": "image/jpeg" },
+    });
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options) => {
+      if (String(url).startsWith("https://img.test/")) return imageResponse.clone();
+      return originalFetch(url, options);
+    };
+    try {
+      const response = await fetch(`${baseUrl}/api/demands`, {
+        method: "POST",
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "小红书图片需求",
+          source: "xiaohongshu",
+          thumbnail_url: "https://img.test/xhs-cover.jpg",
+        }),
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(201);
+      expect(body.thumbnail_url).toMatch(/^\/uploads\/remote-media\/.+\.jpg$/);
+      expect(body.image).toBe(body.thumbnail_url);
+      expect(body.original_image_url).toBe("https://img.test/xhs-cover.jpg");
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 });
 

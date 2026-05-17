@@ -43,6 +43,7 @@ import {
 } from "./feishu-doc-export-service.js";
 import { syncDocumentReviewToFeishuBase, syncKnowledgeGapToFeishu } from "./feishu-base-sync-service.js";
 import { handleFeishuBotQuestion } from "./feishu-bot-service.js";
+import { withCachedImageFields } from "./media-cache-service.js";
 import { indexKnowledgeRecord } from "./knowledge-indexer.js";
 import { generateProjectKnowledgePack, generateResearchKnowledgePack } from "./knowledge-pack-service.js";
 import { evaluateKnowledgeRegression, listKnowledgeQueryLogs, queryKnowledge } from "./knowledge-query-service.js";
@@ -149,6 +150,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
+const uploadsDir = process.env.UPLOADS_DIR || path.join(projectRoot, "uploads");
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const SQLiteStore = SQLiteStoreFactory(session);
@@ -1059,7 +1061,10 @@ app.post("/api/bot/feishu/events", requireAuth, asyncHandler(async (req, res) =>
 }));
 
 app.get("/api/products", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).products));
-app.post("/api/products", requireAuth, (req, res) => res.status(201).json(createProduct(currentUserId(req), req.body || {})));
+app.post("/api/products", requireAuth, asyncHandler(async (req, res) => {
+  const payload = await withCachedImageFields(req.body || {});
+  res.status(201).json(createProduct(currentUserId(req), payload));
+}));
 app.get("/api/products/find-similar", requireAuth, (req, res) => {
   const name = String(req.query.name || "").trim().toLowerCase();
   const brand = String(req.query.brand || "").trim().toLowerCase();
@@ -1107,7 +1112,10 @@ app.post("/api/products/parse-raw", requireAuth, asyncHandler(async (req, res) =
 }));
 
 app.get("/api/demands", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).demands));
-app.post("/api/demands", requireAuth, (req, res) => res.status(201).json(createDemand(currentUserId(req), req.body || {})));
+app.post("/api/demands", requireAuth, asyncHandler(async (req, res) => {
+  const payload = await withCachedImageFields(req.body || {});
+  res.status(201).json(createDemand(currentUserId(req), payload));
+}));
 app.patch("/api/demands/:id", requireAuth, (req, res) => {
   const item = updateDemand(currentUserId(req), req.params.id, req.body || {});
   if (!item) return res.status(404).json({ error: "demand_not_found" });
@@ -1520,6 +1528,7 @@ if (process.env.NODE_ENV === "production") {
   });
 
   app.use("/app/assets", express.static(path.join(appDistDir, "assets"), immutableStaticOptions));
+  app.use("/uploads", express.static(uploadsDir, immutableStaticOptions));
   app.get("/app", (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
   app.get("/app/", (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
   app.use("/app", express.static(appDistDir, noCacheHtmlOptions));

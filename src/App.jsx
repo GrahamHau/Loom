@@ -476,9 +476,31 @@ function DocumentModal({ mode, defaultDocType = "prd", onClose, onDone }) {
   );
 }
 
-function LibraryScreen({ onNavigate, onOpenDocumentModal }) {
+function LibraryScreen({ data, api, reloadKey = 0, onNavigate, onOpenDocumentModal }) {
   const [activeTab, setActiveTab] = useState("all");
+  const [documents, setDocuments] = useState([]);
+  const [status, setStatus] = useState("idle");
+  const [message, setMessage] = useState("");
   const current = LIBRARY_TABS.find((tab) => tab.key === activeTab) || LIBRARY_TABS[0];
+  const workspaceId = data?.workspace?.id || "";
+  const visibleDocuments = documents.filter((document) => activeTab === "all" || document.doc_type === activeTab);
+  const loadDocuments = async () => {
+    if (!api || !workspaceId) return;
+    setStatus("loading");
+    setMessage("");
+    try {
+      const query = new URLSearchParams({ workspace_id: workspaceId });
+      const result = await api(`/api/documents?${query.toString()}`);
+      setDocuments(Array.isArray(result) ? result : []);
+      setStatus("ready");
+    } catch (error) {
+      setStatus("error");
+      setMessage(error.message || "资料加载失败");
+    }
+  };
+  useEffect(() => {
+    loadDocuments();
+  }, [workspaceId, reloadKey]);
 
   return (
     <div className="viewport">
@@ -487,11 +509,12 @@ function LibraryScreen({ onNavigate, onOpenDocumentModal }) {
           <div className="screen-header-left">
             <div className="screen-icon-box"><Icon name="file-text" size={20} /></div>
             <div>
-              <h1 className="h1" style={{ marginBottom: 2 }}>Library</h1>
+              <h1 className="h1" style={{ marginBottom: 2 }}>资料库</h1>
               <div className="muted text-sm">导入飞书文档、PRD / MRD 文本，自动标准化入库</div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            <Btn size="sm" variant="ghost" icon="sync" onClick={loadDocuments} disabled={status === "loading"}>刷新</Btn>
             <Btn size="sm" variant="ghost" icon="upload" onClick={() => onNavigate("library-import")}>导入文档</Btn>
             <Btn size="sm" variant="primary" icon="plus" onClick={() => onOpenDocumentModal("create")}>新建资料</Btn>
           </div>
@@ -510,9 +533,52 @@ function LibraryScreen({ onNavigate, onOpenDocumentModal }) {
             </button>
           ))}
         </div>
+        {message ? <div className="library-doc-message error" style={{ marginBottom: 12 }}>{message}</div> : null}
+        {visibleDocuments.length ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {visibleDocuments.map((document) => {
+              const sections = Array.isArray(document.content?.normalized_sections) ? document.content.normalized_sections : [];
+              return (
+                <article
+                  key={document.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "36px 1fr",
+                    gap: 12,
+                    alignItems: "center",
+                    padding: 12,
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-lg)",
+                    background: "color-mix(in srgb, var(--surface) 88%, transparent)",
+                  }}
+                >
+                  <div style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 12,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "var(--surface-2)",
+                    color: "var(--accent)",
+                  }}><Icon name={document.doc_type === "mrd" ? "bar-chart" : document.doc_type === "prd" ? "clipboard" : "file-text"} size={16} /></div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 650, color: "var(--text)" }}>{document.title}</div>
+                    <div style={{ marginTop: 7, display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center", fontSize: 11.5, color: "var(--text-3)" }}>
+                      <Tag tone="outline">{String(document.doc_type || "other").toUpperCase()}</Tag>
+                      <span>{document.status || "draft"}</span>
+                      <span>{sections.length} 个章节</span>
+                      {document.source_uri ? <span>飞书导入</span> : null}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
         <div className="screen-empty-hero">
           <Icon name="file-text" size={32} style={{ color: "var(--accent)", marginBottom: 12 }} />
-          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>{current.title}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>{status === "loading" ? "正在加载资料..." : current.title}</div>
           <div style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.7, maxWidth: 390, margin: "0 auto 20px" }}>
             {current.desc}
           </div>
@@ -534,6 +600,7 @@ function LibraryScreen({ onNavigate, onOpenDocumentModal }) {
             </button>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
@@ -853,6 +920,7 @@ function App() {
   const [demoIntroOpen, setDemoIntroOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [documentModalMode, setDocumentModalMode] = useState("");
+  const [libraryReloadKey, setLibraryReloadKey] = useState(0);
   const [t, setTweak] = useTweaks({ theme: "halo", mode: "light", showLogin: false });
   const prevSampleWorkspaceRef = useRef(false);
   const prevUserIdRef = useRef("");
@@ -1068,7 +1136,7 @@ function App() {
     products: <ProductsScreen {...screenProps} detailCollapsed={detailCollapsed} setDetailCollapsed={setDetailCollapsed} />,
     demands: <DemandsScreen {...screenProps} />,
     research: <ResearchScreen {...screenProps} />,
-    library: <LibraryScreen onNavigate={setActive} onOpenDocumentModal={setDocumentModalMode} />,
+    library: <LibraryScreen {...screenProps} reloadKey={libraryReloadKey} onNavigate={setActive} onOpenDocumentModal={setDocumentModalMode} />,
     "library-import": <LibraryImportScreen onOpenDocumentModal={setDocumentModalMode} />,
     ask: (
       <div className="viewport">
@@ -1310,6 +1378,7 @@ function App() {
           onClose={() => setDocumentModalMode("")}
           onDone={async () => {
             await loadBootstrap({ background: true });
+            setLibraryReloadKey((value) => value + 1);
             setActive("library");
           }}
         />
