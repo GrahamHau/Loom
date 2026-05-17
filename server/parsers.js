@@ -3,7 +3,8 @@ import { callLLM, callRoutedLLM } from "./ai-service.js";
 import { fetchPageContent } from "./content-fetcher.js";
 import { buildSearchContext } from "./search-service.js";
 import { rawState } from "./repository.js";
-import { fieldOptionsText } from "./field-config.js";
+import { fieldOptionsText, normalizeFields } from "./field-config.js";
+import { normalizeTagValues } from "./field-matcher.js";
 
 function compactArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String).slice(0, 8);
@@ -34,6 +35,79 @@ function fields(userId) {
 
 function fieldListText(userId, key) {
   return fieldOptionsText(fields(userId), key);
+}
+
+function accountFields(userId, entity) {
+  const settings = rawState(userId)?.settings || {};
+  return normalizeFields(settings.fields, settings.tag_groups, { includeDefaults: false })
+    .filter((field) => field.entities.includes(entity));
+}
+
+function fieldLibraryPrompt(userId, entity) {
+  const list = accountFields(userId, entity);
+  if (!list.length) {
+    return "账号字段库为空。不要自动创建字段；tag_values 必须返回 {}。";
+  }
+  const schema = list.map((field) => ({
+    key: field.key,
+    name: field.name,
+    multi: field.multi !== false,
+    options: field.options || [],
+  }));
+  return `只允许写入以下账号字段库字段，禁止返回未列出的字段 key。字段有 options 时优先使用 options 中的值；没有匹配选项时可返回原始短标签。
+${JSON.stringify(schema)}`;
+}
+
+function legacyTagCandidates(entity, result = {}) {
+  if (entity === "competitor") {
+    return {
+      brand: result.brand,
+      host: result.host,
+      category: result.category,
+      custom_tags: result.tags || result.tags_custom,
+      标签: result.tags || result.tags_custom,
+    };
+  }
+  return {
+    scenarios: result.tags_scenario || result.scenarios,
+    使用场景: result.tags_scenario || result.scenarios,
+    painpoints: result.tags_painpoint || result.painpoints,
+    用户痛点: result.tags_painpoint || result.painpoints,
+    innovation: result.tags_innovation || result.innovation,
+    创新类型: result.tags_innovation || result.innovation,
+    custom_tags: result.tags_custom || result.tags,
+    标签: result.tags_custom || result.tags,
+  };
+}
+
+function fieldSuggestions(entity, result = {}, tagValues = {}) {
+  if (Object.keys(tagValues || {}).length) return [];
+  const suggestions = entity === "competitor"
+    ? [
+        [result.brand, "品牌"],
+        [result.host, "主机"],
+        [result.category, "品类"],
+        [result.tags || result.tags_custom, "标签"],
+      ]
+    : [
+        [result.tags_scenario || result.scenarios, "使用场景"],
+        [result.tags_painpoint || result.painpoints, "用户痛点"],
+        [result.tags_innovation || result.innovation, "创新类型"],
+        [result.tags_custom || result.tags, "标签"],
+      ];
+  return suggestions
+    .filter(([value]) => compactArray(value).length || (typeof value === "string" && value.trim()))
+    .map(([, label]) => label)
+    .slice(0, 3);
+}
+
+function accountTagValues(userId, entity, result) {
+  const list = accountFields(userId, entity);
+  if (!list.length) return {};
+  return normalizeTagValues({
+    ...legacyTagCandidates(entity, result),
+    ...(result?.tag_values || {}),
+  }, list, { includeDefaults: false });
 }
 
 export async function parseProductUrl(userId, { url, platform }) {
@@ -151,13 +225,16 @@ export async function parseProductRaw(userId, { platform, data }) {
   "monthly_sales": "月销估算",
   "selling_points": ["卖点"],
   "negative_keywords": ["差评词"],
-  "ai_summary": "50字以内中文竞品摘要"
+  "ai_summary": "50字以内中文竞品摘要",
+  "tag_values": { "字段key": ["字段值"] }
 }
 
 竞品品牌：${fieldListText(userId, "brand")}
 适配主机/设备型号：${fieldListText(userId, "host")}
 产品品类：${fieldListText(userId, "category")}
 字段语义：brand 只填竞品/厂商品牌；host 只填适配主机或设备型号；category 只填产品品类，三者不要互相混填。
+账号字段库：
+${fieldLibraryPrompt(userId, "competitor")}
 
 平台：${platform}
 URL：${source.url || ""}
@@ -170,6 +247,7 @@ URL：${source.url || ""}
 原始卖点/规格：${rawBullets.join("；")}`,
     maxTokens: 260,
   });
+  const tagValues = accountTagValues(userId, "competitor", result);
 
   return {
     ...source,
@@ -189,6 +267,8 @@ URL：${source.url || ""}
     review_count: safeNumber(result.review_count ?? source.review_count),
     monthly_sales: normalizeMonthlySales(result.monthly_sales || source.monthly_sales),
     thumbnail_url: source.thumbnail_url || result.image_url || "",
+    tag_values: tagValues,
+    field_suggestions: fieldSuggestions("competitor", result, tagValues),
     selling_points: compactArray(result.selling_points).length ? compactArray(result.selling_points) : rawBullets,
     negative_keywords: compactArray(result.negative_keywords),
     ai_summary: result.ai_summary || source.description || "",
@@ -241,13 +321,16 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets }) {
   "monthly_sales": "月销估算或空字符串",
   "selling_points": ["来自详情图或规格的核心卖点"],
   "negative_keywords": ["明确出现的差评词或限制"],
-  "ai_summary": "50字以内中文竞品摘要"
+  "ai_summary": "50字以内中文竞品摘要",
+  "tag_values": { "字段key": ["字段值"] }
 }
 
 竞品品牌：${fieldListText(userId, "brand")}
 适配主机/设备型号：${fieldListText(userId, "host")}
 产品品类：${fieldListText(userId, "category")}
 字段语义：brand 只填竞品/厂商品牌；host 只填适配主机或设备型号；category 只填产品品类，三者不要互相混填。
+账号字段库：
+${fieldLibraryPrompt(userId, "competitor")}
 
 平台：${platform}
 URL：${source.url || ""}
@@ -263,6 +346,7 @@ ${detailImages.map((url, index) => `${index + 1}. ${url}`).join("\n")}`,
     imageUrls: detailImages,
     maxTokens: 320,
   });
+  const tagValues = accountTagValues(userId, "competitor", result);
 
   return {
     ...source,
@@ -279,6 +363,8 @@ ${detailImages.map((url, index) => `${index + 1}. ${url}`).join("\n")}`,
     monthly_sales: normalizeMonthlySales(result.monthly_sales || source.monthly_sales),
     thumbnail_url: source.thumbnail_url || result.image_url || "",
     detail_images: detailImages,
+    tag_values: tagValues,
+    field_suggestions: fieldSuggestions("competitor", result, tagValues),
     selling_points: compactArray(result.selling_points),
     negative_keywords: compactArray(result.negative_keywords),
     ai_summary: result.ai_summary || source.description || "",
@@ -320,7 +406,6 @@ URL：${page.url}
 ${searchContext}`,
     maxTokens: 260,
   });
-
   return {
     source_url: page.url,
     url: page.url,
@@ -368,8 +453,12 @@ export async function parseDemandRaw(userId, { platform, data }) {
   "tags_painpoint": [],
   "tags_innovation": "单选值",
   "tags_category": [],
-  "tags_custom": []
+  "tags_custom": [],
+  "tag_values": { "字段key": ["字段值"] }
 }
+
+账号字段库：
+${fieldLibraryPrompt(userId, "inspiration")}
 
 平台：${platform}
 URL：${source.url || ""}
@@ -379,6 +468,7 @@ URL：${source.url || ""}
 内容：${source.content || source.description || ""}`,
     maxTokens: 240,
   });
+  const tagValues = accountTagValues(userId, "inspiration", result);
 
   return {
     ...source,
@@ -391,6 +481,8 @@ URL：${source.url || ""}
     tags_innovation: result.tags_innovation || "待分类",
     tags_category: compactArray(result.tags_category),
     tags_custom: compactArray(result.tags_custom),
+    tag_values: tagValues,
+    field_suggestions: fieldSuggestions("inspiration", result, tagValues),
     thumbnail_url: source.thumbnail_url || "",
     source: source.source || platform,
     source_platform: source.source_platform || platform,

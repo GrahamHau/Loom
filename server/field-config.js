@@ -144,7 +144,7 @@ export function legacyKeyForField(key) {
 }
 
 export function fieldsToTagGroups(fields = []) {
-  const normalized = normalizeFields(fields);
+  const normalized = normalizeFields(fields, [], { includeDefaults: false });
   return normalized.map((field) => ({
     key: field.legacyKey || legacyKeyForField(field.key),
     name: field.name,
@@ -160,21 +160,10 @@ export function fieldsToTagGroups(fields = []) {
 export function fieldsFromTagGroups(tagGroups = []) {
   const groups = normalizeTagGroups(tagGroups);
   const byKey = new Map(groups.map((group) => [group.key, group]));
-  const official = DEFAULT_FIELDS.map((field) => {
-    const group = byKey.get(field.legacyKey);
-    return {
-      ...field,
-      name: group?.name || field.name,
-      tone: normalizeTone(group?.tone, field.tone),
-      multi: group?.multi !== undefined ? group.multi !== false : field.multi,
-      entities: cleanEntities(group?.entities, field.entities),
-      options: cleanOptions(group?.tags?.length ? group.tags : field.options),
-    };
-  });
   const officialLegacyKeys = new Set(DEFAULT_FIELDS.map((field) => field.legacyKey));
-  const custom = Array.isArray(tagGroups)
+  return Array.isArray(tagGroups)
     ? tagGroups
-      .filter((group) => group && !officialLegacyKeys.has(group.key) && group.key !== "custom_tags")
+      .filter((group) => group && !officialLegacyKeys.has(group.key))
       .map((group) => ({
         key: normalizeFieldKey(group.field_key || group.key, `u_${nanoid(8)}`),
         legacyKey: normalizeFieldKey(group.key, `u_${nanoid(8)}`),
@@ -186,10 +175,10 @@ export function fieldsFromTagGroups(tagGroups = []) {
         options: cleanOptions(group.tags),
       }))
     : [];
-  return [...official, ...custom];
 }
 
-export function normalizeFields(fields = [], tagGroups = []) {
+export function normalizeFields(fields = [], tagGroups = [], options = {}) {
+  const includeDefaults = options.includeDefaults === true;
   const source = Array.isArray(fields) && fields.length ? fields : fieldsFromTagGroups(tagGroups);
   const defaultsByKey = new Map(DEFAULT_FIELDS.map((field) => [field.key, field]));
   const seen = new Set();
@@ -214,14 +203,17 @@ export function normalizeFields(fields = [], tagGroups = []) {
         : cleanOptions(sourceOptions),
     });
   }
-  for (const field of DEFAULT_FIELDS) {
-    if (!seen.has(field.key)) normalized.push({ ...field, options: cleanOptions(field.options) });
+  if (includeDefaults) {
+    for (const field of DEFAULT_FIELDS) {
+      if (!seen.has(field.key)) normalized.push({ ...field, options: cleanOptions(field.options) });
+    }
   }
   return normalized;
 }
 
 export function normalizeSettingsFields(settings = {}) {
-  const fields = normalizeFields(settings.fields, settings.tag_groups);
+  const fields = normalizeFields(Array.isArray(settings.fields) ? settings.fields : [], [], { includeDefaults: false })
+    .filter((field) => !field.official);
   return {
     ...settings,
     fields,
@@ -230,7 +222,7 @@ export function normalizeSettingsFields(settings = {}) {
 }
 
 export function fieldOptionsText(fields, key) {
-  const normalized = normalizeFields(fields);
+  const normalized = normalizeFields(fields, [], { includeDefaults: true });
   const field = normalized.find((item) => item.key === key || item.legacyKey === key);
   return JSON.stringify(field?.options || []);
 }

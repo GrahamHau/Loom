@@ -80,7 +80,7 @@ export default function AdminApp() {
   useEffect(() => {
     fetch("/api/me", { credentials: "same-origin" })
       .then(async (response) => {
-        if (!response.ok) throw new Error("请先登录 Loom");
+        if (!response.ok) throw new Error("请先登录 LOOM");
         const data = await response.json();
         const user = data.user || data;
         if (!user.is_admin) throw new Error("当前账号没有管理员权限");
@@ -146,9 +146,9 @@ export default function AdminApp() {
   if (error && !me) {
     return (
       <main className="admin-empty">
-        <h1>Loom Admin</h1>
+        <h1>LOOM Admin</h1>
         <p>{error}</p>
-        <a href="/app">返回 Loom</a>
+        <a href="/app">返回 LOOM</a>
       </main>
     );
   }
@@ -156,7 +156,7 @@ export default function AdminApp() {
   return (
     <main className="admin-shell">
       <aside className="admin-sidebar">
-        <a className="admin-brand" href="/app">Loom Admin</a>
+        <a className="admin-brand" href="/app">LOOM Admin</a>
         <button className={`admin-nav ${activeView === "dashboard" ? "active" : ""}`} type="button" onClick={() => setActiveView("dashboard")}>总览看板</button>
         <button className={`admin-nav ${activeView === "workspaces" ? "active" : ""}`} type="button" onClick={() => setActiveView("workspaces")}>工作区</button>
         <button className={`admin-nav ${activeView === "observability" ? "active" : ""}`} type="button" onClick={() => setActiveView("observability")}>AI 观测</button>

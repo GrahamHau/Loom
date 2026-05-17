@@ -103,8 +103,8 @@ function candidatesFor(option) {
   return [option, ...(OPTION_ALIASES[option] || [])];
 }
 
-export function matchFieldKey(rawKey, fields = []) {
-  const normalized = normalizeFields(fields);
+export function matchFieldKey(rawKey, fields = [], options = {}) {
+  const normalized = normalizeFields(fields, [], { includeDefaults: options.includeDefaults !== false });
   const query = compact(rawKey);
   if (!query) return null;
   let best = null;
@@ -159,11 +159,13 @@ export function matchFieldOptionInText(rawText, field = {}, options = {}) {
 }
 
 export function normalizeTagValues(tagValues = {}, fields = [], options = {}) {
-  const normalizedFields = normalizeFields(fields);
+  const normalizedFields = normalizeFields(fields, [], { includeDefaults: options.includeDefaults !== false });
   const byKey = new Map(normalizedFields.map((field) => [field.key, field]));
   const out = {};
   for (const [rawKey, rawList] of Object.entries(tagValues || {})) {
-    const fieldMatch = byKey.get(rawKey) ? { field: byKey.get(rawKey), confidence: 1 } : matchFieldKey(rawKey, normalizedFields);
+    const fieldMatch = byKey.get(rawKey)
+      ? { field: byKey.get(rawKey), confidence: 1 }
+      : matchFieldKey(rawKey, normalizedFields, { includeDefaults: false });
     if (!fieldMatch) continue;
     const field = fieldMatch.field;
     const values = splitFieldValues(rawList)
