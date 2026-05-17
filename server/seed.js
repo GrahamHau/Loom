@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_FIELDS, fieldsToTagGroups } from "./field-config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -14,6 +13,9 @@ export function defaultSettings() {
     llm_api_url: "",
     llm_model: "",
     llm_api_key: "",
+    llm_fast_model: "",
+    llm_strong_model: "",
+    llm_routing_policy_json: "{}",
     llm_vision_api_type: "openai",
     llm_vision_api_url: "",
     llm_vision_model: "",
@@ -32,8 +34,8 @@ export function defaultSettings() {
     search_serpapi_api_key: "",
     search_serpapi_api_url: "https://serpapi.com/search.json",
     search_serpapi_engine: "google",
-    fields: DEFAULT_FIELDS,
-    tag_groups: fieldsToTagGroups(DEFAULT_FIELDS),
+    fields: [],
+    tag_groups: [],
     feishu_app_id: "",
     feishu_app_secret: "",
     feishu_base_token: "",
@@ -49,6 +51,7 @@ export function defaultSettings() {
     official_news_enabled: true,
     rss_collect_enabled: process.env.RSS_COLLECT_ENABLED !== "false",
     rss_collect_interval_ms: Number(process.env.RSS_COLLECT_INTERVAL_MS || 15 * 60 * 1000),
+    extension_ai_before_save: true,
   };
 }
 

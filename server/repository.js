@@ -14,8 +14,11 @@ import {
   saveUserState,
   ensureCompanyAdminWorkspaceForUser,
   ensureFeishuWorkspaceForUser,
+  companyWorkspaceDefaults,
+  ensureWorkspace,
+  addWorkspaceMember,
 } from "./db.js";
-import { DEFAULT_FIELDS, normalizeFields, normalizeSettingsFields } from "./field-config.js";
+import { normalizeFields, normalizeSettingsFields } from "./field-config.js";
 import { normalizeDemandInputTags, normalizeProductInputTags } from "./field-matcher.js";
 import { isCrossSourceNewsStoryKey, isSpecificNewsStoryKey, withNewsDedupeKeys } from "./news-dedupe.js";
 import { buildEmptyState } from "./seed.js";
@@ -218,6 +221,8 @@ function mapNewsSourceRow(row) {
     name: row.name,
     url: row.url,
     type: row.type,
+    adapter_type: row.adapter_type || row.type || "rss",
+    adapter_config: row.adapter_config_json ? JSON.parse(row.adapter_config_json) : {},
     language: row.language || "",
     authority: row.authority || "watchlist",
     group: row.group_name || "custom",
@@ -235,6 +240,53 @@ function mapNewsSourceRow(row) {
   };
 }
 
+function mapFeedGroupRow(row) {
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    workspace_id: row.workspace_id || null,
+    name: row.name,
+    slug: row.slug,
+    description: row.description || "",
+    color: row.color || "",
+    is_active: Boolean(row.is_active),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function mapFeedDestinationRow(row) {
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    workspace_id: row.workspace_id || null,
+    name: row.name,
+    type: row.type,
+    target: row.target || "",
+    group_id: row.group_id || "",
+    config: row.config_json ? JSON.parse(row.config_json) : {},
+    is_active: Boolean(row.is_active),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function mapFeedExportRow(row) {
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    workspace_id: row.workspace_id || null,
+    name: row.name,
+    format: row.format,
+    scope_type: row.scope_type,
+    scope_id: row.scope_id,
+    item_count: Number(row.item_count || 0),
+    payload: row.payload_json ? JSON.parse(row.payload_json) : null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
 function clampFetchInterval(value) {
   const interval = Number(value || 60);
   return Math.min(1440, Math.max(30, Number.isFinite(interval) ? interval : 60));
@@ -244,6 +296,21 @@ function cleanText(value, fallback = "") {
   const text = String(value ?? "").trim();
   if (!text || text === "null" || text === "undefined") return fallback;
   return text;
+}
+
+function cleanJsonObject(value, fallback = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function slugifyFeedName(value, fallback = "group") {
+  const slug = String(value || fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return slug || fallback;
 }
 
 function cleanTitle(value, fallback) {
@@ -296,7 +363,7 @@ function demandTagValues(input = {}) {
 }
 
 function fieldSchemaForState(state) {
-  return normalizeFields(state?.settings?.fields, state?.settings?.tag_groups);
+  return normalizeFields(state?.settings?.fields, state?.settings?.tag_groups, { includeDefaults: true });
 }
 
 function productTagValuesForState(state, input = {}) {
@@ -490,12 +557,35 @@ export function ensureLocalUser(input = {}) {
   if (saved.auth_provider === "feishu") {
     ensureFeishuWorkspaceForUser(saved);
   }
+  if (input.withDefaultWorkspace) {
+    ensureDefaultWorkspaceForUser(saved, { autoAssign: true });
+  }
   if (input.withSampleWorkspace) {
     ensureSampleUserState(saved);
   } else {
     ensureUserState(saved);
   }
   return saved;
+}
+
+export function ensureDefaultWorkspaceForUser(user, options = {}) {
+  if (!user || user.id === getLegacyUserId()) return null;
+  const current = db.prepare(`
+    SELECT wm.*, w.slug, w.name
+    FROM workspace_members wm
+    JOIN workspaces w ON w.id = wm.workspace_id
+    WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
+    ORDER BY wm.is_default DESC, w.name ASC
+    LIMIT 1
+  `).get(user.id);
+  if (current) return current;
+  if (options.autoAssign !== true && user.auth_provider !== "feishu" && !["owner", "admin"].includes(user.role_code)) return null;
+  const workspace = ensureWorkspace(companyWorkspaceDefaults());
+  return addWorkspaceMember(workspace.id, user.id, {
+    role: ["owner", "admin"].includes(user.role_code) ? "admin" : "member",
+    status: "active",
+    isDefault: true,
+  });
 }
 
 export function findUserById(userId) {
@@ -580,6 +670,15 @@ export function bootstrap(userId) {
     state.settings.llm_configured = llmConfigured;
     state.settings.llm_vision_configured = llmVisionConfigured;
   }
+  const workspaces = db.prepare(`
+    SELECT w.id, w.slug, w.name, w.type, wm.role, wm.is_default
+    FROM workspace_members wm
+    JOIN workspaces w ON w.id = wm.workspace_id
+    WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
+    ORDER BY wm.is_default DESC, w.name ASC
+  `).all(userId);
+  state.workspaces = workspaces;
+  state.workspace = workspaces[0] || null;
   return state;
 }
 
@@ -852,12 +951,15 @@ export function deleteResearch(userId, id) {
 
 export function updateSettings(userId, patch) {
   return mutateUserState(userId, (state) => {
-    const previousFields = normalizeFields(state.settings?.fields, state.settings?.tag_groups);
+    const previousFields = normalizeFields(state.settings?.fields, state.settings?.tag_groups, { includeDefaults: false });
     const allowed = [
       "llm_api_type",
       "llm_api_url",
       "llm_model",
       "llm_api_key",
+      "llm_fast_model",
+      "llm_strong_model",
+      "llm_routing_policy_json",
       "llm_vision_api_type",
       "llm_vision_api_url",
       "llm_vision_model",
@@ -890,6 +992,7 @@ export function updateSettings(userId, patch) {
       "official_news_enabled",
       "rss_collect_enabled",
       "rss_collect_interval_ms",
+      "extension_ai_before_save",
     ];
     const next = {};
     for (const key of allowed) {
@@ -901,7 +1004,7 @@ export function updateSettings(userId, patch) {
     state.settings = { ...(state.settings || {}), ...next };
     state.settings = normalizeSettingsFields(state.settings);
     if (patch.fields !== undefined) {
-      const nextKeys = new Set(normalizeFields(state.settings.fields).map((field) => field.key));
+      const nextKeys = new Set(normalizeFields(state.settings.fields, [], { includeDefaults: false }).map((field) => field.key));
       const removedCustomKeys = previousFields
         .filter((field) => !field.official && !nextKeys.has(field.key))
         .map((field) => field.key);
@@ -925,14 +1028,14 @@ export function updateSettings(userId, patch) {
 }
 
 export function listFields(userId, entity = "") {
-  const fields = rawState(userId)?.settings?.fields || DEFAULT_FIELDS;
-  const normalized = normalizeFields(fields);
+  const state = rawState(userId);
+  const normalized = normalizeFields(state?.settings?.fields, state?.settings?.tag_groups, { includeDefaults: false });
   return entity ? normalized.filter((field) => field.entities.includes(entity)) : normalized;
 }
 
 export function createField(userId, input = {}) {
   return mutateUserState(userId, (state) => {
-    const fields = normalizeFields(state.settings?.fields, state.settings?.tag_groups);
+    const fields = normalizeFields(state.settings?.fields, state.settings?.tag_groups, { includeDefaults: false });
     const name = cleanTitle(input.name, "自定义字段");
     const keyBase = cleanText(input.key || name)
       .toLowerCase()
@@ -959,7 +1062,7 @@ export function createField(userId, input = {}) {
 
 export function updateField(userId, key, patch = {}) {
   return mutateUserState(userId, (state) => {
-    const fields = normalizeFields(state.settings?.fields, state.settings?.tag_groups);
+    const fields = normalizeFields(state.settings?.fields, state.settings?.tag_groups, { includeDefaults: false });
     const index = fields.findIndex((field) => field.key === key || field.legacyKey === key);
     if (index === -1) return null;
     const current = fields[index];
@@ -982,7 +1085,7 @@ export function updateField(userId, key, patch = {}) {
 
 export function deleteField(userId, key) {
   return mutateUserState(userId, (state) => {
-    const fields = normalizeFields(state.settings?.fields, state.settings?.tag_groups);
+    const fields = normalizeFields(state.settings?.fields, state.settings?.tag_groups, { includeDefaults: false });
     const target = fields.find((field) => field.key === key || field.legacyKey === key);
     if (!target || target.official) return false;
     state.settings = normalizeSettingsFields({
@@ -1475,6 +1578,8 @@ export function createNewsSource(userId, input) {
       name: cleanTitle(input.name, "未命名数据源"),
       url: normalizedUrl,
       type: cleanText(input.type, "rss"),
+      adapter_type: cleanText(input.adapter_type || input.type, "rss"),
+      adapter_config_json: input.adapter_config ? JSON.stringify(cleanJsonObject(input.adapter_config)) : null,
       language: cleanText(input.language),
       authority: cleanText(input.authority, "watchlist"),
       group_name: cleanText(input.group, "custom"),
@@ -1490,11 +1595,11 @@ export function createNewsSource(userId, input) {
     };
   db.prepare(`
     INSERT INTO news_sources (
-      id, user_id, name, url, type, language, authority, group_name, source_group, brand,
+      id, user_id, name, url, type, adapter_type, adapter_config_json, language, authority, group_name, source_group, brand,
       fetch_interval, is_active, last_fetched_at, last_item_count, last_error, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    source.id, source.user_id, source.name, source.url, source.type, source.language, source.authority, source.group_name, source.source_group, source.brand,
+    source.id, source.user_id, source.name, source.url, source.type, source.adapter_type, source.adapter_config_json, source.language, source.authority, source.group_name, source.source_group, source.brand,
     source.fetch_interval, source.is_active, source.last_fetched_at, source.last_item_count, source.last_error, source.created_at, source.updated_at
   );
   return listNewsSources(userId).find((item) => item.id === source.id) || null;
@@ -1503,7 +1608,10 @@ export function createNewsSource(userId, input) {
 export function importWechatExporterAccounts(userId, manifest = {}, options = {}) {
   const accounts = Array.isArray(manifest?.accounts) ? manifest.accounts : [];
   const interval = clampFetchInterval(options.interval || manifest?.interval || 1440);
-  const type = cleanText(options.type, "wechat_exporter");
+  const rsshubBaseUrl = cleanText(options.rsshubBaseUrl || manifest?.rsshub_base_url);
+  const maxPerSource = Math.min(50, Math.max(1, Number(options.maxPerSource || manifest?.max_per_source || 20)));
+  const type = cleanText(options.type, rsshubBaseUrl ? "rss" : "wechat_exporter");
+  const adapterType = cleanText(options.adapter_type || options.adapterType, rsshubBaseUrl ? "rsshub_wechat" : type);
   const created = [];
   const updated = [];
   const skipped = [];
@@ -1520,16 +1628,31 @@ export function importWechatExporterAccounts(userId, manifest = {}, options = {}
       continue;
     }
 
-    const existing = listNewsSources(userId).find((source) =>
-      cleanText(source?.type).toLowerCase() === "wechat_exporter" &&
-      /[?&](fakeid|id)=/.test(String(source?.url || "")) &&
-      String(source.url).includes(encodeURIComponent(fakeid))
-    );
+    const encodedFakeid = encodeURIComponent(fakeid);
+    const existing = listNewsSources(userId).find((source) => {
+      const sourceType = cleanText(source?.type).toLowerCase();
+      const adapter = cleanText(source?.adapter_type).toLowerCase();
+      const url = String(source?.url || "");
+      return (
+        (sourceType === "wechat_exporter" || adapter === "rsshub_wechat" || cleanText(source?.source_group).toLowerCase() === "wechat-exporter") &&
+        (
+          source?.adapter_config?.fakeid === fakeid ||
+          (/[?&](fakeid|id)=/.test(url) && url.includes(encodedFakeid)) ||
+          url.includes(`/loom/wechat/${encodedFakeid}`)
+        )
+      );
+    });
+
+    const url = rsshubBaseUrl
+      ? `${rsshubBaseUrl.replace(/\/+$/g, "")}/loom/wechat/${encodedFakeid}?limit=${maxPerSource}`
+      : `?fakeid=${encodedFakeid}`;
 
     const payload = {
       name: nickname,
-      url: `?fakeid=${encodeURIComponent(fakeid)}`,
+      url,
       type,
+      adapter_type: adapterType,
+      adapter_config: { fakeid, source: "wechat-article-exporter" },
       interval,
       authority: "watchlist",
       group: "wechat-exporter",
@@ -1595,13 +1718,15 @@ export function updateNewsSource(userId, id, patch) {
   if (!current) return null;
   db.prepare(`
     UPDATE news_sources
-    SET name = ?, url = ?, type = ?, language = ?, authority = ?, group_name = ?, source_group = ?, brand = ?,
+    SET name = ?, url = ?, type = ?, adapter_type = ?, adapter_config_json = ?, language = ?, authority = ?, group_name = ?, source_group = ?, brand = ?,
         fetch_interval = ?, is_active = ?, last_fetched_at = ?, last_item_count = ?, last_error = ?, updated_at = ?
     WHERE id = ? AND user_id = ?
   `).run(
     patch.name !== undefined ? cleanTitle(patch.name, current.name) : current.name,
     patch.url !== undefined ? cleanText(patch.url, current.url) : current.url,
     patch.type !== undefined ? cleanText(patch.type, current.type) : current.type,
+    patch.adapter_type !== undefined ? cleanText(patch.adapter_type, current.adapter_type || current.type) : (current.adapter_type || current.type),
+    patch.adapter_config !== undefined ? JSON.stringify(cleanJsonObject(patch.adapter_config)) : current.adapter_config_json,
     patch.language !== undefined ? cleanText(patch.language, current.language) : current.language,
     patch.authority !== undefined ? cleanText(patch.authority, current.authority) : current.authority,
     patch.group !== undefined ? cleanText(patch.group, current.group_name) : current.group_name,
@@ -1625,6 +1750,225 @@ export function deleteNewsSource(userId, id) {
 
 export function clearNewsSources(userId) {
   return db.prepare("DELETE FROM news_sources WHERE user_id = ?").run(userId).changes;
+}
+
+export function listFeedGroups(userId) {
+  return db.prepare(`
+    SELECT *
+    FROM feed_groups
+    WHERE user_id = ?
+    ORDER BY created_at ASC
+  `).all(userId).map(mapFeedGroupRow);
+}
+
+export function createFeedGroup(userId, input = {}) {
+  const baseSlug = slugifyFeedName(input.slug || input.name, "group");
+  let slug = baseSlug;
+  let counter = 2;
+  while (db.prepare("SELECT 1 FROM feed_groups WHERE user_id = ? AND slug = ?").get(userId, slug)) {
+    slug = `${baseSlug}-${counter++}`;
+  }
+  const group = {
+    id: input.id || nanoid(10),
+    user_id: userId,
+    workspace_id: cleanText(input.workspace_id),
+    name: cleanTitle(input.name, "未命名分组"),
+    slug,
+    description: cleanSummary(input.description, ""),
+    color: cleanText(input.color, "").slice(0, 40),
+    is_active: input.is_active ?? input.active ?? true ? 1 : 0,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  db.prepare(`
+    INSERT INTO feed_groups (
+      id, user_id, workspace_id, name, slug, description, color, is_active, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    group.id, group.user_id, group.workspace_id || null, group.name, group.slug, group.description, group.color, group.is_active, group.created_at, group.updated_at
+  );
+  return listFeedGroups(userId).find((item) => item.id === group.id) || null;
+}
+
+export function updateFeedGroup(userId, id, patch = {}) {
+  const current = db.prepare("SELECT * FROM feed_groups WHERE id = ? AND user_id = ?").get(id, userId);
+  if (!current) return null;
+  let slug = current.slug;
+  if (patch.slug !== undefined || patch.name !== undefined) {
+    const baseSlug = slugifyFeedName(patch.slug !== undefined ? patch.slug : patch.name, current.slug || "group");
+    slug = baseSlug;
+    let counter = 2;
+    while (db.prepare("SELECT 1 FROM feed_groups WHERE user_id = ? AND slug = ? AND id <> ?").get(userId, slug, id)) {
+      slug = `${baseSlug}-${counter++}`;
+    }
+  }
+  db.prepare(`
+    UPDATE feed_groups
+    SET name = ?, slug = ?, description = ?, color = ?, is_active = ?, updated_at = ?
+    WHERE id = ? AND user_id = ?
+  `).run(
+    patch.name !== undefined ? cleanTitle(patch.name, current.name) : current.name,
+    slug,
+    patch.description !== undefined ? cleanSummary(patch.description, current.description || "") : (current.description || ""),
+    patch.color !== undefined ? cleanText(patch.color, current.color || "").slice(0, 40) : (current.color || ""),
+    patch.is_active !== undefined ? (patch.is_active ? 1 : 0) : (patch.active !== undefined ? (patch.active ? 1 : 0) : current.is_active),
+    nowIso(),
+    id,
+    userId
+  );
+  return listFeedGroups(userId).find((item) => item.id === id) || null;
+}
+
+export function deleteFeedGroup(userId, id) {
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM feed_group_sources WHERE user_id = ? AND group_id = ?").run(userId, id);
+    db.prepare("DELETE FROM feed_destinations WHERE user_id = ? AND group_id = ?").run(userId, id);
+    return db.prepare("DELETE FROM feed_groups WHERE user_id = ? AND id = ?").run(userId, id).changes > 0;
+  });
+  return tx();
+}
+
+export function listFeedGroupSources(userId, groupId = "") {
+  return db.prepare(`
+    SELECT s.*
+    FROM feed_group_sources gs
+    JOIN news_sources s ON s.id = gs.source_id
+    WHERE gs.user_id = ?
+      AND (? = '' OR gs.group_id = ?)
+    ORDER BY s.created_at ASC
+  `).all(userId, groupId, groupId).map(mapNewsSourceRow);
+}
+
+export function assignSourceToFeedGroup(userId, groupId, sourceId) {
+  const group = db.prepare("SELECT id FROM feed_groups WHERE id = ? AND user_id = ?").get(groupId, userId);
+  const source = db.prepare("SELECT id FROM news_sources WHERE id = ? AND user_id = ?").get(sourceId, userId);
+  if (!group || !source) return null;
+  db.prepare(`
+    INSERT OR IGNORE INTO feed_group_sources (id, user_id, group_id, source_id, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(nanoid(12), userId, groupId, sourceId, nowIso());
+  return {
+    group_id: groupId,
+    source_id: sourceId,
+  };
+}
+
+export function removeSourceFromFeedGroup(userId, groupId, sourceId) {
+  return db.prepare(`
+    DELETE FROM feed_group_sources
+    WHERE user_id = ? AND group_id = ? AND source_id = ?
+  `).run(userId, groupId, sourceId).changes > 0;
+}
+
+export function listFeedDestinations(userId) {
+  return db.prepare(`
+    SELECT *
+    FROM feed_destinations
+    WHERE user_id = ?
+    ORDER BY created_at ASC
+  `).all(userId).map(mapFeedDestinationRow);
+}
+
+export function createFeedDestination(userId, input = {}) {
+  const destination = {
+    id: input.id || nanoid(10),
+    user_id: userId,
+    workspace_id: cleanText(input.workspace_id),
+    name: cleanTitle(input.name, "未命名投递"),
+    type: cleanText(input.type, "freshrss"),
+    target: cleanText(input.target, ""),
+    group_id: cleanText(input.group_id, ""),
+    config_json: JSON.stringify(cleanJsonObject(input.config)),
+    is_active: input.is_active ?? input.active ?? true ? 1 : 0,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  db.prepare(`
+    INSERT INTO feed_destinations (
+      id, user_id, workspace_id, name, type, target, group_id, config_json, is_active, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    destination.id, destination.user_id, destination.workspace_id || null, destination.name, destination.type, destination.target, destination.group_id || null,
+    destination.config_json, destination.is_active, destination.created_at, destination.updated_at
+  );
+  return listFeedDestinations(userId).find((item) => item.id === destination.id) || null;
+}
+
+export function updateFeedDestination(userId, id, patch = {}) {
+  const current = db.prepare("SELECT * FROM feed_destinations WHERE id = ? AND user_id = ?").get(id, userId);
+  if (!current) return null;
+  db.prepare(`
+    UPDATE feed_destinations
+    SET name = ?, type = ?, target = ?, group_id = ?, config_json = ?, is_active = ?, updated_at = ?
+    WHERE id = ? AND user_id = ?
+  `).run(
+    patch.name !== undefined ? cleanTitle(patch.name, current.name) : current.name,
+    patch.type !== undefined ? cleanText(patch.type, current.type) : current.type,
+    patch.target !== undefined ? cleanText(patch.target, current.target || "") : (current.target || ""),
+    patch.group_id !== undefined ? cleanText(patch.group_id, current.group_id || "") || null : current.group_id,
+    patch.config !== undefined ? JSON.stringify(cleanJsonObject(patch.config)) : current.config_json,
+    patch.is_active !== undefined ? (patch.is_active ? 1 : 0) : (patch.active !== undefined ? (patch.active ? 1 : 0) : current.is_active),
+    nowIso(),
+    id,
+    userId
+  );
+  return listFeedDestinations(userId).find((item) => item.id === id) || null;
+}
+
+export function deleteFeedDestination(userId, id) {
+  return db.prepare("DELETE FROM feed_destinations WHERE user_id = ? AND id = ?").run(userId, id).changes > 0;
+}
+
+export function ensureFeedAccessToken(userId, purpose = "feed") {
+  const current = db.prepare("SELECT * FROM feed_access_tokens WHERE user_id = ? AND purpose = ?").get(userId, purpose);
+  if (current?.token) return current.token;
+  const token = nanoid(32);
+  db.prepare(`
+    INSERT INTO feed_access_tokens (token, user_id, purpose, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(token, userId, purpose, nowIso(), nowIso());
+  return token;
+}
+
+export function findUserIdByFeedAccessToken(token, purpose = "feed") {
+  const row = db.prepare("SELECT * FROM feed_access_tokens WHERE token = ? AND purpose = ?").get(cleanText(token), purpose);
+  if (!row?.user_id) return "";
+  db.prepare("UPDATE feed_access_tokens SET last_used_at = ?, updated_at = ? WHERE token = ?").run(nowIso(), nowIso(), cleanText(token));
+  return row.user_id;
+}
+
+export function listFeedExports(userId) {
+  return db.prepare(`
+    SELECT *
+    FROM feed_exports
+    WHERE user_id = ?
+    ORDER BY created_at DESC
+  `).all(userId).map(mapFeedExportRow);
+}
+
+export function createFeedExport(userId, input = {}) {
+  const record = {
+    id: input.id || nanoid(10),
+    user_id: userId,
+    workspace_id: cleanText(input.workspace_id),
+    name: cleanTitle(input.name, "未命名导出"),
+    format: cleanText(input.format, "json"),
+    scope_type: cleanText(input.scope_type, "group"),
+    scope_id: cleanText(input.scope_id),
+    item_count: Number(input.item_count || 0),
+    payload_json: JSON.stringify(input.payload ?? null),
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  db.prepare(`
+    INSERT INTO feed_exports (
+      id, user_id, workspace_id, name, format, scope_type, scope_id, item_count, payload_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    record.id, record.user_id, record.workspace_id || null, record.name, record.format, record.scope_type, record.scope_id,
+    record.item_count, record.payload_json, record.created_at, record.updated_at
+  );
+  return listFeedExports(userId).find((item) => item.id === record.id) || null;
 }
 
 export function markSynced(userId, kind, records) {

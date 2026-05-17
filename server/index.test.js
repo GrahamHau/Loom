@@ -8,6 +8,7 @@ process.env.APP_PASSWORD_ACCOUNTS = "";
 process.env.LOOM_OWNER_EMAIL = "";
 
 const dbModule = await import("./db.js");
+const repo = await import("./repository.js");
 const { default: app, zonedDateHour } = await import("./index.js");
 
 let server;
@@ -101,6 +102,365 @@ describe("auth logout", () => {
       headers: { Authorization: `Bearer ${loginBody.token}` },
     });
     expect(meWithLoginToken.status).toBe(401);
+  });
+});
+
+describe("document imports", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("imports pasted PRD text through the API and keeps it out of RAG by default", async () => {
+    const { cookie } = await login();
+    const response = await fetch(`${baseUrl}/api/document-imports/paste`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        doc_type: "prd",
+        title: "Quick Release PRD",
+        text: "功能需求\n产品需支持单手快拆。\n\n[图片]\n\n额外供应商说明\n这段先保留为未匹配。",
+      }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.import.status).toBe("indexed");
+    expect(body.import.document_id).toBe(body.document.id);
+    expect(body.document.rag_enabled).toBe(false);
+    expect(body.document.content.normalized_sections.map((section) => section.key)).toContain("functional_attributes");
+    expect(body.document.content.image_placeholders).toHaveLength(1);
+    expect(body.document.content.unmatched_sections.some((section) => section.title.includes("额外供应商说明"))).toBe(true);
+
+    const readResponse = await fetch(`${baseUrl}/api/document-imports/${body.import.id}`, {
+      headers: { Cookie: cookie },
+    });
+    const readBody = await readResponse.json();
+    expect(readResponse.status).toBe(200);
+    expect(readBody.document.id).toBe(body.document.id);
+  });
+});
+
+describe("knowledge project and document APIs", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("creates projects, templates, documents, packs, query, drafts, and supplier exports through APIs", async () => {
+    const { cookie } = await login();
+    const ownerUser = repo.findUserByEmail(process.env.APP_USERNAME);
+    ownerUser.role_code = "member";
+    dbModule.addWorkspaceMember("ws-company", ownerUser.id, { role: "member", status: "active", isDefault: true });
+    const projectResponse = await fetch(`${baseUrl}/api/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workspace_id: "ws-company", name: "Tripod PRD", code: "TRI" }),
+    });
+    const project = await projectResponse.json();
+    expect(projectResponse.status).toBe(201);
+
+    const templateResponse = await fetch(`${baseUrl}/api/product-type-templates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        name: "机加件",
+        code: "machined_part",
+        enabled_modules: ["product_definition", "structure", "packaging", "open_questions"],
+      }),
+    });
+    expect(templateResponse.status).toBe(201);
+
+    const importResponse = await fetch(`${baseUrl}/api/document-imports/paste`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        project_id: project.id,
+        doc_type: "prd",
+        text: "结构要求\n需要稳定支撑 quick tripod。\n\n包装需求\n需要保护内托。",
+      }),
+    });
+    const imported = await importResponse.json();
+    expect(importResponse.status).toBe(201);
+
+    const entitiesResponse = await fetch(`${baseUrl}/api/knowledge/entities?workspace_id=ws-company&project_id=${project.id}`, {
+      headers: { Cookie: cookie },
+    });
+    const entities = await entitiesResponse.json();
+    expect(entitiesResponse.status).toBe(200);
+    expect(entities.map((entity) => entity.entity_type)).toEqual(expect.arrayContaining(["document", "doc_section", "feature", "packaging_requirement"]));
+    const feature = entities.find((entity) => entity.entity_type === "feature");
+    expect(feature.source_refs[0].document_id).toBe(imported.document.id);
+
+    const graphResponse = await fetch(`${baseUrl}/api/knowledge/entities/${feature.id}/graph?workspace_id=ws-company&depth=2`, {
+      headers: { Cookie: cookie },
+    });
+    const graph = await graphResponse.json();
+    expect(graphResponse.status).toBe(200);
+    expect(graph.nodes.some((node) => node.id === feature.id)).toBe(true);
+    expect(graph.edges.some((edge) => edge.relation_type === "appears_in")).toBe(true);
+
+    const peer = repo.ensureLocalUser({
+      id: "knowledge-peer-user",
+      email: "knowledge-peer@example.com",
+      name: "Knowledge Peer",
+      auth_provider: "password",
+      role_code: "member",
+    });
+    dbModule.addWorkspaceMember("ws-company", peer.id, { role: "member", status: "active", isDefault: true });
+    repo.upsertApiToken("knowledge-peer-token", peer.id);
+    const peerAuth = { Authorization: "Bearer knowledge-peer-token" };
+
+    const privateListResponse = await fetch(`${baseUrl}/api/knowledge/entities?workspace_id=ws-company`, {
+      headers: peerAuth,
+    });
+    const privateList = await privateListResponse.json();
+    expect(privateListResponse.status).toBe(200);
+    expect(privateList.map((entity) => entity.id)).not.toContain(feature.id);
+
+    const privateGraphResponse = await fetch(`${baseUrl}/api/knowledge/entities/${feature.id}/graph?workspace_id=ws-company`, {
+      headers: peerAuth,
+    });
+    expect(privateGraphResponse.status).toBe(404);
+
+    const publishResponse = await fetch(`${baseUrl}/api/documents/${imported.document.id}/publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ rag_enabled: true, bot_enabled: true }),
+    });
+    ownerUser.role_code = "owner";
+    expect(publishResponse.status).toBe(200);
+
+    const publishedListResponse = await fetch(`${baseUrl}/api/knowledge/entities?workspace_id=ws-company&project_id=${project.id}`, {
+      headers: { Cookie: cookie },
+    });
+    const publishedList = await publishedListResponse.json();
+    expect(publishedList.map((entity) => entity.id)).toContain(feature.id);
+
+    const seededFusion = (await import("./knowledge-repository.js")).createKnowledgeFusionCandidate({
+      workspace_id: "ws-company",
+      project_id: project.id,
+      candidate_type: "entity",
+      action: "review",
+      source_entity_ids: [feature.id],
+      proposed_entity: {
+        canonical_name: feature.canonical_name,
+        entity_type: feature.entity_type,
+      },
+      reason: "API permission test",
+      confidence: 0.5,
+    });
+    const fusionResponse = await fetch(`${baseUrl}/api/knowledge/fusion-candidates?workspace_id=ws-company&project_id=${project.id}`, {
+      headers: { Cookie: cookie },
+    });
+    const fusionCandidates = await fusionResponse.json();
+    const reviewCandidate = fusionCandidates.find((candidate) => candidate.id === seededFusion.id);
+    expect(fusionResponse.status).toBe(200);
+    expect(reviewCandidate).toBeTruthy();
+
+    const peerPatch = await fetch(`${baseUrl}/api/knowledge/fusion-candidates/${reviewCandidate.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...peerAuth },
+      body: JSON.stringify({ workspace_id: "ws-company", status: "approved" }),
+    });
+    expect(peerPatch.status).toBe(403);
+
+    dbModule.addWorkspaceMember("ws-company", ownerUser.id, { role: "admin", status: "active", isDefault: true });
+    const approveFusion = await fetch(`${baseUrl}/api/knowledge/fusion-candidates/${reviewCandidate.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workspace_id: "ws-company", status: "approved" }),
+    });
+    expect(approveFusion.status).toBe(200);
+
+    const invalidFusion = await fetch(`${baseUrl}/api/knowledge/fusion-candidates/${reviewCandidate.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workspace_id: "ws-company", status: "pending" }),
+    });
+    expect(invalidFusion.status).toBe(400);
+
+    const packResponse = await fetch(`${baseUrl}/api/knowledge/packs/build`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workspace_id: "ws-company", project_id: project.id }),
+    });
+    const pack = await packResponse.json();
+    expect(packResponse.status).toBe(201);
+    expect(pack.chunks.length).toBeGreaterThan(0);
+
+    const queryResponse = await fetch(`${baseUrl}/api/knowledge/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workspace_id: "ws-company", project_id: project.id, pack_id: pack.id, question: "quick tripod" }),
+    });
+    const queryBody = await queryResponse.json();
+    expect(queryResponse.status).toBe(200);
+    expect(queryBody.citations.length).toBeGreaterThan(0);
+
+    const draftResponse = await fetch(`${baseUrl}/api/documents/prd/draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workspace_id: "ws-company", project_id: project.id, pack_id: pack.id, product_type_code: "machined_part" }),
+    });
+    const draft = await draftResponse.json();
+    expect(draftResponse.status).toBe(201);
+    expect(draft.sections.map((section) => section.key)).toEqual(["product_definition", "structure", "packaging", "open_questions"]);
+
+    const patchResponse = await fetch(`${baseUrl}/api/documents/${draft.document.id}/sections/structure`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ access_policy: { supplier_visible: true } }),
+    });
+    expect(patchResponse.status).toBe(200);
+
+    const exportResponse = await fetch(`${baseUrl}/api/documents/${draft.document.id}/export/supplier`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+    const exported = await exportResponse.json();
+    expect(exportResponse.status).toBe(200);
+    expect(exported.sections.map((section) => section.key)).toEqual(["structure"]);
+  });
+
+  it("blocks cross-workspace ids and unauthenticated bot RAG access", async () => {
+    const { cookie } = await login();
+    const otherUser = repo.ensureLocalUser({
+      id: "other-workspace-user",
+      email: "other@example.com",
+      name: "Other",
+      auth_provider: "feishu",
+    });
+    dbModule.ensureWorkspace({ id: "ws-other", slug: "other", name: "Other Workspace" });
+    dbModule.addWorkspaceMember("ws-other", otherUser.id, { role: "member", status: "active", isDefault: true });
+
+    const otherDoc = (await import("./knowledge-repository.js")).createDocument({
+      id: "doc-other-workspace",
+      workspace_id: "ws-other",
+      title: "Other Secret",
+      doc_type: "prd",
+      owner_user_id: otherUser.id,
+      content: {
+        normalized_sections: [
+          { key: "functional_attributes", title: "功能属性", content: "quick secret" },
+        ],
+      },
+      access_policy: { visibility: "workspace", rag_enabled: true },
+    });
+    const otherPack = (await import("./knowledge-repository.js")).createKnowledgePack({
+      id: "pack-other-workspace",
+      workspace_id: "ws-other",
+      project_id: "other-project",
+      title: "Other Pack",
+      pack_type: "project",
+    });
+    const otherGap = (await import("./knowledge-repository.js")).createKnowledgeGap({
+      id: "gap-other-workspace",
+      workspace_id: "ws-other",
+      project_id: "other-project",
+      pack_id: otherPack.id,
+      question: "other workspace question",
+      reason: "missing_source",
+    });
+    const otherEntity = (await import("./knowledge-repository.js")).createKnowledgeEntity({
+      id: "entity-other-workspace",
+      workspace_id: "ws-other",
+      project_id: "other-project",
+      entity_type: "feature",
+      canonical_name: "Other secret feature",
+    });
+
+    const readOther = await fetch(`${baseUrl}/api/documents/${otherDoc.id}`, {
+      headers: { Cookie: cookie },
+    });
+    const exportOther = await fetch(`${baseUrl}/api/documents/${otherDoc.id}/export/supplier`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+    const projectsOther = await fetch(`${baseUrl}/api/projects?workspace_id=ws-other`, {
+      headers: { Cookie: cookie },
+    });
+    const botUnauthed = await fetch(`${baseUrl}/api/bot/feishu/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", question: "quick secret" }),
+    });
+    const draftOtherPack = await fetch(`${baseUrl}/api/documents/prd/draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ pack_id: otherPack.id }),
+    });
+    const syncOtherGap = await fetch(`${baseUrl}/api/knowledge/gaps/${otherGap.id}/sync-feishu`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+    const graphOtherEntity = await fetch(`${baseUrl}/api/knowledge/entities/${otherEntity.id}/graph?workspace_id=ws-other`, {
+      headers: { Cookie: cookie },
+    });
+
+    expect(readOther.status).toBe(404);
+    expect(exportOther.status).toBe(404);
+    expect(projectsOther.status).toBe(403);
+    expect(botUnauthed.status).toBe(401);
+    expect(draftOtherPack.status).toBe(404);
+    expect(syncOtherGap.status).toBe(404);
+    expect(graphOtherEntity.status).toBe(403);
+  });
+
+  it("does not trust client-supplied draft chunks without a server-loaded pack", async () => {
+    const { cookie } = await login();
+
+    const response = await fetch(`${baseUrl}/api/documents/prd/draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        project_id: "client-pack-project",
+        pack: {
+          id: "client-pack",
+          title: "Client Pack",
+          chunks: [
+            {
+              id: "client-secret-chunk",
+              title: "Client Secret",
+              text: "不应该进入服务端草稿的 quick secret。",
+            },
+          ],
+        },
+        chunks: [
+          {
+            id: "client-raw-chunk",
+            title: "Client Raw Secret",
+            text: "也不应该进入服务端草稿。",
+          },
+        ],
+        enabled_modules: ["functional_attributes"],
+      }),
+    });
+    const body = await response.json();
+    const text = body.document.content_text;
+
+    expect(response.status).toBe(201);
+    expect(text).not.toContain("quick secret");
+    expect(text).not.toContain("Client Raw Secret");
+    expect(body.sections[0].source_refs).toEqual([]);
+    expect(body.sections[0].open_questions[0]).toContain("功能属性");
   });
 });
 
@@ -319,6 +679,129 @@ describe("admin users", () => {
     const logs = await logsResponse.json();
     expect(logsResponse.status).toBe(200);
     expect(logs.items.some((item) => item.id === "llm-log-test")).toBe(true);
+  });
+});
+
+describe("feed hub", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("exposes feed hub bootstrap and public opml/rss urls", async () => {
+    const { cookie } = await login();
+    const sourceResponse = await fetch(`${baseUrl}/api/news-sources`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        name: "Sony Feed",
+        url: "https://example.com/sony.xml",
+        group: "custom",
+      }),
+    });
+    const source = await sourceResponse.json();
+
+    const groupResponse = await fetch(`${baseUrl}/api/feed-hub/groups`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ name: "Photography Brands", slug: "photography-brands" }),
+    });
+    const group = await groupResponse.json();
+
+    const assignResponse = await fetch(`${baseUrl}/api/feed-hub/groups/${group.id}/sources/${source.id}`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+    expect(assignResponse.status).toBe(201);
+
+    dbModule.db.prepare(`
+      INSERT INTO news_items (
+        id, user_id, source_id, source_name, original_title, original_url, title_zh, summary_zh, content_zh, type,
+        is_kept, is_read, is_starred, published_at, llm_processed, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "hub-news-1",
+      "password-tester-example-com",
+      source.id,
+      source.name,
+      "Sony launches Alpha",
+      "https://example.com/sony-launch",
+      "索尼发布 Alpha",
+      "新品摘要",
+      "新品正文",
+      "新品发布",
+      1,
+      0,
+      0,
+      "2026-05-16T00:00:00.000Z",
+      1,
+      "2026-05-16T00:00:00.000Z",
+      "2026-05-16T00:00:00.000Z",
+    );
+
+    const bootstrapResponse = await fetch(`${baseUrl}/api/feed-hub/bootstrap`, {
+      headers: { Cookie: cookie },
+    });
+    const bootstrap = await bootstrapResponse.json();
+    expect(bootstrapResponse.status).toBe(200);
+    expect(bootstrap.feed_token).toBeTruthy();
+    expect(bootstrap.public_urls.opml).toContain("/api/feed-hub/public/opml.xml?token=");
+
+    const publicOpml = await fetch(bootstrap.public_urls.opml);
+    expect(publicOpml.status).toBe(200);
+    expect(await publicOpml.text()).toContain("photography-brands.xml");
+
+    const groupFeedResponse = await fetch(`${baseUrl}/api/feed-hub/public/groups/photography-brands.xml?token=${bootstrap.feed_token}`);
+    expect(groupFeedResponse.status).toBe(200);
+    expect(await groupFeedResponse.text()).toContain("索尼发布 Alpha");
+  });
+
+  it("auto-populates default feed hub groups from source semantics", async () => {
+    const { cookie } = await login();
+
+    const customResponse = await fetch(`${baseUrl}/api/news-sources`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        name: "Sony Feed",
+        url: "https://example.com/sony.xml",
+        group: "custom",
+      }),
+    });
+    expect(customResponse.status).toBe(201);
+
+    repo.importWechatExporterAccounts("password-tester-example-com", {
+      usefor: "wechat-article-exporter",
+      accounts: [
+        { fakeid: "MzA3", nickname: "SmallRig斯莫格" },
+      ],
+    }, {
+      interval: 1440,
+      rsshubBaseUrl: "https://rss.example.com",
+      maxPerSource: 12,
+    });
+
+    const bootstrapResponse = await fetch(`${baseUrl}/api/feed-hub/bootstrap`, {
+      headers: { Cookie: cookie },
+    });
+    const bootstrap = await bootstrapResponse.json();
+
+    expect(bootstrapResponse.status).toBe(200);
+    const allGroup = bootstrap.groups.find((group) => group.slug === "all-sources");
+    const wechatGroup = bootstrap.groups.find((group) => group.slug === "wechat");
+    const customGroup = bootstrap.groups.find((group) => group.slug === "custom");
+
+    expect(allGroup?.sources.map((source) => source.name)).toEqual(expect.arrayContaining(["Sony Feed", "SmallRig斯莫格"]));
+    expect(wechatGroup?.sources.map((source) => source.name)).toEqual(["SmallRig斯莫格"]);
+    expect(customGroup?.sources.map((source) => source.name)).toEqual(["Sony Feed"]);
+    expect(bootstrap.ungrouped_sources).toEqual([]);
   });
 });
 

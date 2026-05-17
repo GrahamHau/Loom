@@ -28,8 +28,11 @@ function getSettings(userId, kind = "text") {
   };
 }
 
-function configuredSettings(userId, kind = "text") {
+function configuredSettings(userId, kind = "text", overrides = {}) {
   const settings = getSettings(userId, kind);
+  if (overrides.model) {
+    settings.llm_model = overrides.model;
+  }
   if (!settings.llm_api_url || !settings.llm_model || !settings.llm_api_key) {
     const label = kind === "vision" ? "视觉模型" : "LLM";
     throw new AppError(400, "llm_not_configured", `${label} 未配置完整，请先在系统设置填写 API URL、模型和 API Key。`);
@@ -40,6 +43,18 @@ function configuredSettings(userId, kind = "text") {
 export function isLLMConfigured(userId) {
   const settings = getSettings(userId, "text");
   return Boolean(settings.llm_api_url && settings.llm_model && settings.llm_api_key);
+}
+
+export function routedTextModel(userId, tier = "fast") {
+  const settings = getSettings(userId, "text");
+  if (tier === "strong") return settings.llm_strong_model || process.env.LLM_STRONG_MODEL || settings.llm_model || "";
+  if (tier === "fast") return settings.llm_fast_model || process.env.LLM_FAST_MODEL || settings.llm_model || "";
+  return settings.llm_model || "";
+}
+
+export function isTextModelTierConfigured(userId, tier = "fast") {
+  const settings = getSettings(userId, "text");
+  return Boolean(settings.llm_api_url && settings.llm_api_key && routedTextModel(userId, tier));
 }
 
 export function isVisionLLMConfigured(userId) {
@@ -191,8 +206,8 @@ async function requestLLM(settings, { userId, kind = "text", purpose = "unknown"
   }
 }
 
-export async function callLLM({ userId, purpose = "text", system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
-  const settings = configuredSettings(userId, "text");
+export async function callLLM({ userId, purpose = "text", system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens, model }) {
+  const settings = configuredSettings(userId, "text", { model });
   return requestLLM(settings, { userId, kind: "text", purpose, system, user, imageUrls, responseFormat, temperature, maxTokens });
 }
 

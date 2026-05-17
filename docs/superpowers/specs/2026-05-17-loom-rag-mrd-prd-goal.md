@@ -1,4 +1,4 @@
-# Goal: Loom RAG / MRD / PRD 无人值守实施
+# Goal: LOOM Knowledge Fabric / MRD / PRD 无人值守实施
 
 状态：Ready for unattended execution
 依据设计：`docs/superpowers/specs/2026-05-17-loom-rag-mrd-prd-parallel-design.md`
@@ -11,27 +11,30 @@
 Project / Document / Knowledge 统一模型
 → 飞书文档或复制粘贴导入
 → 模板标准化
+→ Document Understanding
+→ Product Ontology
+→ Knowledge Fusion
 → Knowledge Source / Chunk / Pack
-→ RAG 问答
+→ Graph Viewer / Query 问答
 → MRD 草稿
 → 硬件 PRD 草稿
 → 权限发布
-→ 飞书 Bot / Base / Docs 出口
+→ 飞书 Bot / 飞书多维表格 / 飞书云文档出口
 ```
 
 执行时不要在每个 milestone 停下来等用户确认。除非遇到会破坏数据、删除生产数据、需要真实密钥、需要外部付费、或需要改变产品方向的决策，否则按本文件继续推进。
 
 ## 总原则
 
-- 做最小必要改动，不重写现有 Loom 架构。
+- 做最小必要改动，不重写现有 LOOM 架构。
 - 先服务端、测试、API，再做前端入口。
 - 先 paste 导入跑通，再接飞书 OpenAPI。
 - P0 不下载图片、不做 OCR、不接向量库。
-- RAG 必须检索前权限过滤。
+- Query / RAG 必须检索前权限过滤，RAG 只是查询层技术，不是 LOOM 主系统。
 - PRD 是硬件/摄影配件产品定义文档，不使用 MVP/backlog/sprint 语言。
 - 产品类型不写死，使用公司可配置模板。
 - 飞书 Bot 是接口，不是对话大脑；不默认接 Hermes。
-- 飞书 Base 是协作镜像，不是主库。
+- 飞书多维表格是协作镜像和人工工作台，不是主库。
 - 模型使用分层路由：便宜快模型做抽取/标准化/普通草稿，强模型做关键判断和审校，权限必须由代码控制。
 - 如果旧字段兼容代码被触碰，顺手收敛，但不要做破坏性大迁移。
 
@@ -104,6 +107,10 @@ server/seed.js
 - 新增 `document_templates`。
 - 新增 `product_type_templates`。
 - 新增 `document_imports`。
+- 新增 `knowledge_entities`。
+- 新增 `knowledge_relations`。
+- 新增 `knowledge_fusion_candidates`。
+- 新增 `feishu_base_mappings`。
 - 新增 `knowledge_sources`。
 - 新增 `knowledge_chunks`。
 - 新增 `knowledge_chunks_fts`。
@@ -113,6 +120,7 @@ server/seed.js
 - 新增 `knowledge_gaps`。
 - 新增 `knowledge_query_logs`。
 - 写 repository CRUD 和基础 normalize。
+- 写 ontology entity/relation/fusion candidate CRUD。
 - seed 默认 PRD/MRD document template。
 - seed 一个通用硬件 product type template，但不要把公司具体产品类型写死。
 
@@ -141,6 +149,8 @@ server/feishu-doc-reader-service.js
 - 实现 template normalization。
 - 生成 `documents.content_json.normalized_sections`。
 - 生成 `unmatched_sections`。
+- 从 normalized sections 抽取 Feature、Need、Evidence、DocSection、TestRequirement、CertificationRequirement、PackagingRequirement、SupplierCapability。
+- 从文档内容抽取关系，能确定的进入 `knowledge_relations`，不确定或冲突的进入 `knowledge_fusion_candidates`。
 - 飞书 reader 先封装接口，真实 OpenAPI 可作为后续实现；P0 不因为飞书权限阻塞 paste 闭环。
 - 导入后默认 `rag_enabled=false`、`bot_enabled=false`、`supplier_visible=false`、`sales_visible=false`。
 
@@ -159,8 +169,47 @@ POST /api/document-imports/:id/retry
 - 图片占位不会写入文件。
 - 模板匹配成功的内容进 normalized sections。
 - 未匹配内容进入 unmatched sections。
+- 关键实体都有 `source_refs`。
+- 低置信度、重复和冲突关系进入 fusion candidate，不静默覆盖主知识。
 
-## Milestone 3: Knowledge Index + Pack
+## Milestone 3: Ontology + Fusion + Graph Viewer
+
+文件：
+
+```text
+server/knowledge-schema.js
+server/knowledge-repository.js
+server/knowledge-extension-adapters.js
+server/knowledge-repository.test.js
+```
+
+任务：
+
+- 实现 `knowledge_entities` CRUD。
+- 实现 `knowledge_relations` CRUD。
+- 实现 `knowledge_fusion_candidates` CRUD。
+- 写 Document / Product / Demand / News / Research 到 ontology 的最小 adapter。
+- 实现 `merge/link/new/conflict/review` candidate 生成和状态流转。
+- 提供只读 Graph Viewer API，按 entity 或 document section 查询一跳/两跳关系。
+- Graph Viewer 不允许写业务数据。
+
+API：
+
+```text
+GET /api/knowledge/entities
+GET /api/knowledge/entities/:id/graph
+GET /api/knowledge/fusion-candidates
+PATCH /api/knowledge/fusion-candidates/:id
+```
+
+验收：
+
+- 导入 PRD 后能看到 Feature / Need / DocSection / Evidence。
+- 同一功能或需求跨来源出现时能生成 merge/link candidate。
+- 冲突参数进入 conflict candidate。
+- 图谱接口能返回节点、边、source_refs。
+
+## Milestone 4: Knowledge Index + Pack
 
 文件：
 
@@ -178,6 +227,7 @@ server/knowledge-pack-service.test.js
 - `demand → knowledge_source/chunks`。
 - `news_items → knowledge_source/chunks`。
 - `research → knowledge_source/chunks`。
+- `knowledge_entities / relations → knowledge_source/chunks`。
 - 写入 `knowledge_chunks_fts`。
 - 根据 project 或 research 生成 pack。
 - 基于 content hash 跳过未变化内容。
@@ -188,7 +238,7 @@ server/knowledge-pack-service.test.js
 - FTS 能搜到功能、痛点、竞品名。
 - 每个 chunk 能回到 source。
 
-## Milestone 4: RAG Query Baseline
+## Milestone 5: Query / RAG Baseline
 
 文件：
 
@@ -220,11 +270,11 @@ POST /api/knowledge/evaluate
 验收：
 
 - 导入后默认搜不到。
-- 开启 `rag_enabled` 后可被授权用户搜到。
+- 开启 `rag_enabled` 后可被授权用户通过 Query / RAG 搜到。
 - 无权限用户得到 refused。
 - 回答必须带 citations。
 
-## Milestone 5: MRD / PRD 草稿生成
+## Milestone 6: MRD / PRD 草稿生成
 
 文件：
 
@@ -260,9 +310,9 @@ POST /api/documents/:id/publish
 - MRD 生成 8 节。
 - PRD 按产品类型模板生成模块。
 - 不需要的模块不出现。
-- 发布后 RAG 可引用。
+- 发布后 Query / RAG 可引用。
 
-## Milestone 6: 权限发布与导出
+## Milestone 7: 权限发布与导出
 
 文件：
 
@@ -278,8 +328,10 @@ server/feishu-base-sync-service.js
 - section policy 继承到 chunk。
 - 内部版 / 供应商版 / 销售版导出过滤。
 - 导出权限由代码规则决定，不能让模型决定哪些内容可供应商/销售可见。
-- Feishu Docs export P0 先生成 markdown/html payload，可后接真实 API。
-- KnowledgeGap 同步 Base P0 先封装 service 接口，可后接真实 API。
+- 飞书云文档 export P0 先生成 markdown/html payload，可后接真实 API。
+- KnowledgeGap 同步飞书多维表格 P0 先封装 service 接口，可后接真实 API。
+- 真实飞书多维表格调试和一次性读写优先使用 `lark-base` skill/CLI，实际命令是 `lark-cli base +...`；LOOM 后端业务封装仍命名为 `feishu-base-sync-service`。
+- 不要在 LOOM 自己的命名里使用 `bitable`。`bitable` 只允许作为飞书开放平台外部接口路径出现，例如 `/open-apis/bitable/v1/...`。
 
 API：
 
@@ -297,7 +349,7 @@ POST /api/documents/:id/sync-review-base
 - 成本 / 内部风险不会导出。
 - Gap 可进入 sync 状态或 mock record id。
 
-## Milestone 7: 前端最小入口
+## Milestone 8: 前端最小入口
 
 文件：
 
@@ -320,16 +372,17 @@ src/legacy/knowledge/
 - 增加 Project / Documents 入口。
 - 文档导入页面：飞书链接 / 复制粘贴。
 - Knowledge Pack 页面：build、sources、chunks、open questions。
-- RAG 问答面板：question、answer、citations、gaps。
+- Graph Viewer：只读展示实体、关系、来源。
+- Query / RAG 问答面板：question、answer、citations、gaps。
 - MRD/PRD 草稿页面：章节列表、中间内容、右侧引用/权限。
-- 权限发布控件：RAG / Bot / Supplier / Sales 开关。
+- 权限发布控件：Query / RAG / Bot / Supplier / Sales 开关。
 
 验收：
 
 - 不靠 curl 也能完成第一阶段 Demo。
 - 桌面优先，移动端不崩。
 
-## Milestone 8: 飞书出口
+## Milestone 9: 飞书出口
 
 文件：
 
@@ -342,18 +395,19 @@ server/feishu-base-sync-service.js
 任务：
 
 - Bot event receiver 最小封装。
-- 调用 Loom Knowledge API。
+- 调用 LOOM Knowledge API。
 - 回答卡片 payload 生成。
-- Gap Base sync 接口。
-- Docs export 接口。
+- Gap 飞书多维表格 sync 接口。
+- 飞书云文档 export 接口。
+- 需要直接操作飞书多维表格时，使用 `lark-base`，不要临时发明 Base 工具名。
 - 真实飞书权限不足时必须清晰报错。
 
 验收：
 
 - 可生成 Bot card payload。
 - Gap sync 可 mock 成功。
-- Docs export 可 mock 成功。
-- 不影响 paste 导入和 Web RAG 闭环。
+- 飞书云文档 export 可 mock 成功。
+- 不影响 paste 导入和 Web Query / RAG 闭环。
 
 ## 最终 Demo 验收
 
@@ -365,14 +419,17 @@ server/feishu-base-sync-service.js
 4. 图片默认跳过。
 5. 标准化成 sections。
 6. 关联现有竞品、需求、Stream。
-7. 生成 Knowledge Pack。
-8. RAG 问 10 个问题。
-9. 生成 MRD 草稿。
-10. 生成硬件 PRD 草稿。
-11. 设置 `supplier_visible`。
-12. 导出供应商版。
-13. 权限不足时 RAG 拒答。
-14. 答不上来生成 KnowledgeGap。
+7. 抽取 Feature / Need / Evidence / DocSection。
+8. 生成 Knowledge Fusion candidate。
+9. Graph Viewer 能看到实体关系和 source_refs。
+10. 生成 Knowledge Pack。
+11. Query / RAG 问 10 个问题。
+12. 生成 MRD 草稿。
+13. 生成硬件 PRD 草稿。
+14. 设置 `supplier_visible`。
+15. 导出供应商版。
+16. 权限不足时 Query / RAG 拒答。
+17. 答不上来生成 KnowledgeGap。
 
 ## 验证命令
 
@@ -414,7 +471,7 @@ P0 不单独配置 `judge_model`。`strong_model` 同时承担复杂生成、审
 - 飞书文档章节识别。
 - raw blocks 标准化。
 - chunk 摘要和标签。
-- 普通 RAG 问答。
+- 普通 Query / RAG 问答。
 - MRD/PRD 非关键草稿。
 - KnowledgeGap 归类。
 
@@ -429,7 +486,7 @@ P0 不单独配置 `judge_model`。`strong_model` 同时承担复杂生成、审
 必须代码处理，不能交给模型：
 
 - 权限过滤。
-- RAG/Bot 是否可引用。
+- Query / RAG / Bot 是否可引用。
 - 供应商版/销售版导出范围。
 - 是否下载图片。
 - 是否写入/删除主数据。

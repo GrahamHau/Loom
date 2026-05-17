@@ -480,14 +480,6 @@ function normalizeFields(fieldsOrGroups, fallbackGroups = []) {
   }
   const groups = source.length ? source : safeArray(fallbackGroups);
   const officialGroupKeys = new Set(OFFICIAL_FIELD_DEFS.map((d) => d.tagGroupKey));
-  const official = OFFICIAL_FIELD_DEFS.map((def) => {
-    const group = groups.find((g) => g.key === def.tagGroupKey);
-    return {
-      ...def,
-      options: Array.isArray(group?.tags) ? group.tags : [],
-      entities: Array.isArray(group?.entities) ? group.entities : def.entities,
-    };
-  });
   const custom = groups
     .filter((g) => !officialGroupKeys.has(g.key))
     .map((g) => ({
@@ -500,7 +492,12 @@ function normalizeFields(fieldsOrGroups, fallbackGroups = []) {
       tone: g.tone || "outline",
       options: Array.isArray(g.tags) ? g.tags : [],
     }));
-  return [...official, ...custom];
+  return custom;
+}
+
+function entityUsesField(entity, field) {
+  if (entity?.tag_values && Object.prototype.hasOwnProperty.call(entity.tag_values, field.key)) return true;
+  return getFieldValue(entity, field.key).length > 0;
 }
 
 function getFieldValue(entity, fieldKey) {
@@ -928,9 +925,9 @@ function FieldRow({ field, entity, onSave, onCreateOption }) {
   );
 }
 
-function AddFieldPopover({ fields, entityType, onAttach, onGoSettings, onClose }) {
+function AddFieldPopover({ fields, entityType, entity, onAttach, onGoSettings, onClose }) {
   const rootRef = useRef(null);
-  const unattached = fields.filter((f) => !f.entities.includes(entityType));
+  const unattached = fields.filter((f) => f.entities.includes(entityType) && !entityUsesField(entity, f));
   useEffect(() => {
     const handler = (e) => { if (!rootRef.current?.contains(e.target)) onClose(); };
     document.addEventListener("mousedown", handler);
@@ -940,7 +937,7 @@ function AddFieldPopover({ fields, entityType, onAttach, onGoSettings, onClose }
     <div className="add-field-popover" ref={rootRef}>
       <div className="add-field-popover-head">添加字段</div>
       {unattached.length === 0 ? (
-        <div className="add-field-empty">所有字段已添加<br /><span>可在设置里新建更多字段</span></div>
+        <div className="add-field-empty">暂无可添加字段<br /><span>可在设置里新建字段</span></div>
       ) : (
         <div className="add-field-list">
           {unattached.map((f) => (
@@ -991,14 +988,12 @@ function LoginScreen({ onLogin, onDemoLogin, onFeishuLogin, error, providers = {
 
         <div className="login-actions">
 
-          {/* ① 飞书登录 — 主要入口 */}
-          {feishuEnabled && (
-            <button className="login-feishu-btn" type="button"
-              onClick={() => onFeishuLogin?.()} disabled={busy}>
-              <img src="/feishu.png" alt="" />
-              使用飞书登录
-            </button>
-          )}
+          {/* ① 飞书登录 — 主要入口，始终常驻 */}
+          <button className="login-feishu-btn" type="button"
+            onClick={() => onFeishuLogin?.()} disabled={busy}>
+            <img src="/feishu.png" alt="" />
+            使用飞书登录
+          </button>
 
           {/* ② 演示模式 — 次要入口 */}
           <button className="login-demo-btn" type="button"
@@ -1047,6 +1042,64 @@ function LoginScreen({ onLogin, onDemoLogin, onFeishuLogin, error, providers = {
 window.LoginScreen = LoginScreen;
 
 // ============ NEWS ============
+const DIGEST_MOCK = [
+  { id: "d1", kind: "launch", headline: "友商新品首次切入低价带，产品线明显下探", connection: "可对照你 Lens 中追踪的同类竞品", sourceCount: 2 },
+  { id: "d2", kind: "trend", headline: "本周 AI 搜索相关报道密集，多家媒体集中发声", connection: "与 Spark 中 2 条关注的用户痛点关键词重叠", sourceCount: 5 },
+  { id: "d3", kind: "unknown_signal", headline: "新兴品牌获融资，专注你尚未追踪的细分赛道", connection: null, sourceCount: 1 },
+];
+
+function DailyDigestCard({ data }) {
+  const today = new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
+  const hasLlm = Boolean(data.settings?.llm_configured);
+  return (
+    <div className="briefing-card">
+      <div className="briefing-card-head">
+        <Icon name="sparkles" size={13} style={{ color: "var(--accent)" }} />
+        <span className="briefing-card-title">今日总结</span>
+        <span className="briefing-card-date">{today}</span>
+        <Btn size="sm" variant="ghost" icon="sync" />
+      </div>
+      <div className="briefing-card-body">
+        {!hasLlm ? (
+          <div className="briefing-empty">
+            <Icon name="sparkles" size={22} style={{ color: "var(--text-4)" }} />
+            <div className="briefing-empty-text">配置 LLM 后，每天自动生成行业动态摘要，并标注与你研究上下文的关联</div>
+          </div>
+        ) : DIGEST_MOCK.map((item) => <InsightItem key={item.id} item={item} />)}
+      </div>
+    </div>
+  );
+}
+
+function InsightItem({ item }) {
+  const meta = {
+    launch: { label: "新品动态" },
+    trend: { label: "趋势" },
+    funding: { label: "融资" },
+    policy: { label: "政策" },
+    unknown_signal: { label: "陌生信号" },
+  }[item.kind] || { label: "陌生信号" };
+  return (
+    <div className={`insight-item${item.kind === "unknown_signal" ? " insight-item--unknown" : ""}`}>
+      <div className="insight-item-head">
+        <span className={`insight-kind insight-kind--${item.kind}`}>{meta.label}</span>
+        {item.sourceCount > 0 && <span className="insight-source-count">{item.sourceCount} 条来源</span>}
+      </div>
+      <div className="insight-headline">{item.headline}</div>
+      {item.connection && (
+        <div className="insight-connection">
+          <Icon name="link" size={11} />
+          <span>{item.connection}</span>
+        </div>
+      )}
+      <div className="insight-actions">
+        <Btn size="sm" variant="ghost" icon="plus">加入 Weave</Btn>
+        <Btn size="sm" variant="ghost" icon="x">忽略</Btn>
+      </div>
+    </div>
+  );
+}
+
 function NewsScreen({ data, api, refreshData, navTarget }) {
   const [tab, setTab] = useState("微信公众号");
   const [items, setItems] = useState([]);
@@ -1062,6 +1115,36 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   const loadMoreRef = useRef(null);
   const initialBatchSize = 18;
   const [visibleCount, setVisibleCount] = useState(initialBatchSize);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const draggingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartWidthRef = useRef(0);
+
+  const onResizerMouseDown = (e) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    dragStartXRef.current = e.clientX;
+    dragStartWidthRef.current = sidebarWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (moveEvent) => {
+      if (!draggingRef.current) return;
+      const delta = moveEvent.clientX - dragStartXRef.current;
+      const next = Math.min(480, Math.max(220, dragStartWidthRef.current + delta));
+      setSidebarWidth(next);
+    };
+    const onMouseUp = () => {
+      draggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  };
+
   useEffect(() => {
     setCounts(data.newsCounts || { all: 0, wechat: 0, trend: 0, starred: 0 });
     if (!api) {
@@ -1219,108 +1302,126 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
 
   return (
     <>
-      <div className="news-tabs">
-        {[
-        ["微信公众号", "微信公众号", counts.wechat],
-        ["Google News", "Google News", counts.trend],
-        ["starred", "已收藏", counts.starred],
-        ["all", "全部", counts.all]].
-        map(([k, label, count]) =>
-        <div key={k} className={`news-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
-            {label} <span style={{ color: "var(--text-4)", marginLeft: 4 }}>{count}</span>
-          </div>
-        )}
-        <div className="page-actions news-page-actions">
-          {selectMode ?
-          <>
-              <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
-              <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
-              <span className="muted text-sm">{selectedIds.length} 条已选择</span>
-            </> :
-          <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
-          }
-          <Btn size="sm" variant="ghost" icon="filter">筛选</Btn>
-          <Btn size="sm" variant="ghost" icon="sparkles" onClick={processLlm} disabled={busy}>{busy ? "处理中..." : "LLM处理"}</Btn>
+      <div className="news-layout">
+        <div className="news-sidebar" style={{ width: sidebarWidth }}>
+          <DailyDigestCard data={data} />
         </div>
-      </div>
 
-      <div className="viewport">
-        <div className="page page-fluid" style={{ paddingTop: 8 }}>
-          {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
-          {sampleWorkspace && tab !== "starred" && (
-            <div className="live-sample-note">
-              <div className="live-sample-note-main">
-                <Icon name="rss" size={15} />
-                <span>
-                  {liveNewsReady
-                    ? `News 只展示最近 ${Math.round(newsMaxAgeHours / 24)} 天内保存的内容。`
-                    : "等待 Chrome 插件保存内容。"}
-                </span>
+        <div className="news-sidebar-resizer" onMouseDown={onResizerMouseDown}>
+          <div className="news-sidebar-resizer-dots" />
+        </div>
+
+        <div className="news-feed-col">
+          <div className="news-tabs">
+            {[
+            ["微信公众号", "微信公众号", counts.wechat],
+            ["Google News", "Google News", counts.trend],
+            ["starred", "已收藏", counts.starred],
+            ["all", "全部", counts.all]].
+            map(([k, label, count]) =>
+            <div key={k} className={`news-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
+                {label} <span style={{ color: "var(--text-4)", marginLeft: 4 }}>{count}</span>
               </div>
+            )}
+            <div className="page-actions news-page-actions">
+              {selectMode ?
+              <>
+                  <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+                  <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
+                  <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+                </> :
+              <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+              }
+              <Btn size="sm" variant="ghost" icon="filter">筛选</Btn>
+              <Btn size="sm" variant="ghost" icon="sparkles" onClick={processLlm} disabled={busy}>{busy ? "处理中..." : "LLM处理"}</Btn>
             </div>
-          )}
-          {dates.length === 0 &&
-            <EmptyState
-              icon="newspaper"
-              title={emptyState.title}>
-              {emptyState.body}
-            </EmptyState>
-          }
-          {dates.map((d) =>
-            <div key={d}>
-              <div className="news-day">{formatDate(d)}</div>
-              {grouped[d].map((n) => {
-                const isWechat = isWechatNewsItem(n);
-                const primaryTag = newsPrimaryTag(n);
-                const brand = !isWechat && !isGoogleNewsItem(n) ? guessBrand(n) : "";
-                const secondaryTag = sameMetaLabel(primaryTag, brand) ? "" : brand;
-                const sourceTone = isWechat ? "outline" : (isGoogleNewsItem(n) ? "accent" : "outline");
-                return (
-            <div className={`news-card ${n.sourceCount > 1 ? "grouped" : ""} ${n.unread ? "unread" : ""}`} key={n.id} role="button" tabIndex={0}
-              onClick={() => openNews(n)}
-              onKeyDown={(e) => { if (e.key === "Enter") openNews(n); }}>
-                  <NewsThumb item={n} />
-                  {selectMode && <label className="news-card-select" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={selectedIds.includes(n.id)} onChange={() => toggleSelect(n.id)} />
-                  </label>}
-                  <div className="news-body">
-                    <a
-                      className="news-title"
-                      href={n.original_url || n.url || "#"}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {n.titleZh}
-                    </a>
-                    <div className="news-summary">{n.summary}</div>
-                    <div className="news-meta">
-                      <Tag tone={sourceTone}>{primaryTag}</Tag>
-                      {secondaryTag ? <Tag tone="outline">{secondaryTag}</Tag> : null}
-                      {n.sourceCount > 1 ? <span className="news-source-pill">{n.sourceCount} 个来源</span> : null}
-                      <span>{formatRelativeTime(n.published_at)}</span>
-                    </div>
-                  </div>
-                  <div className="news-actions">
-                    <Btn size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); toggleStar(n.id); }}
-                icon={n.starred ? "star-fill" : "star"}
-                style={{ color: n.starred ? "var(--warn)" : undefined }} />
+          </div>
+
+          <div className="viewport">
+            <div className="page page-fluid news-feed-page" style={{ paddingTop: 8 }}>
+              {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
+              {sampleWorkspace && tab !== "starred" && (
+                <div className="live-sample-note">
+                  <div className="live-sample-note-main">
+                    <Icon name="rss" size={15} />
+                    <span>
+                      {liveNewsReady
+                        ? `News 只展示最近 ${Math.round(newsMaxAgeHours / 24)} 天内保存的内容。`
+                        : "等待 Chrome 插件保存内容。"}
+                    </span>
                   </div>
                 </div>
-                );
-              })}
+              )}
+              {dates.length === 0 &&
+                <EmptyState
+                  icon="newspaper"
+                  title={emptyState.title}>
+                  {emptyState.body}
+                </EmptyState>
+              }
+              {dates.map((d) =>
+                <div key={d}>
+                  <div className="news-day">{formatDate(d)}</div>
+                  {grouped[d].map((n) => {
+                    const isWechat = isWechatNewsItem(n);
+                    const primaryTag = newsPrimaryTag(n);
+                    const brand = !isWechat && !isGoogleNewsItem(n) ? guessBrand(n) : "";
+                    const secondaryTag = sameMetaLabel(primaryTag, brand) ? "" : brand;
+                    const sourceTone = isWechat ? "outline" : (isGoogleNewsItem(n) ? "accent" : "outline");
+                    return (
+                <div
+                  className={`news-card ${n.sourceCount > 1 ? "grouped" : ""} ${n.unread ? "unread" : ""}`}
+                  key={n.id}
+                  role="button"
+                  tabIndex={0}
+                  style={{ "--source-count": Math.min(Number(n.sourceCount || 1), 8) }}
+                  onClick={() => openNews(n)}
+                  onKeyDown={(e) => { if (e.key === "Enter") openNews(n); }}>
+                      <NewsThumb item={n} />
+                      {selectMode && <label className="news-card-select" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={selectedIds.includes(n.id)} onChange={() => toggleSelect(n.id)} />
+                      </label>}
+                      <div className="news-body">
+                        <a
+                          className="news-title"
+                          href={n.original_url || n.url || "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {n.titleZh}
+                        </a>
+                        <div className="news-summary">{n.summary}</div>
+                        <div className="news-meta">
+                          <Tag tone={sourceTone}>{primaryTag}</Tag>
+                          {secondaryTag ? <Tag tone="outline">{secondaryTag}</Tag> : null}
+                          {n.sourceCount > 1 ? <span className="news-source-pill">{n.sourceCount} 个来源</span> : null}
+                          <span>{formatRelativeTime(n.published_at)}</span>
+                        </div>
+                      </div>
+                      <div className="news-actions">
+                        <Btn size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); toggleStar(n.id); }}
+                    icon={n.starred ? "star-fill" : "star"}
+                    style={{ color: n.starred ? "var(--warn)" : undefined }} />
+                      </div>
+                    </div>
+                    );
+                  })}
+                </div>
+              )}
+              {hasMore ? (
+                <div ref={loadMoreRef} className="news-load-more">
+                  向下滚动，继续加载更多资讯
+                </div>
+              ) : items.length > initialBatchSize ? (
+                <div className="news-load-more done">
+                  已展示全部 {items.length} 条资讯
+                </div>
+              ) : null}
             </div>
-          )}
-          {hasMore ? (
-            <div ref={loadMoreRef} className="news-load-more">
-              向下滚动，继续加载更多资讯
-            </div>
-          ) : items.length > initialBatchSize ? (
-            <div className="news-load-more done">
-              已展示全部 {items.length} 条资讯
-            </div>
-          ) : null}
+          </div>
         </div>
+
       </div>
       {deleteTarget && <DeleteItemsConfirmModal entityLabel="资讯" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
       {sourceModalTarget && <NewsSourceModal group={sourceModalTarget} onClose={() => setSourceModalTarget(null)} onOpen={openOriginal} />}
@@ -1849,7 +1950,6 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                 if (url) window.open(externalHref(url), "_blank", "noopener,noreferrer");
               }}
             />
-            <Btn variant="ghost" icon="panel-open" title="收起详情栏" onClick={() => setDetailCollapsed?.(true)} />
           </div>
 
           <div className="detail-body">
@@ -1871,13 +1971,9 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
 
             {(() => {
               const fields = normalizeFields(data.settings?.fields, data.settings?.tag_groups);
-              const competitorFields = fields.filter((f) => f.entities.includes("competitor"));
+              const competitorFields = fields.filter((f) => f.entities.includes("competitor") && entityUsesField(selected, f));
               const attachField = async (field) => {
-                await api?.(`/api/fields/${encodeURIComponent(field.key)}`, {
-                  method: "PATCH",
-                  body: JSON.stringify({ entities: Array.from(new Set([...(Array.isArray(field.entities) ? field.entities : []), "competitor"])) }),
-                });
-                await refreshData?.();
+                await updateSelected(buildFieldPatch(field.key, []));
               };
               return (
                 <>
@@ -1900,6 +1996,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                       <AddFieldPopover
                         fields={fields}
                         entityType="competitor"
+                        entity={selected}
                         onAttach={attachField}
                         onGoSettings={() => { setAddFieldOpen(false); setNotice("请前往「设置 → 标签与字段」新建字段。"); }}
                         onClose={() => setAddFieldOpen(false)}
@@ -2213,45 +2310,39 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   return (
     <div className="viewport">
       <div className="page page-fluid">
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
-          <div>
-            <h1 className="h1">Spark 灵感库</h1>
-            <div className="muted text-sm">{demands.length} 条已录入</div>
-          </div>
-          <div className="page-actions">
-            <Btn size="sm" icon="sync" onClick={syncDemands}>同步飞书</Btn>
-          </div>
-        </div>
         {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
-        {filtered.length > 0 &&
+        {filtered.length > 0 && selectMode &&
           <div className={`bulk-toolbar ${selectMode ? "" : "idle"}`} style={{ marginBottom: 12 }}>
-            {selectMode ?
             <>
                 <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
                 <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
                 <span className="muted text-sm">{selectedIds.length} 条已选择</span>
-              </> :
-            <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
-            }
+              </>
           </div>
         }
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <Icon name="filter" size={13} style={{ color: "var(--text-3)" }} />
-          <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>筛选:</span>
-          <select className="input sm" style={{ height: 28 }} value={filterScenario} onChange={(e) => setFilterScenario(e.target.value)}>
-            <option value="">全部场景</option>
-            {allScenarios.filter(Boolean).map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select className="input sm" style={{ height: 28 }} value={filterInnov} onChange={(e) => setFilterInnov(e.target.value)}>
-            <option value="">全部创新类型</option>
-            {allInnov.filter(Boolean).map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <div className="news-tabs" style={{ padding: 0, borderBottom: "none", background: "transparent", marginLeft: 4 }}>
-            <div className={`news-tab ${viewMode === "card" ? "active" : ""}`} onClick={() => setViewMode("card")}>卡片</div>
-            <div className={`news-tab ${viewMode === "list" ? "active" : ""}`} onClick={() => setViewMode("list")}>列表</div>
+        <div className="demand-toolbar">
+          <div className="demand-toolbar-cluster">
+            <div className="demand-filter-group" role="group" aria-label="需求筛选">
+              <div className="demand-filter-label">
+                <Icon name="filter" size={13} />
+                <span>筛选</span>
+              </div>
+              <select className="demand-filter-select" value={filterScenario} onChange={(e) => setFilterScenario(e.target.value)}>
+                <option value="">全部场景</option>
+                {allScenarios.filter(Boolean).map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select className="demand-filter-select" value={filterInnov} onChange={(e) => setFilterInnov(e.target.value)}>
+                <option value="">全部创新类型</option>
+                {allInnov.filter(Boolean).map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="demand-view-switch" role="tablist" aria-label="需求视图">
+              <button type="button" className={viewMode === "card" ? "active" : ""} onClick={() => setViewMode("card")}>卡片</button>
+              <button type="button" className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>列表</button>
+            </div>
           </div>
-          <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text-3)" }}>
+          <span className="demand-match-count">
             匹配 {filtered.length} 条
           </span>
         </div>
@@ -2406,13 +2497,9 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
 
           {(() => {
             const normalizedFields = normalizeFields(fields, tagGroups);
-            const inspirationFields = normalizedFields.filter((f) => f.entities.includes("inspiration"));
+            const inspirationFields = normalizedFields.filter((f) => f.entities.includes("inspiration") && entityUsesField(demand, f));
             const attachField = async (field) => {
-              await api?.(`/api/fields/${encodeURIComponent(field.key)}`, {
-                method: "PATCH",
-                body: JSON.stringify({ entities: Array.from(new Set([...(Array.isArray(field.entities) ? field.entities : []), "inspiration"])) }),
-              });
-              await refreshData?.();
+              await save(buildFieldPatch(field.key, []));
             };
             return (
               <>
@@ -2430,10 +2517,11 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
                     <Icon name="plus" size={12} /> 添加字段
                   </button>
                   {addFieldOpen && (
-                    <AddFieldPopover
-                      fields={normalizedFields}
-                      entityType="inspiration"
-                      onAttach={attachField}
+                      <AddFieldPopover
+                        fields={normalizedFields}
+                        entityType="inspiration"
+                        entity={demand}
+                        onAttach={attachField}
                       onGoSettings={() => { setAddFieldOpen(false); onNavigateSettings?.(); }}
                       onClose={() => setAddFieldOpen(false)}
                     />
@@ -2795,14 +2883,13 @@ function ResearchScreen({ data, api, refreshData }) {
             <div className="muted text-sm">从 Lens 与 Spark 中匹配数据，AI 生成结构化分析报告</div>
           </div>
           <div className="page-actions">
-            {selectMode ?
+            {selectMode &&
             <>
                 <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
                 <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
-              </> :
-            <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+              </>
             }
-            <Btn variant="primary" icon="plus" onClick={() => setShowCreate(true)}>新建调研项目</Btn>
+            <Btn className="weave-create-btn" variant="primary" icon="plus" onClick={() => setShowCreate(true)}>新建调研项目</Btn>
           </div>
         </div>
 
@@ -2846,6 +2933,467 @@ function ResearchScreen({ data, api, refreshData }) {
 
 }
 window.ResearchScreen = ResearchScreen;
+
+// ============ KNOWLEDGE ============
+function KnowledgeScreen({ data, api, initialPane = "import" }) {
+  const workspaceId = data.workspace?.id || "";
+  const [projectId, setProjectId] = useState("demo-project");
+  const [docType, setDocType] = useState("prd");
+  const [pasteText, setPasteText] = useState("功能需求\n产品需支持单手快拆。\n\n包装需求\n需要包含说明书与保护内托。\n\n待确认问题\n认证范围是否覆盖海外销售？");
+  const [lastImport, setLastImport] = useState(null);
+  const [lastPack, setLastPack] = useState(null);
+  const [question, setQuestion] = useState("这份 PRD 定义了哪些功能？");
+  const [answer, setAnswer] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [graph, setGraph] = useState(null);
+  const [fusionCandidates, setFusionCandidates] = useState([]);
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState("");
+  const [activeDocSection, setActiveDocSection] = useState("");
+  const [selectedEntityId, setSelectedEntityId] = useState("");
+  const [activePane, setActivePane] = useState(initialPane);
+  const [audience, setAudience] = useState("internal");
+  const [publishPolicy, setPublishPolicy] = useState({
+    rag_enabled: true,
+    bot_enabled: true,
+    supplier_visible: false,
+    sales_visible: false,
+  });
+  const projectOptions = useMemo(() => {
+    const fromProducts = safeArray(data.products).map((item) => item.project_id).filter(Boolean);
+    const fromResearch = safeArray(data.research).map((item) => item.project_id || item.id).filter(Boolean);
+    return Array.from(new Set(["demo-project", ...fromProducts, ...fromResearch])).slice(0, 8);
+  }, [data.products, data.research]);
+  const importedSections = safeArray(lastImport?.document?.content?.normalized_sections);
+  const draftSections = safeArray(draft?.sections);
+  const selectedDraftSection = draftSections.find((section) => section.key === activeDocSection) || draftSections[0] || null;
+  const workspaceReady = Boolean(workspaceId);
+  const workflow = [
+    { key: "import", title: "导入", desc: lastImport ? `${importedSections.length} 个标准章节` : "粘贴飞书/PRD/MRD 文本", done: Boolean(lastImport), icon: "file-text" },
+    { key: "publish", title: "发布", desc: lastImport?.document?.status === "published" ? "已进入 RAG 索引" : "权限过滤后再入库", done: lastImport?.document?.status === "published", icon: "shield" },
+    { key: "graph", title: "图谱", desc: graph ? `${safeArray(graph.nodes).length} nodes / ${safeArray(graph.edges).length} edges` : "只读查看关联", done: Boolean(graph), icon: "network" },
+    { key: "pack", title: "资料包", desc: lastPack ? `${lastPack.sources?.length || 0} sources / ${lastPack.chunks?.length || 0} chunks` : "汇总项目证据", done: Boolean(lastPack), icon: "layers" },
+    { key: "answer", title: "问答", desc: answer ? `${safeArray(answer.citations).length} 条引用` : "只回答授权资料", done: Boolean(answer), icon: "bot" },
+    { key: "draft", title: "草稿", desc: draft ? `${draft.document?.doc_type?.toUpperCase()} · ${draftSections.length} 节` : "生成 MRD / PRD", done: Boolean(draft), icon: "edit" },
+  ];
+  const panes = [
+    {
+      key: "import",
+      icon: "file-text",
+      title: "导入资料",
+      desc: lastImport ? `${importedSections.length} 个章节已标准化` : "先把飞书/PRD/MRD 文本放进来",
+    },
+    {
+      key: "query",
+      icon: "bot",
+      title: "知识问答",
+      desc: lastPack ? `${lastPack.chunks?.length || 0} 个片段可检索` : "发布资料后再构建资料包",
+    },
+    {
+      key: "graph",
+      icon: "network",
+      title: "图谱治理",
+      desc: graph ? `${safeArray(graph.nodes).length} 个节点` : "查看实体、关系和待确认合并",
+    },
+    {
+      key: "draft",
+      icon: "edit",
+      title: "文档生成",
+      desc: draft ? `${draft.document?.doc_type?.toUpperCase()} 草稿已生成` : "从资料包生成 MRD / PRD",
+    },
+  ];
+  const activePaneMeta = panes.find((pane) => pane.key === activePane) || panes[0];
+  useEffect(() => {
+    setActivePane(initialPane);
+  }, [initialPane]);
+  const coverage = lastPack ? Math.round((lastPack.coverage_score || 0) * 100) : 0;
+  const modelLabel = answer?.model_status || draft?.model_status?.reason || "deterministic / ready";
+
+  const run = async (label, task) => {
+    setBusy(label);
+    setNotice("");
+    try {
+      const result = await task();
+      setNotice(`${label}完成`);
+      return result;
+    } catch (error) {
+      setNotice(error.message || `${label}失败`);
+      return null;
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const importDocument = async () => run("导入", async () => {
+    if (!workspaceId) throw new Error("当前账号还没有分配工作区");
+    const result = await api("/api/document-imports/paste", {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId, doc_type: docType, text: pasteText }),
+    });
+    setLastImport(result);
+    setGraph(null);
+    setFusionCandidates([]);
+    setSelectedEntityId(result.knowledge?.entities?.[0]?.id || "");
+    setActiveDocSection(result.document?.content?.normalized_sections?.[0]?.key || "");
+    setActivePane("import");
+    return result;
+  });
+  const publishImported = async () => {
+    const documentId = lastImport?.document?.id;
+    if (!documentId) return setNotice("请先导入文档");
+    return run("发布索引", async () => {
+      const result = await api(`/api/documents/${documentId}/publish`, {
+        method: "POST",
+        body: JSON.stringify(publishPolicy),
+      });
+      setLastImport({ ...lastImport, document: result.document, indexed: result.indexed });
+      setActivePane("graph");
+      return result;
+    });
+  };
+  const loadGraph = async () => {
+    if (!lastImport?.document?.id) return setNotice("请先导入并发布文档");
+    return run("加载图谱", async () => {
+      const entities = await api(`/api/knowledge/entities?project_id=${encodeURIComponent(projectId)}`);
+      const documentEntities = safeArray(entities).filter((entity) => safeArray(entity.source_refs).some((ref) => ref.document_id === lastImport.document.id));
+      const root = documentEntities.find((entity) => entity.id === selectedEntityId) || documentEntities[0];
+      const graphResult = root ? await api(`/api/knowledge/entities/${root.id}/graph?depth=2`) : { nodes: [], edges: [] };
+      const candidates = await api(`/api/knowledge/fusion-candidates?project_id=${encodeURIComponent(projectId)}`);
+      setSelectedEntityId(root?.id || "");
+      setGraph(graphResult);
+      setFusionCandidates(candidates);
+      setActivePane("graph");
+      return graphResult;
+    });
+  };
+  const patchFusion = async (candidateId, status) => run(status === "approved" ? "确认合并" : "拒绝合并", async () => {
+    const result = await api(`/api/knowledge/fusion-candidates/${candidateId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ project_id: projectId, status }),
+    });
+    setFusionCandidates((items) => safeArray(items).map((item) => item.id === candidateId ? result : item));
+    return result;
+  });
+  const buildPack = async () => run("构建资料包", async () => {
+    if (!workspaceId) throw new Error("当前账号还没有分配工作区");
+    const result = await api("/api/knowledge/packs/build", {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId, title: "Demo Knowledge Pack" }),
+    });
+    setLastPack(result);
+    setActivePane("query");
+    return result;
+  });
+  const askQuestion = async () => {
+    if (!lastPack?.id) return setNotice("请先构建 Knowledge Pack");
+    return run("问答", async () => {
+      const result = await api("/api/knowledge/query", {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId, pack_id: lastPack.id, question, audience }),
+      });
+      setAnswer(result);
+      setActivePane("query");
+      return result;
+    });
+  };
+  const generateDraft = async (type) => {
+    if (!lastPack?.id) return setNotice("请先构建 Knowledge Pack");
+    return run(type === "mrd" ? "生成 MRD" : "生成 PRD", async () => {
+      const result = await api(`/api/documents/${type}/draft`, {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId, pack_id: lastPack.id }),
+      });
+      setDraft(result);
+      setActiveDocSection(result.sections?.[0]?.key || "");
+      setActivePane("draft");
+      return result;
+    });
+  };
+  const exportSupplier = async () => {
+    const documentId = draft?.document?.id;
+    if (!documentId) return setNotice("请先生成 PRD/MRD 草稿");
+    return run("供应商版导出", async () => api(`/api/documents/${documentId}/export/supplier`, { method: "POST" }));
+  };
+
+  return (
+    <div className="viewport">
+      <div className="page page-fluid">
+        <div className="knowledge-studio">
+          <div className="knowledge-hero compact">
+            <div className="knowledge-hero-copy">
+              <div className="knowledge-eyebrow">RAG · MRD · PRD 工作台</div>
+              <h1 className="h1">{activePaneMeta.title}</h1>
+              <div className="muted text-sm">{activePaneMeta.desc}</div>
+            </div>
+            <div className="knowledge-hero-actions">
+              <Tag tone={busy ? "accent" : "outline"}>{busy || "Ready"}</Tag>
+              {notice && <Tag tone={notice.includes("失败") ? "danger" : "success"}>{notice}</Tag>}
+            </div>
+          </div>
+
+          <div className="knowledge-command">
+            <div className="knowledge-command-main">
+              <span>当前项目</span>
+              <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                {projectOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+              <span>文档类型</span>
+              <select className="input" value={docType} onChange={(e) => setDocType(e.target.value)}>
+                <option value="prd">PRD</option>
+                <option value="mrd">MRD</option>
+                <option value="report">Report</option>
+              </select>
+            </div>
+            <div className="knowledge-command-meta">
+              <Tag tone={workspaceReady ? "outline" : "danger"}>{data.workspace?.name || data.workspace?.slug || "未分配工作区"}</Tag>
+              <Tag tone="outline">{modelLabel}</Tag>
+            </div>
+          </div>
+
+          {!workspaceReady && (
+            <div className="knowledge-workspace-warning">
+              <Icon name="lock" size={14} />
+              <span>当前演示 visitor 没有绑定真实工作区，所以只能预览界面；登录正式账号后可以导入、索引、问答和生成文档。</span>
+            </div>
+          )}
+
+          <div className="knowledge-overview">
+            <div className="knowledge-section-intro">
+              {panes.filter((pane) => pane.key === activePane).map((pane) => (
+                <div key={pane.key}>
+                  <Icon name={pane.icon} size={16} />
+                  <span>
+                    <strong>{pane.title}</strong>
+                    <small>{pane.desc}</small>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="knowledge-workflow compact">
+              {workflow.map((step, index) => (
+                <div key={step.key} className={`knowledge-step ${step.done ? "done" : ""}`}>
+                  <div className="knowledge-step-index">{step.done ? <Icon name="check" size={13} /> : index + 1}</div>
+                  <div className="knowledge-step-body">
+                    <div><Icon name={step.icon} size={13} />{step.title}</div>
+                    <span>{step.desc}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className={`knowledge-pane-layout ${activePane}`}>
+            {activePane === "import" && <section className="knowledge-panel knowledge-panel-flow">
+              <div className="knowledge-panel-head">
+                <Icon name="file-text" size={15} />
+                <div><h3>资料入口</h3><p>复制飞书文档文本即可导入；图片暂不落盘，只保留结构和占位信息。</p></div>
+              </div>
+              <textarea className="input knowledge-textarea" value={pasteText} onChange={(e) => setPasteText(e.target.value)} />
+              <div className="knowledge-actions">
+                <Btn variant="primary" icon="plus" onClick={importDocument} disabled={!workspaceReady || Boolean(busy)}>导入并标准化</Btn>
+                <Btn icon="check" onClick={publishImported} disabled={!workspaceReady || !lastImport || Boolean(busy)}>发布到 RAG</Btn>
+                <Btn icon="network" onClick={loadGraph} disabled={!workspaceReady || !lastImport || Boolean(busy)}>查看图谱</Btn>
+              </div>
+              <div className="knowledge-policy-strip">
+                {[
+                  ["rag_enabled", "RAG 可引用"],
+                  ["bot_enabled", "飞书 Bot"],
+                  ["supplier_visible", "供应商版"],
+                  ["sales_visible", "销售版"],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    className={`knowledge-toggle ${publishPolicy[key] ? "on" : ""}`}
+                    onClick={() => setPublishPolicy((current) => ({ ...current, [key]: !current[key] }))}
+                    type="button"
+                  >
+                    <span>{label}</span>
+                    <i>{publishPolicy[key] ? "开" : "关"}</i>
+                  </button>
+                ))}
+              </div>
+              {lastImport && <div className="knowledge-result">
+                <div>
+                  <strong>{lastImport.document?.title}</strong>
+                  <span>{lastImport.import?.status} · {importedSections.length} sections · {lastImport.document?.status || "draft"}</span>
+                </div>
+                <Tag tone="outline">{lastImport.indexed?.chunks?.length || 0} chunks</Tag>
+              </div>}
+            </section>}
+
+            {activePane === "graph" && <section className="knowledge-panel knowledge-panel-main">
+              <div className="knowledge-panel-head">
+                <Icon name="network" size={15} />
+                <div><h3>图谱治理</h3><p>只读查看实体与关系；候选合并必须由有权限的人确认。</p></div>
+              </div>
+              <div className="knowledge-pack-bar">
+                <Btn variant="primary" icon="sync" onClick={loadGraph} disabled={!workspaceReady || !lastImport || Boolean(busy)}>刷新图谱</Btn>
+                <div className="knowledge-metrics">
+                  <div><strong>{safeArray(graph?.nodes).length}</strong><span>nodes</span></div>
+                  <div><strong>{safeArray(graph?.edges).length}</strong><span>edges</span></div>
+                  <div><strong>{safeArray(fusionCandidates).length}</strong><span>fusion</span></div>
+                </div>
+              </div>
+              {graph ? (
+                <div className="knowledge-graph-grid">
+                  <div className="knowledge-graph-card">
+                    <div className="knowledge-evidence-title">实体节点</div>
+                    <div className="knowledge-section-list">
+                      {safeArray(graph.nodes).map((node) => (
+                        <button
+                          key={node.id}
+                          type="button"
+                          className={`knowledge-section-row ${selectedEntityId === node.id ? "active" : ""}`}
+                          onClick={() => setSelectedEntityId(node.id)}
+                        >
+                          <span>{node.canonical_name}</span>
+                          <Tag tone="outline">{node.entity_type}</Tag>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="knowledge-graph-card">
+                    <div className="knowledge-evidence-title">关系边</div>
+                    <div className="knowledge-citations graph-list">
+                      {safeArray(graph.edges).map((edge) => <Tag key={edge.id} tone="outline">{edge.relation_type}</Tag>)}
+                      {!safeArray(graph.edges).length ? <Tag tone="outline">暂无关系</Tag> : null}
+                    </div>
+                  </div>
+                  <div className="knowledge-graph-card">
+                    <div className="knowledge-evidence-title">待确认 Fusion</div>
+                    <div className="knowledge-fusion-list">
+                      {safeArray(fusionCandidates).map((candidate) => (
+                        <div key={candidate.id} className="knowledge-fusion-row">
+                          <div>
+                            <strong>{candidate.action}</strong>
+                            <span>{candidate.reason || candidate.candidate_type}</span>
+                          </div>
+                          <Tag tone={candidate.status === "pending" ? "accent" : "outline"}>{candidate.status}</Tag>
+                          {candidate.status === "pending" ? (
+                            <div className="knowledge-fusion-actions">
+                              <Btn size="sm" icon="check" onClick={() => patchFusion(candidate.id, "approved")} disabled={Boolean(busy)}>通过</Btn>
+                              <Btn size="sm" variant="ghost" icon="x" onClick={() => patchFusion(candidate.id, "rejected")} disabled={Boolean(busy)}>拒绝</Btn>
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                      {!safeArray(fusionCandidates).length ? <div className="knowledge-empty-note">暂无待确认候选。</div> : null}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="knowledge-empty-note">导入并发布文档后，可以在这里查看 Product Ontology 的节点、关系和待确认合并。</div>
+              )}
+            </section>}
+
+            {activePane === "query" && <section className="knowledge-panel knowledge-panel-main">
+              <div className="knowledge-panel-head">
+                <Icon name="database" size={15} />
+                <div><h3>资料包与问答</h3><p>把已发布文档、竞品、需求、Stream 汇入同一个项目资料包。</p></div>
+              </div>
+              <div className="knowledge-pack-bar">
+                <Btn variant="primary" icon="sync" onClick={buildPack} disabled={!workspaceReady || Boolean(busy)}>构建资料包</Btn>
+                {lastPack && <div className="knowledge-metrics">
+                  <div><strong>{lastPack.sources?.length || 0}</strong><span>sources</span></div>
+                  <div><strong>{lastPack.chunks?.length || 0}</strong><span>chunks</span></div>
+                  <div><strong>{coverage}%</strong><span>coverage</span></div>
+                </div>}
+              </div>
+              <div className="knowledge-question">
+                <div className="knowledge-question-head">
+                  <span>知识库问题</span>
+                  <select className="input" value={audience} onChange={(e) => setAudience(e.target.value)}>
+                    <option value="internal">内部</option>
+                    <option value="supplier">供应商</option>
+                    <option value="sales_external">销售外部</option>
+                  </select>
+                </div>
+                <textarea className="input" value={question} onChange={(e) => setQuestion(e.target.value)} />
+                <Btn icon="sparkles" onClick={askQuestion} disabled={!workspaceReady || !lastPack || Boolean(busy)}>问知识库</Btn>
+              </div>
+              {answer ? (
+                <div className={`knowledge-answer ${answer.mode === "refused" ? "is-refused" : ""}`}>
+                  <div className="knowledge-answer-top">
+                    <Tag tone={answer.mode === "refused" ? "danger" : "success"}>{answer.mode}</Tag>
+                    <span>{Math.round((answer.confidence || 0) * 100)}% confidence</span>
+                    {answer.needs_review ? <Tag tone="accent">needs review</Tag> : null}
+                  </div>
+                  <div className="knowledge-answer-text">{answer.answer}</div>
+                  <div className="knowledge-citations">
+                    {safeArray(answer.citations).map((item) => <Tag key={item.chunk_id || item.title} tone="outline">{item.title || item.chunk_id}</Tag>)}
+                    {!safeArray(answer.citations).length && <Tag tone="danger">无可引用资料</Tag>}
+                  </div>
+                </div>
+              ) : (
+                <div className="knowledge-empty-note">构建资料包后，问答会显示答案、可信度和引用来源。</div>
+              )}
+            </section>}
+
+            {activePane === "draft" && <aside className="knowledge-side">
+              <section className="knowledge-panel">
+                <div className="knowledge-panel-head">
+                  <Icon name="edit" size={15} />
+                  <div><h3>MRD / PRD 草稿</h3><p>生成后在这里快速审阅章节、引用和开放问题。</p></div>
+                </div>
+                <div className="knowledge-actions">
+                  <Btn icon="sparkles" onClick={() => generateDraft("mrd")} disabled={!workspaceReady || !lastPack || Boolean(busy)}>生成 MRD</Btn>
+                  <Btn icon="sparkles" onClick={() => generateDraft("prd")} disabled={!workspaceReady || !lastPack || Boolean(busy)}>生成 PRD</Btn>
+                </div>
+                {draft ? (
+                  <div className="knowledge-draft">
+                    <div className="knowledge-draft-title">{draft.document?.title}</div>
+                    <div className="muted text-sm">{draft.document?.doc_type?.toUpperCase()} · {draftSections.length} sections · {draft.needs_review ? "needs review" : "reviewed"}</div>
+                    <div className="knowledge-section-list">
+                      {draftSections.map((section) => (
+                        <button
+                          key={section.key}
+                          type="button"
+                          className={`knowledge-section-row ${selectedDraftSection?.key === section.key ? "active" : ""}`}
+                          onClick={() => setActiveDocSection(section.key)}
+                        >
+                          <span>{section.title}</span>
+                          <Tag tone="outline">{section.source_chunk_ids?.length || 0} refs</Tag>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="knowledge-empty-note">PRD 会突出功能属性、结构、工艺、认证、测试、供应链和包装需求，不使用 MVP 语言。</div>
+                )}
+              </section>
+
+              <section className="knowledge-panel">
+                <div className="knowledge-panel-head">
+                  <Icon name="shield" size={15} />
+                  <div><h3>证据与权限</h3><p>文档导出前确认对外可见范围。</p></div>
+                </div>
+                {selectedDraftSection ? (
+                  <div className="knowledge-evidence">
+                    <div className="knowledge-evidence-title">{selectedDraftSection.title}</div>
+                    <p>{selectedDraftSection.content || "暂无内容。"}</p>
+                    <div className="knowledge-citations">
+                      {safeArray(selectedDraftSection.source_refs).map((item) => <Tag key={item.chunk_id || item.title} tone="outline">{item.title || item.chunk_id}</Tag>)}
+                      {safeArray(selectedDraftSection.open_questions).map((item) => <Tag key={item} tone="accent">{item}</Tag>)}
+                      {!safeArray(selectedDraftSection.source_refs).length && !safeArray(selectedDraftSection.open_questions).length ? <Tag tone="outline">待补证据</Tag> : null}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="knowledge-empty-note">选择一个草稿章节后，会显示对应内容、引用和待确认问题。</div>
+                )}
+                <div className="knowledge-actions knowledge-export-actions">
+                  <Btn icon="external" onClick={exportSupplier} disabled={!workspaceReady || !draft || Boolean(busy)}>供应商版导出</Btn>
+                  <Btn icon="lock" disabled={!workspaceReady || !draft || Boolean(busy)}>销售版待接入</Btn>
+                </div>
+              </section>
+            </aside>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+window.KnowledgeScreen = KnowledgeScreen;
 
 function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const [productIds, setProductIds] = useState(safeArray(research.products));
@@ -2891,7 +3439,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
 
   return (
     <div className="viewport">
-      <div className="page" style={{ maxWidth: 920 }}>
+      <div className="page page-fluid research-detail-page">
         <div className="row page-actions-row" style={{ marginBottom: 18 }}>
           <Btn variant="ghost" icon="arrow-left" onClick={onBack}>返回</Btn>
           <div className="grow" />
@@ -2901,91 +3449,114 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 6 }}>
-          <h1 className="h1" style={{ flex: 1, fontSize: 24 }}>{research.title}</h1>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-            <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>状态</span>
-            <select
-              className="input sm"
-              style={{ height: 28, minWidth: 108 }}
-              value={status}
-              onChange={(e) => saveStatus(e.target.value)}
-            >
-              <option value="草稿">草稿</option>
-              <option value="分析中">分析中</option>
-              <option value="已完成">已完成</option>
-            </select>
+        <div className="research-detail-layout">
+          <div className="research-detail-main">
+            <div className="research-detail-hero">
+              <h1 className="h1">{research.title}</h1>
+              <div className="muted text-sm">创建于 {research.date} · 调研项目 #{research.id.toUpperCase()}</div>
+            </div>
+            {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
+
+            <Section icon="edit" label="产品描述">
+              <div className="research-detail-box research-desc-box">
+                {research.desc}
+              </div>
+            </Section>
+
+            <Section icon="boxes" label={`关联竞品 · ${products.length}`}
+            action={<button className="btn sm ghost" onClick={() => setPicker("product")}><Icon name="plus" size={12} /> 添加竞品</button>}>
+              <div className={`research-detail-box research-products-box ${products.length === 0 ? "is-empty" : ""}`}>
+                {products.map((p) =>
+                <div className="card research-linked-card research-product-card" key={p.id} onClick={() => setDetailTarget({ type: "product", id: p.id })} style={{ padding: 12, display: "flex", gap: 10, position: "relative" }}>
+                    <div className="products-thumb" style={{ width: 36, height: 36, fontSize: 18 }}>{p.emoji}</div>
+                    <div className="research-product-card-body" style={{ minWidth: 0, flex: 1 }}>
+                      <div className="research-product-card-title" style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                      <div className="row" style={{ marginTop: 3, fontSize: 11.5 }}>
+                        <span className="mono" style={{ fontWeight: 600 }}>{safeArray(p.platforms)[0]?.price || "—"}</span>
+                        <span style={{ color: "var(--text-3)" }}>· {safeArray(p.platforms)[0]?.rating ?? "—"}★</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="research-product-card-remove"
+                      aria-label={`移除 ${p.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const next = productIds.filter((id) => id !== p.id);
+                        setProductIds(next);saveLinks(next, demandIds);
+                      }}
+                    >
+                      <Icon name="x" size={12} style={{ color: "var(--text-4)" }} />
+                    </button>
+                  </div>
+                )}
+                {products.length === 0 &&
+                <button className="research-empty-add"
+                onClick={() => setPicker("product")}>
+                    <Icon name="plus" size={12} /> 从竞品库添加
+                  </button>
+                }
+              </div>
+            </Section>
+
+            <Section icon="lightbulb" label={`关联需求 · ${demands.length}`}
+            action={<button className="btn sm ghost" onClick={() => setPicker("demand")}><Icon name="plus" size={12} /> 添加需求</button>}>
+              <div className={`research-detail-box research-demands-box ${demands.length === 0 ? "is-empty" : ""}`}>
+                {demands.map((d, i) =>
+                <div className="research-linked-row" key={d.id} onClick={() => setDetailTarget({ type: "demand", id: d.id })} style={{ display: "flex", gap: 12, padding: "12px 14px", borderTop: i ? "1px solid var(--border)" : "none", alignItems: "center" }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
+                      <DemandThumb hue={d.thumbHue} label="" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600 }}>{d.title}</div>
+                      <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 1 }}>
+                        {PLATFORM_LABEL[d.source]} · {d.date} · {d.innovation}
+                      </div>
+                    </div>
+                    <Icon name="x" size={12} style={{ cursor: "pointer", color: "var(--text-4)" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const next = demandIds.filter((id) => id !== d.id);
+                    setDemandIds(next);saveLinks(productIds, next);
+                  }} />
+                  </div>
+                )}
+                {demands.length === 0 &&
+                <button className="research-empty-add"
+                onClick={() => setPicker("demand")}>
+                    <Icon name="plus" size={12} /> 从 Spark 添加
+                  </button>
+                }
+              </div>
+            </Section>
           </div>
+          <aside className="research-detail-side">
+            <div className="research-side-card">
+              <div className="research-side-label">状态</div>
+              <select
+                className="input sm"
+                value={status}
+                onChange={(e) => saveStatus(e.target.value)}
+              >
+                <option value="草稿">草稿</option>
+                <option value="分析中">分析中</option>
+                <option value="已完成">已完成</option>
+              </select>
+            </div>
+            <div className="research-side-card">
+              <div className="research-side-label">关联资产</div>
+              <div className="research-side-metrics">
+                <div><strong>{products.length}</strong><span>竞品</span></div>
+                <div><strong>{demands.length}</strong><span>需求</span></div>
+                <div><strong>{research.analysis?.length || 0}</strong><span>分析</span></div>
+              </div>
+            </div>
+            <div className="research-side-card">
+              <div className="research-side-label">下一步</div>
+              <p>{research.analysis ? "可以导出报告，或继续补充竞品与需求证据。" : "补充关联竞品和需求后，点击重新分析生成报告。"}</p>
+            </div>
+          </aside>
         </div>
-        <div className="muted text-sm" style={{ marginBottom: 22 }}>创建于 {research.date} · 调研项目 #{research.id.toUpperCase()}</div>
-        {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
-
-        <Section icon="edit" label="产品描述">
-          <div className="research-detail-box research-desc-box">
-            {research.desc}
-          </div>
-        </Section>
-
-        <Section icon="boxes" label={`关联竞品 · ${products.length}`}
-        action={<button className="btn sm ghost" onClick={() => setPicker("product")}><Icon name="plus" size={12} /> 添加竞品</button>}>
-          <div className={`research-detail-box research-products-box ${products.length === 0 ? "is-empty" : ""}`}>
-            {products.map((p) =>
-            <div className="card research-linked-card" key={p.id} onClick={() => setDetailTarget({ type: "product", id: p.id })} style={{ padding: 12, display: "flex", gap: 10, position: "relative" }}>
-                <div className="products-thumb" style={{ width: 36, height: 36, fontSize: 18 }}>{p.emoji}</div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                  <div className="row" style={{ marginTop: 3, fontSize: 11.5 }}>
-                    <span className="mono" style={{ fontWeight: 600 }}>{safeArray(p.platforms)[0]?.price || "—"}</span>
-                    <span style={{ color: "var(--text-3)" }}>· {safeArray(p.platforms)[0]?.rating ?? "—"}★</span>
-                  </div>
-                </div>
-                <Icon name="x" size={12} style={{ cursor: "pointer", color: "var(--text-4)", position: "absolute", top: 8, right: 8 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                const next = productIds.filter((id) => id !== p.id);
-                setProductIds(next);saveLinks(next, demandIds);
-              }} />
-              </div>
-            )}
-            {products.length === 0 &&
-            <button className="research-empty-add"
-            onClick={() => setPicker("product")}>
-                <Icon name="plus" size={12} /> 从竞品库添加
-              </button>
-            }
-          </div>
-        </Section>
-
-        <Section icon="lightbulb" label={`关联需求 · ${demands.length}`}
-        action={<button className="btn sm ghost" onClick={() => setPicker("demand")}><Icon name="plus" size={12} /> 添加需求</button>}>
-          <div className={`research-detail-box research-demands-box ${demands.length === 0 ? "is-empty" : ""}`}>
-            {demands.map((d, i) =>
-            <div className="research-linked-row" key={d.id} onClick={() => setDetailTarget({ type: "demand", id: d.id })} style={{ display: "flex", gap: 12, padding: "12px 14px", borderTop: i ? "1px solid var(--border)" : "none", alignItems: "center" }}>
-                <div style={{ width: 44, height: 44, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
-                  <DemandThumb hue={d.thumbHue} label="" />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>{d.title}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 1 }}>
-                    {PLATFORM_LABEL[d.source]} · {d.date} · {d.innovation}
-                  </div>
-                </div>
-                <Icon name="x" size={12} style={{ cursor: "pointer", color: "var(--text-4)" }}
-              onClick={(e) => {
-                e.stopPropagation();
-                const next = demandIds.filter((id) => id !== d.id);
-                setDemandIds(next);saveLinks(productIds, next);
-              }} />
-              </div>
-            )}
-            {demands.length === 0 &&
-            <button className="research-empty-add"
-            onClick={() => setPicker("demand")}>
-                <Icon name="plus" size={12} /> 从 Spark 添加
-              </button>
-            }
-          </div>
-        </Section>
 
         {picker === "product" &&
         <PickerModal title="添加关联竞品" items={data.products} excludeIds={productIds}
@@ -3026,35 +3597,37 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
         <DemandDetailDrawer demand={detailDemand} api={api} refreshData={refreshData} onClose={() => setDetailTarget(null)} />
         }
 
-        <Section icon="sparkles" label="AI 分析报告">
-          {research.analysis ?
-          <div className="col" style={{ gap: 10 }}>
-              {research.analysis.map((a, i) =>
-            <div className="card" key={i} style={{ padding: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                    <span style={{ fontSize: 16 }}>{a.icon}</span>
-                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{a.title}</h4>
-                    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 10.5, color: "var(--text-3)" }}>置信度</span>
-                      <div className="confidence-bar"><span style={{ width: `${a.confidence * 100}%` }} /></div>
-                      <span style={{ fontSize: 11.5, fontWeight: 600 }}>{Math.round(a.confidence * 100)}%</span>
+        <div className="research-analysis-block">
+          <Section icon="sparkles" label="AI 分析报告">
+            {research.analysis ?
+            <div className="col" style={{ gap: 10 }}>
+                {research.analysis.map((a, i) =>
+              <div className="card" key={i} style={{ padding: 16 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      <span style={{ fontSize: 16 }}>{a.icon}</span>
+                      <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{a.title}</h4>
+                      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 10.5, color: "var(--text-3)" }}>置信度</span>
+                        <div className="confidence-bar"><span style={{ width: `${a.confidence * 100}%` }} /></div>
+                        <span style={{ fontSize: 11.5, fontWeight: 600 }}>{Math.round(a.confidence * 100)}%</span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, lineHeight: 1.7, color: "var(--text-2)" }}>{a.text}</div>
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border)", fontSize: 11, color: "var(--text-3)" }}>
+                      <Icon name="link" size={10} /> 数据来源:{a.source}
                     </div>
                   </div>
-                  <div style={{ fontSize: 13, lineHeight: 1.7, color: "var(--text-2)" }}>{a.text}</div>
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border)", fontSize: 11, color: "var(--text-3)" }}>
-                    <Icon name="link" size={10} /> 数据来源:{a.source}
-                  </div>
-                </div>
-            )}
-            </div> :
+              )}
+              </div> :
 
-          <div className="card" style={{ padding: 30, textAlign: "center", color: "var(--text-3)" }}>
-              <Icon name="sparkles" size={20} style={{ color: "var(--accent)", marginBottom: 8 }} />
-              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>AI 正在生成分析报告...</div>
-              <div style={{ fontSize: 11.5 }}>预计 30 秒</div>
-            </div>
-          }
-        </Section>
+            <div className="card" style={{ padding: 30, textAlign: "center", color: "var(--text-3)" }}>
+                <Icon name="sparkles" size={20} style={{ color: "var(--accent)", marginBottom: 8 }} />
+                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>AI 正在生成分析报告...</div>
+                <div style={{ fontSize: 11.5 }}>预计 30 秒</div>
+              </div>
+            }
+          </Section>
+        </div>
       </div>
     </div>);
 
@@ -3592,7 +4165,7 @@ function SettingsScreen({ data, api, refreshData }) {
           <div className="settings-section">
             <div className="settings-section-head">
               <Icon name="tag" size={14} style={{ color: "var(--accent)" }} />
-              <div><h3>标签与字段</h3><div className="desc">配置竞品库和灵感库的标签字段，支持新建自定义字段</div></div>
+              <div><h3>标签与字段</h3><div className="desc">账号字段库默认为空。需要使用字段时，先在这里新建，再到竞品或灵感详情里按需添加。</div></div>
             </div>
             <div className="settings-section-body">
               <FieldSystemEditor settings={settings} setSettings={setSettings} saveSettings={saveSettings} />

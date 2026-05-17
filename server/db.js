@@ -66,6 +66,10 @@ function feishuWorkspaceDefaults() {
   };
 }
 
+export function companyWorkspaceDefaults() {
+  return feishuWorkspaceDefaults();
+}
+
 export function migrate() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_data (
@@ -143,6 +147,8 @@ export function migrate() {
       name TEXT NOT NULL,
       url TEXT NOT NULL,
       type TEXT DEFAULT 'rss',
+      adapter_type TEXT DEFAULT 'rss',
+      adapter_config_json TEXT,
       language TEXT DEFAULT '',
       authority TEXT DEFAULT 'watchlist',
       group_name TEXT DEFAULT 'custom',
@@ -156,6 +162,72 @@ export function migrate() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS feed_groups (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT '${LEGACY_USER_ID}',
+      workspace_id TEXT,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      color TEXT DEFAULT '',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, slug)
+    );
+    CREATE INDEX IF NOT EXISTS idx_feed_groups_user_id ON feed_groups(user_id);
+
+    CREATE TABLE IF NOT EXISTS feed_group_sources (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT '${LEGACY_USER_ID}',
+      group_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(group_id, source_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_feed_group_sources_group_id ON feed_group_sources(group_id);
+    CREATE INDEX IF NOT EXISTS idx_feed_group_sources_source_id ON feed_group_sources(source_id);
+
+    CREATE TABLE IF NOT EXISTS feed_destinations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT '${LEGACY_USER_ID}',
+      workspace_id TEXT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'freshrss',
+      target TEXT DEFAULT '',
+      group_id TEXT,
+      config_json TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_feed_destinations_user_id ON feed_destinations(user_id);
+
+    CREATE TABLE IF NOT EXISTS feed_exports (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT '${LEGACY_USER_ID}',
+      workspace_id TEXT,
+      name TEXT NOT NULL,
+      format TEXT NOT NULL DEFAULT 'json',
+      scope_type TEXT NOT NULL DEFAULT 'group',
+      scope_id TEXT NOT NULL,
+      item_count INTEGER NOT NULL DEFAULT 0,
+      payload_json TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_feed_exports_user_id ON feed_exports(user_id);
+
+    CREATE TABLE IF NOT EXISTS feed_access_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT '${LEGACY_USER_ID}',
+      purpose TEXT NOT NULL DEFAULT 'feed',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_used_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_feed_access_tokens_user_id ON feed_access_tokens(user_id);
 
     CREATE TABLE IF NOT EXISTS news_items (
       id TEXT PRIMARY KEY,
@@ -217,6 +289,7 @@ export function migrate() {
     CREATE INDEX IF NOT EXISTS idx_llm_logs_status ON llm_call_logs(status);
     CREATE INDEX IF NOT EXISTS idx_llm_logs_kind ON llm_call_logs(kind);
     CREATE INDEX IF NOT EXISTS idx_llm_logs_created ON llm_call_logs(created_at DESC);
+
   `);
 
   const newsSourceColumns = new Set(db.prepare("PRAGMA table_info(news_sources)").all().map((column) => column.name));
@@ -224,6 +297,8 @@ export function migrate() {
   if (!newsSourceColumns.has("source_group")) db.exec("ALTER TABLE news_sources ADD COLUMN source_group TEXT DEFAULT 'custom';");
   if (!newsSourceColumns.has("brand")) db.exec("ALTER TABLE news_sources ADD COLUMN brand TEXT DEFAULT '';");
   if (!newsSourceColumns.has("last_item_count")) db.exec("ALTER TABLE news_sources ADD COLUMN last_item_count INTEGER DEFAULT 0;");
+  if (!newsSourceColumns.has("adapter_type")) db.exec("ALTER TABLE news_sources ADD COLUMN adapter_type TEXT DEFAULT 'rss';");
+  if (!newsSourceColumns.has("adapter_config_json")) db.exec("ALTER TABLE news_sources ADD COLUMN adapter_config_json TEXT;");
 
   const newsItemColumns = new Set(db.prepare("PRAGMA table_info(news_items)").all().map((column) => column.name));
   if (!newsItemColumns.has("workspace_id")) db.exec("ALTER TABLE news_items ADD COLUMN workspace_id TEXT;");

@@ -4,7 +4,7 @@ process.env.DATABASE_PATH = ":memory:";
 
 const dbModule = await import("./db.js");
 const repo = await import("./repository.js");
-const { fieldOptionsText } = await import("./field-config.js");
+const { DEFAULT_FIELDS, fieldOptionsText } = await import("./field-config.js");
 const { matchFieldKey, matchFieldOption, matchFieldOptionInText, normalizeTagValues } = await import("./field-matcher.js");
 
 beforeEach(() => {
@@ -94,6 +94,37 @@ describe("repository", () => {
     expect(product.related_product_id).toBe("p-1");
     expect(product.related_product_name).toBe("Linked Product");
     expect(repo.rawState(legacyUserId).products.filter((item) => !item.sample)).toHaveLength(1);
+  });
+
+  it("creates feed groups and assigns sources", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const source = repo.createNewsSource(legacyUserId, {
+      name: "Sony Feed",
+      url: "https://example.com/sony.xml",
+      group: "brand-news",
+      source_group: "custom",
+    });
+    const group = repo.createFeedGroup(legacyUserId, {
+      name: "Photography Brands",
+      slug: "photography-brands",
+    });
+
+    const linked = repo.assignSourceToFeedGroup(legacyUserId, group.id, source.id);
+    const members = repo.listFeedGroupSources(legacyUserId, group.id);
+
+    expect(group.slug).toBe("photography-brands");
+    expect(linked).toMatchObject({ group_id: group.id, source_id: source.id });
+    expect(members.map((item) => item.id)).toContain(source.id);
+  });
+
+  it("creates a stable feed access token per user", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const first = repo.ensureFeedAccessToken(legacyUserId);
+    const second = repo.ensureFeedAccessToken(legacyUserId);
+    const resolved = repo.findUserIdByFeedAccessToken(first);
+
+    expect(first).toBe(second);
+    expect(resolved).toBe(legacyUserId);
   });
 
   it("keeps the first collected product cover when later auto updates include another image", () => {
@@ -670,6 +701,27 @@ describe("repository", () => {
     expect(sources[0].fetch_interval).toBe(1440);
   });
 
+  it("imports wechat exporter accounts as RSSHub feeds when configured", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const result = repo.importWechatExporterAccounts(legacyUserId, {
+      usefor: "wechat-article-exporter",
+      accounts: [
+        { fakeid: "MzA3", nickname: "SmallRig斯莫格" },
+      ],
+    }, { interval: 1440, rsshubBaseUrl: "https://rss.example.com", maxPerSource: 12 });
+
+    expect(result.created).toHaveLength(1);
+    const sources = repo.listNewsSources(legacyUserId).filter((source) => source.source_group === "wechat-exporter");
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({
+      type: "rss",
+      adapter_type: "rsshub_wechat",
+      adapter_config: { fakeid: "MzA3", source: "wechat-article-exporter" },
+      fetch_interval: 1440,
+    });
+    expect(sources[0].url).toBe("https://rss.example.com/loom/wechat/MzA3?limit=12");
+  });
+
   it("does not overwrite masked secrets", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.updateSettings(legacyUserId, { llm_api_key: "********", feishu_app_secret: "********", llm_model: "m2" });
@@ -927,21 +979,14 @@ describe("repository", () => {
     expect(updated.related_product_name).toBe("Target Product");
   });
 
-  it("exposes field schema and keeps legacy tag groups for compatibility", () => {
+  it("starts account field schema empty while keeping default field templates available", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     const state = repo.bootstrap(legacyUserId);
 
-    expect(state.settings.fields.find((field) => field.key === "host")?.name).toBe("主机");
-    expect(state.settings.tag_groups.find((group) => group.key === "camera_brands")?.name).toBe("主机");
-    expect(state.settings.tag_groups.find((group) => group.key === "camera_brands")?.field_key).toBe("host");
-    expect(state.settings.fields.find((field) => field.key === "host")?.options).toEqual(expect.arrayContaining([
-      "Osmo Pocket 3",
-      "Osmo Action 5 Pro",
-      "DJI Mini 4 Pro",
-      "Insta360 Ace Pro 2",
-      "Insta360 X5",
-      "Insta360 GO 3S",
-    ]));
+    expect(state.settings.fields).toEqual([]);
+    expect(state.settings.tag_groups).toEqual([]);
+    expect(repo.listFields(legacyUserId)).toEqual([]);
+    expect(JSON.parse(fieldOptionsText(state.settings.fields, "host"))).toEqual(expect.arrayContaining(["Osmo Pocket 3"]));
   });
 
   it("does not merge brand and host options into a pseudo brands field", () => {
@@ -954,7 +999,7 @@ describe("repository", () => {
     expect(JSON.parse(fieldOptionsText(state.settings.fields, "brands"))).toEqual([]);
   });
 
-  it("merges latest official host defaults into existing settings fields", () => {
+  it("does not persist official default fields into account settings", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.updateSettings(legacyUserId, {
       fields: [
@@ -972,22 +1017,13 @@ describe("repository", () => {
     });
 
     const state = repo.bootstrap(legacyUserId);
-    const hostOptions = state.settings.fields.find((field) => field.key === "host")?.options || [];
-    expect(hostOptions).toEqual(expect.arrayContaining([
-      "Osmo Pocket 3",
-      "Osmo Action 5 Pro",
-      "DJI Mini 4 Pro",
-      "Insta360 Ace Pro 2",
-      "Insta360 X5",
-      "Insta360 GO 3S",
-      "DJI Osmo Pocket 3",
-      "Insta360 GO 3",
-    ]));
+    expect(state.settings.fields).toEqual([]);
+    expect(state.settings.tag_groups).toEqual([]);
+    expect(JSON.parse(fieldOptionsText(state.settings.fields, "host"))).toEqual(expect.arrayContaining(["Osmo Pocket 3"]));
   });
 
   it("fuzzy matches field keys and tag options", () => {
-    const legacyUserId = dbModule.getLegacyUserId();
-    const fields = repo.bootstrap(legacyUserId).settings.fields;
+    const fields = DEFAULT_FIELDS;
 
     expect(matchFieldKey("适配设备型号", fields)?.field.key).toBe("host");
     expect(matchFieldOption("pocket3", fields.find((field) => field.key === "host"))?.value).toBe("Osmo Pocket 3");

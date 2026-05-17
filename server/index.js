@@ -28,18 +28,78 @@ import { matchFieldKey, matchFieldOption, normalizeTagValues } from "./field-mat
 import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-service.js";
 import { analyzeResearch } from "./research-service.js";
 import { submitFeedbackToFeishu, syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
+import {
+  getDocumentImportResult,
+  importFeishuDocument,
+  importPastedDocument,
+  retryDocumentImport,
+} from "./document-import-service.js";
+import { generateMrdDraft, generatePrdDraft } from "./document-generation-service.js";
+import { patchDocumentSection, publishDocument } from "./document-access-service.js";
+import {
+  exportDocumentToFeishu,
+  exportSalesDocument,
+  exportSupplierDocument,
+} from "./feishu-doc-export-service.js";
+import { syncDocumentReviewToFeishuBase, syncKnowledgeGapToFeishu } from "./feishu-base-sync-service.js";
+import { handleFeishuBotQuestion } from "./feishu-bot-service.js";
+import { indexKnowledgeRecord } from "./knowledge-indexer.js";
+import { generateProjectKnowledgePack, generateResearchKnowledgePack } from "./knowledge-pack-service.js";
+import { evaluateKnowledgeRegression, listKnowledgeQueryLogs, queryKnowledge } from "./knowledge-query-service.js";
+import {
+  assertSameWorkspace,
+  authorizedChunkPredicate,
+  canAccessDocument,
+  resolveUserWorkspace,
+  roleCodesForUser,
+} from "./knowledge-access-service.js";
+import {
+  createDocument,
+  createProject,
+  getDocument,
+  getProject,
+  getKnowledgeGap,
+  getKnowledgeEntity,
+  getKnowledgeEntityGraph,
+  getKnowledgeFusionCandidate,
+  getKnowledgePack,
+  listKnowledgeEntities,
+  listKnowledgeFusionCandidates,
+  listDocumentTemplates,
+  listDocuments,
+  listProductTypeTemplates,
+  listProjects,
+  updateKnowledgeFusionCandidate,
+  updateDocument,
+  updateProject,
+  upsertDocumentTemplate,
+  upsertProductTypeTemplate,
+} from "./knowledge-repository.js";
 import { loadInitialData } from "./seed.js";
 import { applySealConfig } from "./seal-config.js";
 import { isRecentSampleNews, isSampleWorkspace } from "./sample-workspace.js";
 import {
+  buildFeedHubBootstrap,
+  buildGroupFeed,
+  buildHubOpml,
+  buildSourceFeed,
+  exportGroupArchive,
+  renderFreshRssReadingList,
+} from "./feed-hub-service.js";
+import {
+  assignSourceToFeedGroup,
   bootstrap,
   acquireLock,
   createNewsSource,
+  createFeedDestination,
+  createFeedGroup,
   createDemand,
   createField,
   createProduct,
   createResearch,
   deleteDemand,
+  deleteFeedDestination,
+  deleteFeedGroup,
   deleteField,
   deleteNews,
   deleteNewsSource,
@@ -48,6 +108,7 @@ import {
   addFieldOption,
   ensureLegacyWorkspace,
   ensureLocalUser,
+  ensureDefaultWorkspaceForUser,
   getUserIdByApiToken,
   findUserByEmail,
   findUserByFeishuProfile,
@@ -68,8 +129,14 @@ import {
   syncOfficialNewsToAllUsers,
   syncOfficialNewsToUser,
   ensureOfficialNewsCache,
+  ensureFeedAccessToken,
+  findUserIdByFeedAccessToken,
   touchUserLogin,
+  listFeedDestinations,
+  listFeedGroups,
   updateDemand,
+  updateFeedDestination,
+  updateFeedGroup,
   updateField,
   updateNews,
   updateNewsSource,
@@ -87,6 +154,7 @@ const port = Number(process.env.PORT || 3000);
 const SQLiteStore = SQLiteStoreFactory(session);
 const wechatExporterAccountsPath = process.env.WECHAT_EXPORTER_ACCOUNTS_PATH || path.join(projectRoot, "data", "wechat-exporter-accounts.json");
 const wechatExporterSourceIntervalMinutes = Number(process.env.WECHAT_EXPORTER_SOURCE_INTERVAL_MINUTES || 1440);
+const rsshubBaseUrl = String(process.env.RSSHUB_BASE_URL || "").trim();
 const wechatCollectHours = String(process.env.WECHAT_COLLECT_HOURS || "9,21")
   .split(",")
   .map((value) => Number(value.trim()))
@@ -104,7 +172,7 @@ ensureSeed(loadInitialData());
 const legacyUser = ensureLegacyWorkspace();
 const sealConfigResult = applySealConfig();
 if (sealConfigResult.configured) {
-  console.log(`Loom seal config applied: workspaces=${sealConfigResult.workspaces} sources=${sealConfigResult.newsSources}`);
+  console.log(`LOOM seal config applied: workspaces=${sealConfigResult.workspaces} sources=${sealConfigResult.newsSources}`);
 }
 const sampleRefreshInFlight = new Set();
 const requestLogEnabled = ["1", "true", "yes"].includes(String(process.env.LOOM_REQUEST_LOG || "").toLowerCase());
@@ -184,13 +252,117 @@ function currentUser(req) {
   return user?.status === "active" ? user : null;
 }
 
+function feedBaseUrl(req) {
+  return `${req.protocol}://${req.get("host")}`;
+}
+
 function requireAuth(req, res, next) {
   const user = currentUser(req);
   if (!user) return res.status(401).json({ error: "unauthorized" });
+  ensureDefaultWorkspaceForUser(user);
   res.locals.loomUserId = user.id;
   req.session.userId = user.id;
   req.session.user = sessionUserResponse(user);
   next();
+}
+
+function requestWorkspaceId(req, source = "body") {
+  const user = currentUser(req);
+  const container = source === "query" ? req.query : req.body;
+  return resolveUserWorkspace(user, container?.workspace_id);
+}
+
+function resourceInRequestWorkspace(req, resource, label = "resource") {
+  return assertSameWorkspace(resource, requestWorkspaceId(req), label);
+}
+
+function currentWorkspaceRoles(req, workspaceId) {
+  return roleCodesForUser(currentUser(req), workspaceId);
+}
+
+function canManageWorkspaceResource(req, resource) {
+  const user = currentUser(req);
+  const roles = currentWorkspaceRoles(req, resource?.workspace_id);
+  return Boolean(
+    resource?.owner_user_id === user?.id ||
+    roles.includes("owner") ||
+    roles.includes("admin") ||
+    user?.role_code === "owner" ||
+    user?.role_code === "admin"
+  );
+}
+
+function assertCanManageResource(req, resource, label = "resource") {
+  if (!resource) return null;
+  resourceInRequestWorkspace(req, resource, label);
+  if (!canManageWorkspaceResource(req, resource)) {
+    throw new AppError(403, "resource_forbidden", "无权修改该资源。");
+  }
+  return resource;
+}
+
+function assertCanReadDocument(req, document) {
+  if (!document) return null;
+  resourceInRequestWorkspace(req, document, "document");
+  if (!canAccessDocument(document, {
+    user: currentUser(req),
+    roles: currentWorkspaceRoles(req, document.workspace_id),
+  })) {
+    throw new AppError(404, "document_not_found", "文档不存在或无权访问。");
+  }
+  return document;
+}
+
+function sourceDocumentIds(resource) {
+  const refs = Array.isArray(resource?.source_refs) ? resource.source_refs : [];
+  return [...new Set(refs.map((ref) => String(ref?.document_id || "").trim()).filter(Boolean))];
+}
+
+function canAccessKnowledgeResource(req, resource) {
+  resourceInRequestWorkspace(req, resource, "knowledge_resource");
+  const documentIds = sourceDocumentIds(resource);
+  if (!documentIds.length) return true;
+  return documentIds.every((documentId) => {
+    const document = getDocument(documentId);
+    return document && document.workspace_id === resource.workspace_id && canAccessDocument(document, {
+      user: currentUser(req),
+      roles: currentWorkspaceRoles(req, resource.workspace_id),
+    });
+  });
+}
+
+function filterReadableKnowledgeEntities(req, entities) {
+  return entities.filter((entity) => canAccessKnowledgeResource(req, entity));
+}
+
+function packForGeneration(req, pack) {
+  if (!pack) return null;
+  const accessContext = {
+    user: currentUser(req),
+    user_id: currentUserId(req),
+    roles: currentWorkspaceRoles(req, pack.workspace_id),
+  };
+  return {
+    ...pack,
+    chunks: (pack.chunks || []).filter(authorizedChunkPredicate(accessContext)),
+    sources: pack.sources || [],
+  };
+}
+
+function draftGenerationInput(req, workspaceId, pack) {
+  return {
+    workspace_id: workspaceId,
+    owner_user_id: currentUserId(req),
+    project_id: req.body?.project_id,
+    pack_id: req.body?.pack_id,
+    title: req.body?.title,
+    product_type_code: req.body?.product_type_code,
+    product_type_template: req.body?.product_type_template,
+    enabled_modules: req.body?.enabled_modules,
+    strong_model: req.body?.strong_model,
+    llm: req.body?.llm,
+    ...(pack ? { pack: packForGeneration(req, pack) } : {}),
+  };
 }
 
 function sessionUserResponse(user) {
@@ -306,6 +478,7 @@ function ensurePasswordUser(account = getPasswordAuthConfig()) {
     role: isConfiguredOwner ? "主理人" : existing?.role || "成员",
     role_code: isConfiguredOwner ? "owner" : existing?.role_code || "member",
     auth_provider: "password",
+    withDefaultWorkspace: isConfiguredOwner || normalizedEmail === String(process.env.APP_USERNAME || "").trim().toLowerCase(),
   });
 }
 
@@ -369,16 +542,19 @@ function syncWechatExporterSourcesForUser(userId) {
   if (!manifest) return null;
   return importWechatExporterAccounts(userId, manifest, {
     interval: wechatExporterSourceIntervalMinutes,
-    type: "wechat_exporter",
+    type: rsshubBaseUrl ? "rss" : "wechat_exporter",
+    adapter_type: rsshubBaseUrl ? "rsshub_wechat" : "wechat_exporter",
+    rsshubBaseUrl,
+    maxPerSource: Number(process.env.WECHAT_EXPORTER_MAX_PER_SOURCE || 20),
   });
 }
 
 function officialRssSources() {
-  return listNewsSources(legacyUser.id).filter((source) => String(source.type || "").toLowerCase() !== "wechat_exporter");
+  return listNewsSources(legacyUser.id).filter((source) => String(source.source_group || source.group || "").toLowerCase() !== "wechat-exporter");
 }
 
 function officialWechatSources() {
-  return listNewsSources(legacyUser.id).filter((source) => String(source.type || "").toLowerCase() === "wechat_exporter");
+  return listNewsSources(legacyUser.id).filter((source) => String(source.source_group || source.group || "").toLowerCase() === "wechat-exporter");
 }
 
 async function collectOfficialRssSources() {
@@ -558,6 +734,329 @@ app.get("/api/bootstrap", requireAuth, (req, res) => {
   ensureOfficialNewsCache(userId);
   res.json(bootstrap(userId));
 });
+
+app.get("/api/projects", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listProjects(workspaceId));
+});
+
+app.post("/api/projects", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.status(201).json(createProject({ ...(req.body || {}), workspace_id: workspaceId, owner_user_id: currentUserId(req) }));
+});
+
+app.patch("/api/projects/:id", requireAuth, (req, res) => {
+  const current = getProject(req.params.id);
+  if (!current) return res.status(404).json({ error: "project_not_found" });
+  assertCanManageResource(req, current, "project");
+  res.json(updateProject(req.params.id, req.body || {}));
+});
+
+app.get("/api/documents", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  const roles = currentWorkspaceRoles(req, workspaceId);
+  const user = currentUser(req);
+  const documents = listDocuments(workspaceId, {
+    project_id: req.query?.project_id,
+    doc_type: req.query?.doc_type,
+  }).filter((document) => canAccessDocument(document, { user, roles }));
+  res.json(documents);
+});
+
+app.post("/api/documents", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.status(201).json(createDocument({ ...(req.body || {}), workspace_id: workspaceId, owner_user_id: currentUserId(req) }));
+});
+
+app.get("/api/documents/:id", requireAuth, (req, res) => {
+  const document = getDocument(req.params.id);
+  if (!document) return res.status(404).json({ error: "document_not_found" });
+  res.json(assertCanReadDocument(req, document));
+});
+
+app.patch("/api/documents/:id", requireAuth, (req, res) => {
+  const current = getDocument(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_not_found" });
+  assertCanManageResource(req, current, "document");
+  res.json(updateDocument(req.params.id, req.body || {}));
+});
+
+app.get("/api/document-templates", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listDocumentTemplates(workspaceId, req.query?.doc_type || ""));
+});
+
+app.post("/api/document-templates", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.status(201).json(upsertDocumentTemplate({ ...(req.body || {}), workspace_id: workspaceId }));
+});
+
+app.get("/api/product-type-templates", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listProductTypeTemplates(workspaceId));
+});
+
+app.post("/api/product-type-templates", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.status(201).json(upsertProductTypeTemplate({ ...(req.body || {}), workspace_id: workspaceId }));
+});
+
+app.post("/api/document-imports/paste", requireAuth, asyncHandler(async (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  const result = await importPastedDocument({
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    created_by: currentUserId(req),
+  });
+  res.status(201).json(result);
+}));
+
+app.post("/api/document-imports/feishu", requireAuth, asyncHandler(async (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  const result = await importFeishuDocument({
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    created_by: currentUserId(req),
+  });
+  res.status(result.document ? 201 : 422).json(result);
+}));
+
+app.get("/api/document-imports/:id", requireAuth, (req, res) => {
+  const result = getDocumentImportResult(req.params.id);
+  if (!result) return res.status(404).json({ error: "document_import_not_found" });
+  resourceInRequestWorkspace(req, result.import, "document_import");
+  res.json(result);
+});
+
+app.post("/api/document-imports/:id/retry", requireAuth, asyncHandler(async (req, res) => {
+  const current = getDocumentImportResult(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_import_not_found" });
+  resourceInRequestWorkspace(req, current.import, "document_import");
+  const result = await retryDocumentImport(req.params.id);
+  res.json(result);
+}));
+
+app.get("/api/knowledge/entities", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  const entities = listKnowledgeEntities(workspaceId, {
+    project_id: req.query?.project_id,
+    entity_type: req.query?.entity_type,
+    status: req.query?.status || "active",
+  });
+  res.json(filterReadableKnowledgeEntities(req, entities));
+});
+
+app.get("/api/knowledge/entities/:id/graph", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  const entity = getKnowledgeEntity(req.params.id);
+  if (!entity || entity.workspace_id !== workspaceId) return res.status(404).json({ error: "knowledge_entity_not_found" });
+  if (!canAccessKnowledgeResource(req, entity)) return res.status(404).json({ error: "knowledge_entity_not_found" });
+  const graph = getKnowledgeEntityGraph(workspaceId, req.params.id, { depth: req.query?.depth });
+  const readableNodes = filterReadableKnowledgeEntities(req, graph.nodes);
+  const readableIds = new Set(readableNodes.map((node) => node.id));
+  res.json({
+    nodes: readableNodes,
+    edges: graph.edges.filter((edge) => readableIds.has(edge.from_entity_id) && readableIds.has(edge.to_entity_id)),
+  });
+});
+
+app.get("/api/knowledge/fusion-candidates", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listKnowledgeFusionCandidates(workspaceId, {
+    project_id: req.query?.project_id,
+    status: req.query?.status || "pending",
+  }));
+});
+
+app.patch("/api/knowledge/fusion-candidates/:id", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  const current = getKnowledgeFusionCandidate(req.params.id);
+  if (!current || current.workspace_id !== workspaceId) return res.status(404).json({ error: "knowledge_fusion_candidate_not_found" });
+  assertCanManageResource(req, { ...current, owner_user_id: current.created_by }, "knowledge_fusion_candidate");
+  let updated;
+  try {
+    updated = updateKnowledgeFusionCandidate(req.params.id, {
+      status: req.body?.status,
+      reason: req.body?.reason,
+      confidence: req.body?.confidence,
+    });
+  } catch (error) {
+    if (String(error.message || "").startsWith("invalid_fusion_status")) {
+      throw new AppError(400, error.message, "无效的知识合并状态流转。");
+    }
+    throw error;
+  }
+  res.json(updated);
+});
+
+app.post("/api/knowledge/index", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  const result = indexKnowledgeRecord({
+    ...(req.body?.record || req.body || {}),
+    workspace_id: workspaceId,
+  }, req.body?.source_type);
+  res.json(result);
+});
+
+app.post("/api/knowledge/packs/build", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  const payload = {
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    created_by: currentUserId(req),
+  };
+  const result = payload.pack_type === "research" || payload.research_id
+    ? generateResearchKnowledgePack(payload)
+    : generateProjectKnowledgePack(payload);
+  res.status(201).json(result);
+});
+
+app.get("/api/knowledge/packs/:id", requireAuth, (req, res) => {
+  const pack = getKnowledgePack(req.params.id);
+  if (!pack) return res.status(404).json({ error: "knowledge_pack_not_found" });
+  resourceInRequestWorkspace(req, pack, "knowledge_pack");
+  res.json(pack);
+});
+
+app.post("/api/knowledge/query", requireAuth, asyncHandler(async (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.json(await queryKnowledge({
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    user_id: currentUserId(req),
+    user: currentUser(req),
+    roles: currentWorkspaceRoles(req, workspaceId),
+  }));
+}));
+
+app.get("/api/knowledge/query-logs", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listKnowledgeQueryLogs(workspaceId, req.query?.limit));
+});
+
+app.post("/api/knowledge/evaluate", requireAuth, asyncHandler(async (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  if (Array.isArray(req.body?.cases)) {
+    return res.json(await evaluateKnowledgeRegression({
+      ...(req.body || {}),
+      workspace_id: workspaceId,
+      user_id: currentUserId(req),
+      user: currentUser(req),
+      roles: currentWorkspaceRoles(req, workspaceId),
+    }));
+  }
+  const result = await queryKnowledge({
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    user_id: currentUserId(req),
+    user: currentUser(req),
+    roles: currentWorkspaceRoles(req, workspaceId),
+  });
+  res.json({
+    ok: result.mode !== "refused",
+    mode: result.mode,
+    confidence: result.confidence,
+    citation_count: result.citations.length,
+    needs_review: result.needs_review,
+    gaps: result.gaps,
+  });
+}));
+
+app.post("/api/documents/mrd/draft", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  const pack = req.body?.pack_id ? getKnowledgePack(req.body.pack_id) : null;
+  if (req.body?.pack_id && !pack) return res.status(404).json({ error: "knowledge_pack_not_found" });
+  if (pack) resourceInRequestWorkspace(req, pack, "knowledge_pack");
+  res.status(201).json(generateMrdDraft(draftGenerationInput(req, workspaceId, pack)));
+});
+
+app.post("/api/documents/prd/draft", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  const pack = req.body?.pack_id ? getKnowledgePack(req.body.pack_id) : null;
+  if (req.body?.pack_id && !pack) return res.status(404).json({ error: "knowledge_pack_not_found" });
+  if (pack) resourceInRequestWorkspace(req, pack, "knowledge_pack");
+  res.status(201).json(generatePrdDraft(draftGenerationInput(req, workspaceId, pack)));
+});
+
+app.patch("/api/documents/:id/sections/:key", requireAuth, (req, res) => {
+  const current = getDocument(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_not_found" });
+  assertCanManageResource(req, current, "document");
+  const document = patchDocumentSection(req.params.id, req.params.key, req.body || {});
+  res.json(document);
+});
+
+app.post("/api/documents/:id/sections/:key/regenerate", requireAuth, (req, res) => {
+  const current = getDocument(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_not_found" });
+  assertCanManageResource(req, current, "document");
+  const document = patchDocumentSection(req.params.id, req.params.key, {
+    content: req.body?.content || "待重新生成。P0 暂未接入章节级 LLM 重新生成。",
+    status: "needs_review",
+  });
+  res.json({ document, mocked: true });
+});
+
+app.post("/api/documents/:id/publish", requireAuth, (req, res) => {
+  const current = getDocument(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_not_found" });
+  assertCanManageResource(req, current, "document");
+  const result = publishDocument(req.params.id, req.body?.access_policy || req.body || {});
+  res.json(result);
+});
+
+app.post("/api/documents/:id/export/feishu", requireAuth, (req, res) => {
+  const current = getDocument(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_not_found" });
+  assertCanManageResource(req, current, "document");
+  const result = exportDocumentToFeishu(req.params.id);
+  if (!result) return res.status(404).json({ error: "document_not_found" });
+  res.json(result);
+});
+
+app.post("/api/documents/:id/export/supplier", requireAuth, (req, res) => {
+  const current = getDocument(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_not_found" });
+  assertCanManageResource(req, current, "document");
+  const result = exportSupplierDocument(req.params.id);
+  if (!result) return res.status(404).json({ error: "document_not_found" });
+  res.json(result);
+});
+
+app.post("/api/documents/:id/export/sales", requireAuth, (req, res) => {
+  const current = getDocument(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_not_found" });
+  assertCanManageResource(req, current, "document");
+  const result = exportSalesDocument(req.params.id);
+  if (!result) return res.status(404).json({ error: "document_not_found" });
+  res.json(result);
+});
+
+app.post("/api/knowledge/gaps/:id/sync-feishu", requireAuth, (req, res) => {
+  const gap = getKnowledgeGap(req.params.id);
+  if (!gap) return res.status(404).json({ error: "knowledge_gap_not_found" });
+  resourceInRequestWorkspace(req, gap, "knowledge_gap");
+  const result = syncKnowledgeGapToFeishu(req.params.id);
+  res.json(result);
+});
+
+app.post("/api/documents/:id/sync-review-base", requireAuth, (req, res) => {
+  const current = getDocument(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_not_found" });
+  assertCanManageResource(req, current, "document");
+  res.json(syncDocumentReviewToFeishuBase(req.params.id, req.body || {}));
+});
+
+app.post("/api/bot/feishu/events", requireAuth, asyncHandler(async (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.json(await handleFeishuBotQuestion({
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    user_id: currentUserId(req),
+    user: currentUser(req),
+    roles: currentWorkspaceRoles(req, workspaceId),
+  }));
+}));
 
 app.get("/api/products", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).products));
 app.post("/api/products", requireAuth, (req, res) => res.status(201).json(createProduct(currentUserId(req), req.body || {})));
@@ -744,6 +1243,111 @@ app.patch("/api/news-sources/:id", requireAuth, (req, res) => {
 app.delete("/api/news-sources/:id", requireAuth, (req, res) => {
   if (!deleteNewsSource(currentUserId(req), req.params.id)) return res.status(404).json({ error: "news_source_not_found" });
   res.json({ ok: true });
+});
+
+app.get("/api/feed-hub/bootstrap", requireAuth, (req, res) => {
+  const userId = currentUserId(req);
+  const token = ensureFeedAccessToken(userId);
+  const baseUrl = feedBaseUrl(req);
+  res.json({
+    ...buildFeedHubBootstrap(userId),
+    feed_token: token,
+    public_urls: {
+      opml: `${baseUrl}/api/feed-hub/public/opml.xml?token=${encodeURIComponent(token)}`,
+      freshrss: `${baseUrl}/api/feed-hub/public/freshrss-reading-list.opml?token=${encodeURIComponent(token)}`,
+    },
+  });
+});
+
+app.get("/api/feed-hub/groups", requireAuth, (req, res) => {
+  res.json(listFeedGroups(currentUserId(req)));
+});
+app.post("/api/feed-hub/groups", requireAuth, (req, res) => {
+  res.status(201).json(createFeedGroup(currentUserId(req), req.body || {}));
+});
+app.patch("/api/feed-hub/groups/:id", requireAuth, (req, res) => {
+  const item = updateFeedGroup(currentUserId(req), req.params.id, req.body || {});
+  if (!item) return res.status(404).json({ error: "feed_group_not_found" });
+  res.json(item);
+});
+app.delete("/api/feed-hub/groups/:id", requireAuth, (req, res) => {
+  if (!deleteFeedGroup(currentUserId(req), req.params.id)) return res.status(404).json({ error: "feed_group_not_found" });
+  res.json({ ok: true });
+});
+app.post("/api/feed-hub/groups/:id/sources/:sourceId", requireAuth, (req, res) => {
+  const result = assignSourceToFeedGroup(currentUserId(req), req.params.id, req.params.sourceId);
+  if (!result) return res.status(404).json({ error: "feed_group_or_source_not_found" });
+  res.status(201).json(result);
+});
+app.delete("/api/feed-hub/groups/:id/sources/:sourceId", requireAuth, (req, res) => {
+  if (!removeSourceFromFeedGroup(currentUserId(req), req.params.id, req.params.sourceId)) {
+    return res.status(404).json({ error: "feed_group_source_not_found" });
+  }
+  res.json({ ok: true });
+});
+
+app.get("/api/feed-hub/destinations", requireAuth, (req, res) => {
+  res.json(listFeedDestinations(currentUserId(req)));
+});
+app.post("/api/feed-hub/destinations", requireAuth, (req, res) => {
+  res.status(201).json(createFeedDestination(currentUserId(req), req.body || {}));
+});
+app.patch("/api/feed-hub/destinations/:id", requireAuth, (req, res) => {
+  const item = updateFeedDestination(currentUserId(req), req.params.id, req.body || {});
+  if (!item) return res.status(404).json({ error: "feed_destination_not_found" });
+  res.json(item);
+});
+app.delete("/api/feed-hub/destinations/:id", requireAuth, (req, res) => {
+  if (!deleteFeedDestination(currentUserId(req), req.params.id)) return res.status(404).json({ error: "feed_destination_not_found" });
+  res.json({ ok: true });
+});
+
+app.get("/api/feed-hub/groups/:id/feed.xml", requireAuth, (req, res) => {
+  const payload = buildGroupFeed(currentUserId(req), req.params.id);
+  if (!payload) return res.status(404).type("text/plain").send("feed group not found\n");
+  res.type("application/rss+xml; charset=utf-8").send(payload.xml);
+});
+
+app.get("/api/feed-hub/sources/:id/feed.xml", requireAuth, (req, res) => {
+  const payload = buildSourceFeed(currentUserId(req), req.params.id);
+  if (!payload) return res.status(404).type("text/plain").send("feed source not found\n");
+  res.type("application/rss+xml; charset=utf-8").send(payload.xml);
+});
+
+app.get("/api/feed-hub/groups/:id/export", requireAuth, (req, res) => {
+  const exported = exportGroupArchive(currentUserId(req), req.params.id, {
+    format: String(req.query.format || "json"),
+  });
+  if (!exported) return res.status(404).json({ error: "feed_group_not_found" });
+  res.type(exported.contentType).send(exported.body);
+});
+
+app.get("/api/feed-hub/public/opml.xml", (req, res) => {
+  const token = String(req.query.token || "").trim();
+  const userId = findUserIdByFeedAccessToken(token);
+  if (!userId) return res.status(401).type("text/plain").send("unauthorized\n");
+  const xml = buildHubOpml(userId, { baseUrl: feedBaseUrl(req), token });
+  res.type("text/x-opml; charset=utf-8").send(xml);
+});
+
+app.get("/api/feed-hub/public/freshrss-reading-list.opml", (req, res) => {
+  const token = String(req.query.token || "").trim();
+  const userId = findUserIdByFeedAccessToken(token);
+  if (!userId) return res.status(401).type("text/plain").send("unauthorized\n");
+  const xml = renderFreshRssReadingList({
+    title: "LOOM Feed Hub",
+    opmlUrl: `${feedBaseUrl(req)}/api/feed-hub/public/opml.xml?token=${encodeURIComponent(token)}`,
+  });
+  res.type("text/x-opml; charset=utf-8").send(xml);
+});
+
+app.get("/api/feed-hub/public/groups/:slug.xml", (req, res) => {
+  const token = String(req.query.token || "").trim();
+  const userId = findUserIdByFeedAccessToken(token);
+  if (!userId) return res.status(401).type("text/plain").send("unauthorized\n");
+  const payload = buildGroupFeed(userId, req.params.slug);
+  if (!payload) return res.status(404).type("text/plain").send("feed group not found\n");
+  res.type("application/rss+xml; charset=utf-8").send(payload.xml);
 });
 
 app.get("/api/research", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).research || []));
@@ -937,7 +1541,7 @@ app.use(handleError);
 
 if (process.env.NODE_ENV !== "test") {
   app.listen(port, () => {
-    console.log(`Loom listening on http://0.0.0.0:${port}`);
+    console.log(`LOOM listening on http://0.0.0.0:${port}`);
   });
   if (process.env.NODE_ENV === "production") {
     startRssScheduler();
