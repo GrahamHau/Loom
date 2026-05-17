@@ -2310,16 +2310,19 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   return (
     <div className="viewport">
       <div className="page page-fluid">
-        {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
-        {filtered.length > 0 && selectMode &&
-          <div className={`bulk-toolbar ${selectMode ? "" : "idle"}`} style={{ marginBottom: 12 }}>
-            <>
-                <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
-                <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
-                <span className="muted text-sm">{selectedIds.length} 条已选择</span>
-              </>
-          </div>
-        }
+        {notice && (
+          <div className="ai-block" style={{
+            position: "fixed",
+            top: 18,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 1100,
+            margin: 0,
+            minWidth: 220,
+            maxWidth: "min(520px, calc(100vw - 32px))",
+            boxShadow: "var(--shadow-lg)",
+          }}>{notice}</div>
+        )}
 
         <div className="demand-toolbar">
           <div className="demand-toolbar-cluster">
@@ -2342,10 +2345,39 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
               <button type="button" className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>列表</button>
             </div>
           </div>
-          <span className="demand-match-count">
-            匹配 {filtered.length} 条
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="demand-match-count">匹配 {filtered.length} 条</span>
+            {filtered.length > 0 && !selectMode && (
+              <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+            )}
+          </div>
         </div>
+
+        {filtered.length > 0 && selectMode &&
+          <div className="bulk-toolbar" style={{
+            marginBottom: 12,
+            borderRadius: 14,
+            background: "color-mix(in srgb, var(--surface) 86%, transparent)",
+            boxShadow: "0 10px 30px rgba(0,0,0,.06)",
+          }}>
+            <div className="bulk-left">
+              <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
+              <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
+              <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+            </div>
+            <label className="bulk-check">
+              <input
+                type="checkbox"
+                checked={paged.items.length > 0 && paged.items.every((item) => selectedIds.includes(item.id))}
+                onChange={(event) => {
+                  const visibleIds = paged.items.map((item) => item.id);
+                  setSelectedIds(event.target.checked ? Array.from(new Set([...selectedIds, ...visibleIds])) : selectedIds.filter((id) => !visibleIds.includes(id)));
+                }}
+              />
+              <span>全选本页</span>
+            </label>
+          </div>
+        }
 
         {viewMode === "card" ?
         <div className="demands-grid">
