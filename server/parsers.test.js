@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 describe("parsers account fields", () => {
-  it("does not expose default product fields as tag_values when account fields are empty", async () => {
+  it("recognizes default product fields even when account custom fields are empty", async () => {
     mockLlmJson({
       name: "Osmo light",
       brand: "DJI",
@@ -64,11 +64,14 @@ describe("parsers account fields", () => {
 
     expect(result.brand).toBe("DJI");
     expect(result.category).toBe("灯光");
-    expect(result.tag_values).toEqual({});
-    expect(result.field_suggestions).toEqual(["品牌", "品类"]);
+    expect(result.tag_values).toEqual({
+      brand: ["DJI"],
+      category: ["灯光"],
+    });
+    expect(result.field_suggestions).toEqual([]);
   });
 
-  it("normalizes AI product tags only into configured account fields", async () => {
+  it("normalizes AI product tags into default and custom fields", async () => {
     const userId = dbModule.getLegacyUserId();
     const audience = repo.createField(userId, {
       key: "audience",
@@ -93,8 +96,10 @@ describe("parsers account fields", () => {
       data: { title: "Creator tripod", url: "https://example.test/tripod" },
     });
 
-    expect(result.tag_values).toEqual({ [audience.key]: ["创作者"] });
-    expect(result.tag_values.brand).toBeUndefined();
+    expect(result.tag_values).toEqual({
+      [audience.key]: ["创作者"],
+      brand: ["DJI"],
+    });
   });
 
   it("maps legacy product AI fields into configured account fields", async () => {
@@ -126,13 +131,13 @@ describe("parsers account fields", () => {
     });
 
     expect(result.tag_values).toEqual({
-      [brand.key]: ["DJI"],
-      [category.key]: ["灯光"],
+      brand: ["DJI"],
+      category: ["灯光"],
     });
     expect(result.field_suggestions).toEqual([]);
   });
 
-  it("normalizes AI demand tags only into configured account fields", async () => {
+  it("normalizes AI demand tags into default and custom fields", async () => {
     const userId = dbModule.getLegacyUserId();
     const scene = repo.createField(userId, {
       key: "scene",
@@ -158,8 +163,11 @@ describe("parsers account fields", () => {
       data: { title: "露营补光需求", content: "夜间露营拍摄需要柔和补光" },
     });
 
-    expect(result.tag_values).toEqual({ [scene.key]: ["露营"] });
-    expect(result.tag_values.innovation).toBeUndefined();
+    expect(result.tag_values).toEqual({
+      [scene.key]: ["露营"],
+      innovation: ["结构创新"],
+      scenarios: ["露营"],
+    });
   });
 
   it("maps legacy demand AI fields into configured account fields", async () => {
@@ -184,6 +192,34 @@ describe("parsers account fields", () => {
       data: { title: "露营补光需求", content: "夜间露营拍摄需要柔和补光" },
     });
 
-    expect(result.tag_values).toEqual({ [scene.key]: ["露营"] });
+    expect(result.tag_values).toEqual({
+      [scene.key]: ["露营"],
+      innovation: ["结构创新"],
+      scenarios: ["露营"],
+    });
+  });
+
+  it("recognizes default demand fields when account custom fields are empty", async () => {
+    mockLlmJson({
+      title: "Vlog 自拍补光需求",
+      summary: "用户想要更便携的自拍补光方案",
+      tags_scenario: ["vlog 自拍"],
+      tags_painpoint: ["太重"],
+      tags_innovation: "形态创新",
+      tags_custom: ["便携"],
+    });
+
+    const result = await parsers.parseDemandRaw(dbModule.getLegacyUserId(), {
+      platform: "xiaohongshu",
+      data: { title: "Vlog 自拍补光需求", content: "自拍补光灯太重，携带不方便" },
+    });
+
+    expect(result.tag_values).toEqual({
+      scenarios: ["Vlog/自拍"],
+      painpoints: ["携带不便/太重"],
+      innovation: ["形态创新"],
+      custom_tags: ["便携"],
+    });
+    expect(result.field_suggestions).toEqual([]);
   });
 });

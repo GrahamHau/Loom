@@ -463,36 +463,60 @@ const OFFICIAL_FIELD_DEFS = [
   { key: "custom_tags", name: "自定义标签", tagGroupKey: "custom_tags",      official: true,  multi: true,  entities: ["competitor", "inspiration"], tone: "outline" },
 ];
 
-function normalizeFields(fieldsOrGroups, fallbackGroups = []) {
+function normalizeFields(fieldsOrGroups, fallbackGroups = [], options = {}) {
+  const includeDefaults = options.includeDefaults === true;
   const source = Array.isArray(fieldsOrGroups) ? fieldsOrGroups : [];
+  const byKey = new Map();
+  const addField = (field) => {
+    if (!field?.key || byKey.has(field.key)) return;
+    byKey.set(field.key, field);
+  };
   if (source.some((item) => item?.options || item?.official !== undefined || item?.legacyKey)) {
-    return source.map((field) => ({
+    source.map((field) => ({
       key: field.key,
       name: field.name || field.key,
-      tagGroupKey: field.key,
+      tagGroupKey: field.legacyKey || field.key,
       legacyKey: field.legacyKey || field.key,
       official: field.official !== false,
       multi: field.multi !== false,
       entities: Array.isArray(field.entities) ? field.entities : ["competitor"],
       tone: field.tone || "outline",
       options: Array.isArray(field.options) ? field.options : [],
-    }));
+    })).forEach(addField);
+  } else {
+    const groups = source.length ? source : safeArray(fallbackGroups);
+    const officialGroupKeys = new Set(OFFICIAL_FIELD_DEFS.map((d) => d.tagGroupKey));
+    groups
+      .filter((g) => !officialGroupKeys.has(g.key))
+      .map((g) => ({
+        key: g.key,
+        name: g.name || g.key,
+        tagGroupKey: g.key,
+        legacyKey: g.key,
+        official: false,
+        multi: g.multi !== false,
+        entities: Array.isArray(g.entities) ? g.entities : ["competitor", "inspiration"],
+        tone: g.tone || "outline",
+        options: Array.isArray(g.tags) ? g.tags : [],
+      }))
+      .forEach(addField);
   }
-  const groups = source.length ? source : safeArray(fallbackGroups);
-  const officialGroupKeys = new Set(OFFICIAL_FIELD_DEFS.map((d) => d.tagGroupKey));
-  const custom = groups
-    .filter((g) => !officialGroupKeys.has(g.key))
-    .map((g) => ({
-      key: g.key,
-      name: g.name || g.key,
-      tagGroupKey: g.key,
-      official: false,
-      multi: g.multi !== false,
-      entities: Array.isArray(g.entities) ? g.entities : ["competitor", "inspiration"],
-      tone: g.tone || "outline",
-      options: Array.isArray(g.tags) ? g.tags : [],
-    }));
-  return custom;
+  if (includeDefaults) {
+    const groups = safeArray(fallbackGroups);
+    OFFICIAL_FIELD_DEFS
+      .map((field) => {
+        const group = groups.find((item) => item.key === field.tagGroupKey || item.field_key === field.key);
+        return {
+          ...field,
+          legacyKey: field.tagGroupKey,
+          name: group?.name || field.name,
+          tone: group?.tone || field.tone,
+          options: Array.isArray(group?.tags) ? group.tags : [],
+        };
+      })
+      .forEach(addField);
+  }
+  return Array.from(byKey.values());
 }
 
 function entityUsesField(entity, field) {
@@ -674,20 +698,19 @@ function DeleteDemandConfirmModal({ demand, busy, onClose, onConfirm }) {
   if (!demand) return null;
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
-      <div className="modal" style={{ width: 460 }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <Icon name="trash" size={16} style={{ color: "var(--danger)" }} />
-          <h3>确认删除需求</h3>
-          <Btn variant="ghost" icon="x" onClick={onClose} disabled={busy} />
+      <div className="modal destructive-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head destructive-modal-head">
+          <div className="destructive-icon"><Icon name="trash" size={17} /></div>
+          <div className="destructive-title">
+            <h3>删除这条需求？</h3>
+            <p>删除后将无法在当前需求库中恢复。</p>
+          </div>
         </div>
         <div className="modal-body">
-          <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 14 }}>
-            删除后将从当前需求库中移除，这个操作不可撤销。
-          </div>
           <div className="confirm-delete-summary">
             <div className="confirm-delete-row">
               <div className="confirm-delete-label">标题</div>
-              <div className="confirm-delete-value" style={{ fontWeight: 600 }}>{demand.title || "未命名需求"}</div>
+              <div className="confirm-delete-value">{demand.title || "未命名需求"}</div>
             </div>
             <div className="confirm-delete-row">
               <div className="confirm-delete-label">平台</div>
@@ -705,7 +728,7 @@ function DeleteDemandConfirmModal({ demand, busy, onClose, onConfirm }) {
         </div>
         <div className="modal-foot">
           <Btn variant="ghost" onClick={onClose} disabled={busy}>取消</Btn>
-          <Btn variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>{busy ? "删除中..." : "确认删除"}</Btn>
+          <Btn variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>{busy ? "删除中..." : "删除"}</Btn>
         </div>
       </div>
     </div>
@@ -716,20 +739,19 @@ function DeleteSourceConfirmModal({ source, busy, onClose, onConfirm }) {
   if (!source) return null;
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
-      <div className="modal" style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <Icon name="trash" size={16} style={{ color: "var(--danger)" }} />
-          <h3>确认删除数据源</h3>
-          <Btn variant="ghost" icon="x" onClick={onClose} disabled={busy} />
+      <div className="modal destructive-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head destructive-modal-head">
+          <div className="destructive-icon"><Icon name="trash" size={17} /></div>
+          <div className="destructive-title">
+            <h3>删除这个数据源？</h3>
+            <p>删除后，这个数据源将不再继续采集。</p>
+          </div>
         </div>
         <div className="modal-body">
-          <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 14 }}>
-            删除后这个 News 数据源将不会再继续采集。
-          </div>
           <div className="confirm-delete-summary">
             <div className="confirm-delete-row">
               <div className="confirm-delete-label">名称</div>
-              <div className="confirm-delete-value" style={{ fontWeight: 600 }}>{source.name}</div>
+              <div className="confirm-delete-value">{source.name}</div>
             </div>
             <div className="confirm-delete-row">
               <div className="confirm-delete-label">地址</div>
@@ -747,7 +769,7 @@ function DeleteSourceConfirmModal({ source, busy, onClose, onConfirm }) {
         </div>
         <div className="modal-foot">
           <Btn variant="ghost" onClick={onClose} disabled={busy}>取消</Btn>
-          <Btn variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>{busy ? "删除中..." : "确认删除"}</Btn>
+          <Btn variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>{busy ? "删除中..." : "删除"}</Btn>
         </div>
       </div>
     </div>
@@ -762,23 +784,23 @@ function DeleteItemsConfirmModal({ entityLabel, items, busy, onClose, onConfirm 
   if (!items?.length) return null;
   const preview = items.slice(0, 5);
   const extra = items.length - preview.length;
+  const isBulk = items.length > 1;
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
-      <div className="modal" style={{ width: 500 }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <Icon name="trash" size={16} style={{ color: "var(--danger)" }} />
-          <h3>{items.length > 1 ? `确认批量删除${entityLabel}` : `确认删除${entityLabel}`}</h3>
-          <Btn variant="ghost" icon="x" onClick={onClose} disabled={busy} />
+      <div className="modal destructive-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head destructive-modal-head">
+          <div className="destructive-icon"><Icon name="trash" size={17} /></div>
+          <div className="destructive-title">
+            <h3>{isBulk ? `删除 ${items.length} 条${entityLabel}？` : `删除这条${entityLabel}？`}</h3>
+            <p>{isBulk ? "这些内容会从当前工作区移除。" : "删除后将无法在当前列表中恢复。"}</p>
+          </div>
         </div>
         <div className="modal-body">
-          <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 14 }}>
-            {items.length > 1 ? `将删除 ${items.length} 条${entityLabel}，这个操作不可撤销。` : `删除后这条${entityLabel}将无法恢复。`}
-          </div>
           <div className="confirm-delete-summary">
             {preview.map((item) => (
               <div className="confirm-delete-row" key={item.id || itemDisplayName(item)}>
                 <div className="confirm-delete-label">{entityLabel}</div>
-                <div className="confirm-delete-value" style={{ fontWeight: 600 }}>{itemDisplayName(item)}</div>
+                <div className="confirm-delete-value">{itemDisplayName(item)}</div>
               </div>
             ))}
             {extra > 0 && (
@@ -791,7 +813,7 @@ function DeleteItemsConfirmModal({ entityLabel, items, busy, onClose, onConfirm 
         </div>
         <div className="modal-foot">
           <Btn variant="ghost" onClick={onClose} disabled={busy}>取消</Btn>
-          <Btn variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>{busy ? "删除中..." : "确认删除"}</Btn>
+          <Btn variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>{busy ? "删除中..." : isBulk ? `删除 ${items.length} 条` : "删除"}</Btn>
         </div>
       </div>
     </div>
@@ -1825,6 +1847,9 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
           </select>
           <div className="products-toolbar-actions page-actions">
             <Tag tone="outline" className="products-toolbar-count">{filtered.length} 条</Tag>
+            {filtered.length > 0 && !selectMode && (
+              <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+            )}
             <Btn size="sm" variant="ghost" icon="sync" onClick={syncProducts}>同步飞书</Btn>
           </div>
         </div>
@@ -1850,7 +1875,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                   <span>全选本页</span>
                 </label>
               </> :
-            <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+            null
             }
           </div>
         }
@@ -1860,7 +1885,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
             <thead>
               <tr>
                 {selectMode && <th style={{ width: 34 }} />}
-                <th>商品名称</th><th>品类</th><th>平台</th><th>售价</th><th>参考成本</th><th>评分</th><th>月销估算</th><th>状态</th>
+                <th>商品名称</th><th>品类</th><th>平台</th><th>售价</th><th>参考成本</th><th>评分</th><th>月销估算</th><th>状态</th><th style={{ width: 44 }} />
               </tr>
             </thead>
             <tbody>
@@ -1903,12 +1928,17 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                     <td>
                       <Tag tone={p.status === "跟踪中" ? "success" : p.status === "已归档" ? "default" : "accent"}>{p.status}</Tag>
                     </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button className="row-delete-btn apple-delete-btn" title="删除竞品" onClick={() => setDeleteTarget(p)}>
+                        <Icon name="trash" size={13} />
+                      </button>
+                    </td>
                   </tr>);
 
               })}
               {filtered.length === 0 &&
                 <tr>
-                  <td colSpan={selectMode ? 9 : 8}>
+                  <td colSpan={selectMode ? 10 : 9}>
                     <EmptyState
                       icon="boxes"
                       title={products.length ? "没有匹配的竞品" : "还没有真实竞品"}>
@@ -1970,7 +2000,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
             </div>
 
             {(() => {
-              const fields = normalizeFields(data.settings?.fields, data.settings?.tag_groups);
+              const fields = normalizeFields(data.settings?.fields, data.settings?.tag_groups, { includeDefaults: true });
               const competitorFields = fields.filter((f) => f.entities.includes("competitor") && entityUsesField(selected, f));
               const attachField = async (field) => {
                 await updateSelected(buildFieldPatch(field.key, []));
@@ -2528,7 +2558,7 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
           </div>
 
           {(() => {
-            const normalizedFields = normalizeFields(fields, tagGroups);
+            const normalizedFields = normalizeFields(fields, tagGroups, { includeDefaults: true });
             const inspirationFields = normalizedFields.filter((f) => f.entities.includes("inspiration") && entityUsesField(demand, f));
             const attachField = async (field) => {
               await save(buildFieldPatch(field.key, []));
@@ -2915,17 +2945,31 @@ function ResearchScreen({ data, api, refreshData }) {
             <div className="muted text-sm">从竞品库与需求雷达中匹配数据，AI 生成结构化分析报告</div>
           </div>
           <div className="page-actions">
-            {selectMode &&
-            <>
-                <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
-                <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
-              </>
-            }
+            {items.length > 0 && !selectMode && <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>}
             <Btn className="weave-create-btn" variant="primary" icon="plus" onClick={() => setShowCreate(true)}>新建调研项目</Btn>
           </div>
         </div>
 
-        {selectMode && items.length > 0 && <div className="muted text-sm" style={{ marginBottom: 12 }}>{selectedIds.length} 条已选择</div>}
+        {selectMode && items.length > 0 &&
+          <div className="bulk-toolbar research-selection-bar">
+            <div className="bulk-left">
+              <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
+              <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>删除</Btn>
+              <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+            </div>
+            <label className="bulk-check">
+              <input
+                type="checkbox"
+                checked={paged.items.length > 0 && paged.items.every((item) => selectedIds.includes(item.id))}
+                onChange={(event) => {
+                  const visibleIds = paged.items.map((item) => item.id);
+                  setSelectedIds(event.target.checked ? Array.from(new Set([...selectedIds, ...visibleIds])) : selectedIds.filter((id) => !visibleIds.includes(id)));
+                }}
+              />
+              <span>全选本页</span>
+            </label>
+          </div>
+        }
 
         <div className="research-list">
           {paged.items.map((r) =>
@@ -2944,6 +2988,9 @@ function ResearchScreen({ data, api, refreshData }) {
                 {r.status === "草稿" && "📝 "}
                 {r.status}
               </Tag>
+              <button className="row-delete-btn apple-delete-btn" title="删除调研" onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }}>
+                <Icon name="trash" size={13} />
+              </button>
               <Icon name="chevron-right" size={16} style={{ color: "var(--text-3)" }} />
             </div>
           )}

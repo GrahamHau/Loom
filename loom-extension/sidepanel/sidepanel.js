@@ -1267,7 +1267,7 @@ async function loadTagGroups() {
     const data = await api("/api/bootstrap");
     const settings = data?.settings || {};
     state.tagGroups = safeArray(settings.tag_groups);
-    state.fields = normalizeFieldList(settings.fields, state.tagGroups);
+    state.fields = normalizeFieldList(settings.fields, state.tagGroups, { useDefaults: true });
     state.llmConfigured = Boolean(settings.llm_configured);
     if (settings.extension_ai_before_save !== undefined) {
       await chrome.storage.local.set({ [AI_BEFORE_SAVE_KEY]: settings.extension_ai_before_save !== false });

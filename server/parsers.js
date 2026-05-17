@@ -33,28 +33,34 @@ function fields(userId) {
   return rawState(userId)?.settings?.fields || [];
 }
 
+function fieldSchema(userId, entity, options = {}) {
+  const includeDefaults = options.includeDefaults !== false;
+  const settings = rawState(userId)?.settings || {};
+  return normalizeFields(settings.fields, settings.tag_groups, { includeDefaults })
+    .filter((field) => field.entities.includes(entity));
+}
+
 function fieldListText(userId, key) {
   return fieldOptionsText(fields(userId), key);
 }
 
 function accountFields(userId, entity) {
-  const settings = rawState(userId)?.settings || {};
-  return normalizeFields(settings.fields, settings.tag_groups, { includeDefaults: false })
-    .filter((field) => field.entities.includes(entity));
+  return fieldSchema(userId, entity, { includeDefaults: false });
 }
 
-function fieldLibraryPrompt(userId, entity) {
-  const list = accountFields(userId, entity);
+function fieldLibraryPrompt(userId, entity, options = {}) {
+  const list = fieldSchema(userId, entity, { includeDefaults: options.includeDefaults !== false });
   if (!list.length) {
-    return "账号字段库为空。不要自动创建字段；tag_values 必须返回 {}。";
+    return "字段库为空。不要自动创建字段；tag_values 必须返回 {}。";
   }
   const schema = list.map((field) => ({
     key: field.key,
     name: field.name,
+    official: Boolean(field.official),
     multi: field.multi !== false,
     options: field.options || [],
   }));
-  return `只允许写入以下账号字段库字段，禁止返回未列出的字段 key。字段有 options 时优先使用 options 中的值；没有匹配选项时可返回原始短标签。
+  return `只允许写入以下字段库字段，禁止返回未列出的字段 key。字段有 options 时优先使用 options 中的值；没有匹配选项时可返回原始短标签。
 ${JSON.stringify(schema)}`;
 }
 
@@ -102,12 +108,13 @@ function fieldSuggestions(entity, result = {}, tagValues = {}) {
 }
 
 function accountTagValues(userId, entity, result) {
-  const list = accountFields(userId, entity);
+  const list = fieldSchema(userId, entity, { includeDefaults: true });
   if (!list.length) return {};
-  return normalizeTagValues({
+  const normalized = normalizeTagValues({
     ...legacyTagCandidates(entity, result),
     ...(result?.tag_values || {}),
   }, list, { includeDefaults: false });
+  return Object.fromEntries(Object.entries(normalized).filter(([, values]) => compactArray(values).length > 0));
 }
 
 export async function parseProductUrl(userId, { url, platform }) {
@@ -187,6 +194,7 @@ ${searchContext}`,
       fetched_at: new Date().toISOString(),
     }],
     raw: { page_title: page.title, page_description: page.description },
+    tag_values: accountTagValues(userId, "competitor", result),
   };
 }
 
@@ -233,7 +241,7 @@ export async function parseProductRaw(userId, { platform, data }) {
 适配主机/设备型号：${fieldListText(userId, "host")}
 产品品类：${fieldListText(userId, "category")}
 字段语义：brand 只填竞品/厂商品牌；host 只填适配主机或设备型号；category 只填产品品类，三者不要互相混填。
-账号字段库：
+字段库：
 ${fieldLibraryPrompt(userId, "competitor")}
 
 平台：${platform}
@@ -329,7 +337,7 @@ async function parseTaobaoProductRaw(userId, { platform, source, rawBullets }) {
 适配主机/设备型号：${fieldListText(userId, "host")}
 产品品类：${fieldListText(userId, "category")}
 字段语义：brand 只填竞品/厂商品牌；host 只填适配主机或设备型号；category 只填产品品类，三者不要互相混填。
-账号字段库：
+字段库：
 ${fieldLibraryPrompt(userId, "competitor")}
 
 平台：${platform}
@@ -384,6 +392,8 @@ export async function parseDemandUrl(userId, { url }) {
 用户痛点：${fieldListText(userId, "painpoints")}
 创新类型：${fieldListText(userId, "innovation")}
 自定义标签：${fieldListText(userId, "custom_tags")}
+字段库：
+${fieldLibraryPrompt(userId, "inspiration")}
 
 返回 JSON：
 {
@@ -393,7 +403,8 @@ export async function parseDemandUrl(userId, { url }) {
   "tags_painpoint": [],
   "tags_innovation": "单选值",
   "tags_category": [],
-  "tags_custom": []
+  "tags_custom": [],
+  "tag_values": { "字段key": ["字段值"] }
 }
 
 平台：${page.platform}
@@ -406,6 +417,7 @@ URL：${page.url}
 ${searchContext}`,
     maxTokens: 260,
   });
+  const tagValues = accountTagValues(userId, "inspiration", result);
   return {
     source_url: page.url,
     url: page.url,
@@ -420,6 +432,9 @@ ${searchContext}`,
     painpoints: compactArray(result.tags_painpoint),
     tags_category: compactArray(result.tags_category),
     tags_custom: compactArray(result.tags_custom),
+    tags: compactArray(result.tags_custom),
+    tag_values: tagValues,
+    field_suggestions: fieldSuggestions("inspiration", result, tagValues),
     import_method: "manual",
     is_confirmed: false,
     date: new Date().toISOString().slice(0, 10),
