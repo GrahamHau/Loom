@@ -670,15 +670,6 @@ export function bootstrap(userId) {
     state.settings.llm_configured = llmConfigured;
     state.settings.llm_vision_configured = llmVisionConfigured;
   }
-  const workspaces = db.prepare(`
-    SELECT w.id, w.slug, w.name, w.type, wm.role, wm.is_default
-    FROM workspace_members wm
-    JOIN workspaces w ON w.id = wm.workspace_id
-    WHERE wm.user_id = ? AND wm.status = 'active' AND w.status = 'active'
-    ORDER BY wm.is_default DESC, w.name ASC
-  `).all(userId);
-  state.workspaces = workspaces;
-  state.workspace = workspaces[0] || null;
   return state;
 }
 
