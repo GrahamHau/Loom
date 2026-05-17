@@ -61,6 +61,13 @@
       }
     })();
     const currentNoteId = currentPath.split("/").filter(Boolean).pop() || "";
+    const normalizedCurrentUrl = (() => {
+      try {
+        return new URL(window.location.href).toString();
+      } catch {
+        return String(window.location.href || "");
+      }
+    })();
     const sameCurrentPath = (href) => {
       if (!href || !currentPath) return false;
       try {
@@ -1293,12 +1300,25 @@
     const thumbnailResult = pickThumbnail();
     const thumbnail = thumbnailResult.url || "";
     const debug = {
+      note_id: currentNoteId,
+      canonical_path: currentPath,
+      href: normalizedCurrentUrl,
+      document_title: document.title || "",
+      current_anchor_href: currentNoteAnchor?.href || "",
+      has_current_anchor: Boolean(currentNoteAnchor),
+      has_detail_title: Boolean(bootstrapTitleNode),
+      title_text: title,
+      detail_root_connected: Boolean(detailRoot?.isConnected),
+      note_root_connected: Boolean(noteRoot?.isConnected),
       thumbnail_source: thumbnailResult.source,
       ...thumbnailResult.debug,
     };
     window.__loom_xhs_debug = debug;
 
     return {
+      note_id: currentNoteId,
+      canonical_path: currentPath,
+      document_title: document.title || "",
       title,
       content,
       likes: pickMetricCount("likes", ["[class*='like-wrapper'] [class*='count']", ".like-count", ".like-wrapper .count"]),

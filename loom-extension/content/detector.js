@@ -20,8 +20,6 @@
 
   let lastUrl = window.location.href;
   let urlChangeTimer = null;
-  let pageStateTimer = null;
-  let lastPageStateSignalAt = 0;
 
   function notifyUrlChanged(reason) {
     if (urlChangeTimer) clearTimeout(urlChangeTimer);
@@ -41,45 +39,6 @@
         // The side panel may be closed; URL signals are best effort.
       }
     }, 80);
-  }
-
-  function isDetailPage(url) {
-    try {
-      const parsed = new URL(url);
-      const host = parsed.hostname;
-      const href = parsed.href.toLowerCase();
-      if (host.includes("amazon.")) {
-        return /^\/(?:[^/]+\/)?dp\/[a-z0-9]{10}(?:[/?]|$)/i.test(parsed.pathname) || /\/gp\/product\/[a-z0-9]{10}/i.test(parsed.pathname);
-      }
-      if (host.includes("taobao.com")) return parsed.hostname.includes("item.taobao.com") && /(?:^|[?&])id=\d+/.test(parsed.search);
-      if (host.includes("tmall.com")) return parsed.hostname.includes("detail.tmall.com") && /(?:^|[?&])id=\d+/.test(parsed.search);
-      if (host.includes("xiaohongshu.com")) return /^\/explore\/[a-z0-9]+$/i.test(parsed.pathname);
-      if (host.includes("kickstarter.com")) return href.includes("/projects/");
-    } catch {
-      return false;
-    }
-    return false;
-  }
-
-  function notifyPageStateChanged(reason) {
-    if (!isDetailPage(window.location.href)) return;
-    if (pageStateTimer) clearTimeout(pageStateTimer);
-    pageStateTimer = setTimeout(() => {
-      pageStateTimer = null;
-      const now = Date.now();
-      if (now - lastPageStateSignalAt < 1600) return;
-      lastPageStateSignalAt = now;
-      try {
-        chrome.runtime.sendMessage({
-          type: "LOOM_PAGE_STATE_CHANGED",
-          url: window.location.href,
-          platform: detectPlatform(window.location.href),
-          reason,
-        });
-      } catch {
-        // The side panel may be closed; state signals are best effort.
-      }
-    }, 900);
   }
 
   function patchHistoryMethod(name) {
@@ -139,9 +98,7 @@
   window.addEventListener("popstate", () => notifyUrlChanged("popstate"));
   window.addEventListener("hashchange", () => notifyUrlChanged("hashchange"));
 
-  const observeTarget = document.body || document.documentElement;
-  if (observeTarget && typeof MutationObserver !== "undefined") {
-    const observer = new MutationObserver(() => notifyPageStateChanged("dom-mutated"));
-    observer.observe(observeTarget, { childList: true, subtree: true, characterData: true });
-  }
+  // Keep auto capture URL-driven. DOM mutation signals from SPA pages such as
+  // Xiaohongshu fire during comments/images loading and can yank the sidepanel
+  // scroll position while the user is editing.
 })();

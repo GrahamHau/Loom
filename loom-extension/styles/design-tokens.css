@@ -1,56 +1,57 @@
 /* ============================================================
-   LOOM · design tokens
-   Cool neutral + single blue brand (matches spiral mark)
+   LOOM · Apple/Halo design tokens
+   Mirrors the Web app's DESIGN.md direction: calm, dense,
+   editorial, Apple grouped surfaces + one Action Blue.
    ============================================================ */
 :root {
-  /* --- surface ladder (cool neutral, hue 250) --- */
-  --bg:           oklch(0.985 0.003 250);
-  --surface:      oklch(1     0     0  );
-  --surface-2:    oklch(0.976 0.004 250);
-  --surface-3:    oklch(0.96  0.005 250);
-  --hover:        oklch(0.955 0.006 250);
+  /* --- Apple grouped surface ladder --- */
+  --bg:           #ffffff;
+  --surface:      #ffffff;
+  --surface-2:    #f5f5f7;
+  --surface-3:    #eeeeef;
+  --hover:        #ececee;
 
   /* --- borders --- */
-  --border:        oklch(0.918 0.006 250);
-  --border-soft:   oklch(0.945 0.005 250);
-  --border-strong: oklch(0.84  0.009 250);
+  --border:        #d5d5d7;
+  --border-soft:   #e5e5e7;
+  --border-strong: #c0c0c3;
 
-  /* --- text ladder --- */
-  --text:          oklch(0.2  0.012 250);
-  --text-2:        oklch(0.42 0.01  250);
-  --text-3:        oklch(0.58 0.009 250);
-  --text-4:        oklch(0.72 0.007 250);
+  /* --- Apple label hierarchy --- */
+  --text:          #1d1d1f;
+  --text-2:        #333333;
+  --text-3:        #6e6e73;
+  --text-4:        #86868b;
   --text-inverted: #fff;
 
-  /* --- brand (single blue, matches loom-spiral.png) --- */
-  --accent:        oklch(0.56 0.16 252);
-  --accent-soft:   oklch(0.96 0.025 252);
-  --accent-text:   oklch(0.46 0.16 252);
-  --accent-strong: oklch(0.48 0.18 252);
+  /* --- Apple Action Blue: the one interactive color --- */
+  --accent:        #0071e3;
+  --accent-soft:   #e8f0fe;
+  --accent-text:   #0055b3;
+  --accent-strong: #0060c0;
 
-  /* --- information colors (low saturation, used as state hints not decoration) --- */
-  --success:       oklch(0.6  0.1  165);
-  --success-soft:  oklch(0.965 0.03 165);
-  --warn:          oklch(0.66 0.11 75);
-  --warn-soft:     oklch(0.97 0.04 75);
-  --danger:        oklch(0.58 0.16 25);
-  --danger-soft:   oklch(0.965 0.035 25);
+  /* --- system semantics --- */
+  --success:       #34c759;
+  --success-soft:  #e8f8ed;
+  --warn:          #ff9500;
+  --warn-soft:     #fff4e5;
+  --danger:        #ff3b30;
+  --danger-soft:   #ffeae9;
 
-  /* --- radii (tightened, more instrument-like) --- */
-  --radius-xs:   4px;
-  --radius-sm:   5px;
-  --radius:      6px;
-  --radius-lg:   10px;
+  /* --- radii: Apple grouped controls --- */
+  --radius-xs:   8px;
+  --radius-sm:   10px;
+  --radius:      16px;
+  --radius-lg:   24px;
   --radius-full: 9999px;
 
-  /* --- shadows (hairline-first; shadow used sparingly) --- */
-  --shadow-sm: 0 1px 0 rgba(15, 19, 36, 0.025);
-  --shadow:    0 1px 2px rgba(15, 19, 36, 0.04), 0 1px 0 rgba(15, 19, 36, 0.025);
-  --shadow-lg: 0 8px 24px rgba(15, 19, 36, 0.08), 0 1px 2px rgba(15, 19, 36, 0.04);
+  /* --- elevation: surface shifts first, soft shadow only for overlays --- */
+  --shadow-sm: none;
+  --shadow:    0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.12);
 
   /* --- type --- */
-  --font-sans: 'Geist', 'Manrope', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'Geist Mono', 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  --font-sans: 'SF Pro Display', 'SF Pro Text', system-ui, -apple-system, BlinkMacSystemFont, 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
 
   /* --- motion --- */
   --ease-out: cubic-bezier(.22, .84, .36, 1);

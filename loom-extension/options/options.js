@@ -1,18 +1,16 @@
 const DEFAULT_API_BASE = "https://loom.my1panelsite.xyz";
+const LOGIN_WEB_BASE = DEFAULT_API_BASE;
 const LEGACY_API_BASE_HOSTS = new Set([
   "ulanzi-copilot.my1panelsite.xyz",
   "loom.43.156.166.134.sslip.io",
 ]);
 const LOOM_WEB_HOSTS = new Set([
   "loom.my1panelsite.xyz",
-  "127.0.0.1",
-  "localhost",
 ]);
 
 const DEFAULTS = {
   loom_api_base: DEFAULT_API_BASE,
   loom_default_mode: "auto",
-  loom_ai_before_save: true,
   llm_api_type: "openai",
   llm_api_url: "",
   llm_model: "",
@@ -106,6 +104,10 @@ function normalizeApiBase(value) {
   }
 }
 
+function loginWebUrl(path = "/app") {
+  return `${LOGIN_WEB_BASE}${path}`;
+}
+
 function isLoomWebUrl(url) {
   try {
     const parsed = new URL(url);
@@ -134,10 +136,11 @@ function isVisitorUser(user) {
 
 async function load() {
   const data = await getSettings();
+  const accountSettings = await refreshAccountExtensionSettings(data);
   document.getElementById("api-base").value = data.loom_api_base || DEFAULTS.loom_api_base;
   syncWebLinks(data.loom_api_base || DEFAULTS.loom_api_base);
   document.getElementById("default-mode").value = data.loom_default_mode || "auto";
-  document.getElementById("ai-before-save").value = data.loom_ai_before_save === false ? "false" : "true";
+  document.getElementById("ai-before-save").value = accountSettings.extension_ai_before_save === false ? "false" : "true";
   document.querySelectorAll("[data-platform]").forEach((input) => {
     input.checked = data.loom_platforms?.[input.dataset.platform] !== false;
   });
@@ -151,6 +154,20 @@ async function load() {
   bind();
   await refreshLlmSettings({ silent: true });
   await refreshVisionLlmSettings({ silent: true });
+}
+
+async function refreshAccountExtensionSettings(localSettings = null) {
+  try {
+    const settings = await authedFetch("/api/settings");
+    if (settings?.extension_ai_before_save !== undefined) {
+      await chrome.storage.local.set({ loom_ai_before_save: settings.extension_ai_before_save !== false });
+    }
+    return settings || {};
+  } catch {
+    return {
+      extension_ai_before_save: localSettings?.loom_ai_before_save,
+    };
+  }
 }
 
 async function getSettings() {
@@ -199,7 +216,7 @@ function syncWebLinks(fallback = DEFAULTS.loom_api_base) {
 }
 
 function openWebLogin() {
-  window.open(`${currentApiBaseFromForm()}/app?login=1`, "_blank", "noopener");
+  window.open(loginWebUrl(), "_blank", "noopener");
 }
 
 async function testConnection() {
@@ -239,10 +256,11 @@ async function saveSettings() {
   document.querySelectorAll("[data-platform]").forEach((input) => {
     platforms[input.dataset.platform] = input.checked;
   });
+  const aiBeforeSave = document.getElementById("ai-before-save").value === "true";
   await chrome.storage.local.set({
     loom_api_base: normalizeApiBase(document.getElementById("api-base").value.trim()),
     loom_default_mode: document.getElementById("default-mode").value,
-    loom_ai_before_save: document.getElementById("ai-before-save").value === "true",
+    loom_ai_before_save: aiBeforeSave,
     loom_platforms: platforms,
     loom_field_mapping: {
       productName: document.getElementById("map-product-name").value.trim() || "name",
@@ -252,7 +270,15 @@ async function saveSettings() {
       demandSummary: document.getElementById("map-demand-summary").value.trim() || "summary",
     },
   });
-  setConnection("设置已保存");
+  try {
+    await authedFetch("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ extension_ai_before_save: aiBeforeSave }),
+    });
+    setConnection("设置已保存到账户");
+  } catch (error) {
+    setConnection(`已保存到本地，账户同步失败：${error.message}`);
+  }
 }
 
 function setConnection(message) {

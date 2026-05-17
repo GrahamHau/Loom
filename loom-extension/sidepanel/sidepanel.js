@@ -1,12 +1,11 @@
 const DEFAULT_API_BASE = "https://loom.my1panelsite.xyz";
+const LOGIN_WEB_BASE = DEFAULT_API_BASE;
 const LEGACY_API_BASE_HOSTS = new Set([
   "ulanzi-copilot.my1panelsite.xyz",
   "loom.43.156.166.134.sslip.io",
 ]);
 const LOOM_WEB_HOSTS = new Set([
   "loom.my1panelsite.xyz",
-  "127.0.0.1",
-  "localhost",
 ]);
 const API_BASE_KEY = "loom_api_base";
 const TOKEN_KEY = "loom_token";
@@ -15,6 +14,8 @@ const DEFAULT_MODE_KEY = "loom_default_mode";
 const AI_BEFORE_SAVE_KEY = "loom_ai_before_save";
 const LLM_NOTICE_DISMISSED_KEY = "loom_llm_notice_dismissed";
 const DRAFT_STATE_KEY = "loom_sidepanel_draft_state_v1";
+const URL_WATCH_INTERVAL_MS = 650;
+const EDIT_IDLE_GUARD_MS = 4000;
 const LEGACY_KEY_MAP = {
   pmcopilot_api_base: API_BASE_KEY,
   pmcopilot_token: TOKEN_KEY,
@@ -74,6 +75,10 @@ function normalizeApiBase(value) {
   }
 }
 
+function loginWebUrl(path = "/app") {
+  return `${LOGIN_WEB_BASE}${path}`;
+}
+
 const state = {
   apiBase: "",
   token: "",
@@ -97,10 +102,12 @@ const state = {
   relationPickerItems: [],
   relationPickerQuery: "",
   relationPickerError: "",
+  addFieldOpen: null,
   fields: DEFAULT_FIELDS,
   tagGroups: DEFAULT_TAG_GROUPS,
   llmConfigured: false,
   tagPicker: null,
+  activeTagFields: {},
   commentCollecting: false,
   commentCollectStartedAt: 0,
   commentListExpanded: false,
@@ -110,16 +117,21 @@ const state = {
 
 let autoSyncTimer = null;
 let autoSyncPoller = null;
-let quietRefreshTimer = null;
 let runtimeMessageBound = false;
 let commentCollectorTimer = null;
 let pendingUrlSync = false;
+let lastObservedTabId = null;
+let lastObservedUrl = "";
 let loginStatusTimer = null;
 let syncInFlight = null;
 let autoSyncBound = false;
 let storageStateBound = false;
 let successReturnTimer = null;
 let draftPersistTimer = null;
+let autosizeTimer = null;
+let uiStateWatchTimer = null;
+let lastUserEditAt = 0;
+let captureLocked = false;
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -153,10 +165,13 @@ function fieldFromTagGroup(group) {
   };
 }
 
-function normalizeFieldList(fields = [], tagGroups = []) {
-  const groups = safeArray(tagGroups).length ? safeArray(tagGroups) : DEFAULT_TAG_GROUPS;
+function normalizeFieldList(fields = [], tagGroups = [], options = {}) {
+  const useDefaults = options.useDefaults === true;
+  const groups = safeArray(tagGroups);
   const groupByLegacy = new Map(groups.map((group) => [group.key, group]));
-  const source = safeArray(fields).length ? safeArray(fields) : groups.map(fieldFromTagGroup).filter(Boolean);
+  const source = safeArray(fields).length
+    ? safeArray(fields)
+    : groups.map(fieldFromTagGroup).filter(Boolean);
   const normalized = [];
   const seen = new Set();
   for (const item of source) {
@@ -180,15 +195,17 @@ function normalizeFieldList(fields = [], tagGroups = []) {
       options: uniqueList(item.options || item.tags || group?.tags || defaultField?.options),
     });
   }
-  for (const field of DEFAULT_FIELDS) {
-    if (seen.has(field.key)) continue;
-    const group = groupByLegacy.get(field.legacyKey);
-    normalized.push({
-      ...field,
-      name: cleanText(group?.name, field.name),
-      tone: cleanText(group?.tone, field.tone),
-      options: uniqueList(group?.tags || field.options),
-    });
+  if (useDefaults) {
+    for (const field of DEFAULT_FIELDS) {
+      if (seen.has(field.key)) continue;
+      const group = groupByLegacy.get(field.legacyKey);
+      normalized.push({
+        ...field,
+        name: cleanText(group?.name, field.name),
+        tone: cleanText(group?.tone, field.tone),
+        options: uniqueList(group?.tags || field.options),
+      });
+    }
   }
   return normalized;
 }
@@ -216,6 +233,26 @@ function isEditingForm() {
   return Boolean(document.activeElement?.matches?.("[data-tag-query], .ghost-input, .metric-input, .platform-card-link, textarea, input"));
 }
 
+function markUserEdited() {
+  lastUserEditAt = Date.now();
+  if (autoSyncTimer) {
+    clearTimeout(autoSyncTimer);
+    autoSyncTimer = null;
+  }
+}
+
+function hasRecentUserEdit() {
+  return Date.now() - lastUserEditAt < EDIT_IDLE_GUARD_MS;
+}
+
+function shouldDeferAutoRefresh() {
+  return state.formDirty || isEditingForm() || hasRecentUserEdit();
+}
+
+function clearEditGuard() {
+  lastUserEditAt = 0;
+}
+
 function currentCaptureUrl() {
   return cleanText(state.page?.data?.url || state.lastSeenUrl || "");
 }
@@ -231,6 +268,7 @@ function currentDraftSnapshot() {
     processed: state.processed || null,
     form: state.form || null,
     formDirty: Boolean(state.formDirty),
+    activeTagFields: state.activeTagFields || {},
     processingAi: Boolean(state.processingAi),
     message: cleanText(state.message || ""),
     savedAt: Date.now(),
@@ -278,6 +316,7 @@ async function restoreDraftState(result, mode) {
     if (snapshot.mode !== cleanText(mode || "")) return false;
     state.processed = snapshot.processed || { ...result.data, __loom_ai_processed: false };
     state.form = snapshot.form || buildDraft(mode, state.processed);
+    state.activeTagFields = snapshot.activeTagFields || activeTagFieldsForDraft(mode, state.form, state.processed);
     state.formDirty = Boolean(snapshot.formDirty);
     state.message = snapshot.processingAi
       ? "页面刚刚刷新，已恢复上一版草稿；请重新点一次 AI 整理。"
@@ -290,12 +329,17 @@ async function restoreDraftState(result, mode) {
 
 document.addEventListener("DOMContentLoaded", init);
 document.addEventListener("click", handleGlobalClick);
+document.addEventListener("mouseup", rememberManualTextareaResize);
 window.addEventListener("focus", () => {
   void resyncAuthWhenIdle({ source: "window-focus" });
+});
+window.addEventListener("resize", () => {
+  scheduleAutosizeTextareas(document, 60);
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     void resyncAuthWhenIdle({ source: "visibility-visible" });
+    scheduleAutosizeTextareas(document, 60);
   }
 });
 
@@ -314,6 +358,7 @@ async function init() {
   });
   bindLoginStateSync();
   bindStorageStateSync();
+  bindUiStateWatchdog();
   if (!state.token) {
     renderLoginWait("请先在 Web 端完成登录");
     void syncAuthFromWebSession({ force: true });
@@ -321,9 +366,6 @@ async function init() {
   }
   if (!state.sessionCookie && !(await verifyStoredToken({ silent: false }))) {
     return;
-  }
-  if (stored[AI_BEFORE_SAVE_KEY] === undefined) {
-    await chrome.storage.local.set({ [AI_BEFORE_SAVE_KEY]: true });
   }
   bindAutoSync();
   await loadTagGroups();
@@ -375,6 +417,7 @@ async function loadCurrentPage(defaultMode = "auto") {
       renderCollectionWait(result?.error || "unsupported_page");
       return;
     }
+    captureLocked = true;
     state.page = result;
     state.message = "";
     state.mode = modeForPlatform(result.platform, defaultMode || stored[DEFAULT_MODE_KEY] || "auto");
@@ -385,6 +428,7 @@ async function loadCurrentPage(defaultMode = "auto") {
     if (!restored) {
       state.processed = { ...result.data, __loom_ai_processed: false };
       state.form = buildDraft(state.mode, state.processed);
+      state.activeTagFields = {};
       state.formDirty = false;
       state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
     }
@@ -395,7 +439,7 @@ async function loadCurrentPage(defaultMode = "auto") {
       hasImage: Boolean(result.data?.image || result.data?.thumbnail_url),
     });
     renderMain();
-    requestAnimationFrame(syncAutosizeTextareas);
+    scheduleAutosizeTextareas();
     await maybeAutoProcessAfterCapture(stored);
   } catch (error) {
     state.page = null;
@@ -421,7 +465,7 @@ async function readPageData(tab) {
         files: ["content/detector.js", EXTRACTOR_FILES[platform]],
       });
     }
-    return await readInjectedPageData(tab.id, platform);
+    return await readInjectedPageData(tab, platform);
   } catch (error) {
     if (!String(error.message || "").includes("Receiving end does not exist")) throw error;
     if (!platform) throw new Error("当前页面不在插件支持范围内");
@@ -429,7 +473,7 @@ async function readPageData(tab) {
       target: { tabId: tab.id },
       files: ["content/detector.js", EXTRACTOR_FILES[platform]],
     });
-    return readInjectedPageData(tab.id, platform);
+    return readInjectedPageData(tab, platform);
   }
 }
 
@@ -437,14 +481,72 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function readInjectedPageData(tabId, platform) {
+function normalizeUrlPath(url) {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function noteIdFromUrl(url) {
+  const path = normalizeUrlPath(url);
+  return path.split("/").filter(Boolean).pop() || "";
+}
+
+function xhsResultSignature(result) {
+  const data = result?.data || {};
+  return JSON.stringify({
+    url: normalizeUrlPath(data.url || ""),
+    noteId: data.note_id || "",
+    title: cleanText(data.title || data.name, ""),
+    content: cleanText(data.content || data.original_content || data.summary, ""),
+    image: data.image || data.thumbnail_url || "",
+  });
+}
+
+function isXhsResultForTab(result, tabUrl) {
+  if (!result?.ok || result.platform !== "xiaohongshu") return false;
+  const data = result.data || {};
+  const expectedPath = normalizeUrlPath(tabUrl);
+  const resultPath = normalizeUrlPath(data.url || "");
+  if (!expectedPath || resultPath !== expectedPath) return false;
+  const expectedNoteId = noteIdFromUrl(tabUrl);
+  if (expectedNoteId && data.note_id && data.note_id !== expectedNoteId) return false;
+  const content = cleanText(data.content || data.original_content || data.summary, "");
+  const title = cleanText(data.title || data.name, "");
+  const documentTitle = cleanText(data.document_title, "");
+  if (documentTitle && title) {
+    const normalizedDocTitle = documentTitle.replace(/\s*-\s*小红书\s*$/, "").trim();
+    if (normalizedDocTitle && normalizedDocTitle !== title) return false;
+  }
+  return content.length >= 2 && title.length >= 2;
+}
+
+async function readInjectedPageData(tabOrId, platform) {
+  const tabId = typeof tabOrId === "object" ? tabOrId.id : tabOrId;
+  const tabUrl = typeof tabOrId === "object" ? tabOrId.url || "" : "";
   const attempts = platform === "xiaohongshu" ? 8 : 1;
   let lastResult = null;
+  let stableSignature = "";
+  let stableCount = 0;
   for (let index = 0; index < attempts; index += 1) {
     const result = await chrome.tabs.sendMessage(tabId, { type: "LOOM_GET_PAGE_DATA" });
     lastResult = result;
-    const content = cleanText(result?.data?.content || result?.data?.original_content || result?.data?.summary, "");
-    if (platform !== "xiaohongshu" || content.length >= 2) return result;
+    if (platform !== "xiaohongshu") return result;
+    if (isXhsResultForTab(result, tabUrl)) {
+      const signature = xhsResultSignature(result);
+      if (signature === stableSignature) {
+        stableCount += 1;
+      } else {
+        stableSignature = signature;
+        stableCount = 1;
+      }
+      if (stableCount >= 2) return result;
+    } else {
+      stableSignature = "";
+      stableCount = 0;
+    }
     await wait(350);
   }
   return lastResult;
@@ -544,11 +646,14 @@ function clearCapturedPageState() {
   state.formDirty = false;
   state.message = "";
   state.tagPicker = null;
+  state.addFieldOpen = null;
+  state.activeTagFields = {};
   state.relationPickerOpen = false;
   state.relationPickerLoading = false;
   state.relationPickerItems = [];
   state.relationPickerQuery = "";
   state.relationPickerError = "";
+  captureLocked = false;
   stopCommentCollector();
 }
 
@@ -579,8 +684,9 @@ async function processRaw() {
     });
     state.processed = { ...state.page.data, ...data, __loom_ai_processed: true };
     state.form = buildDraft(state.mode, state.processed);
+    state.activeTagFields = activeTagFieldsForDraft(state.mode, state.form, state.processed);
     state.formDirty = false;
-    state.message = "AI 结构化完成";
+    state.message = `AI 结构化完成。${aiFieldSuggestionText(state.processed)}`.trim();
     debugEvent("parse-raw:ok", {
       endpoint,
       title: state.processed?.title || state.processed?.name || "",
@@ -633,6 +739,7 @@ async function reloadCurrentPage() {
     }
     if (!result?.ok) throw new Error(result?.error || "重新抓取失败");
     const stored = await getStoredSettings();
+    captureLocked = true;
     state.page = result;
     state.mode = modeForPlatform(result.platform, stored[DEFAULT_MODE_KEY] || "auto");
     stopCommentCollector();
@@ -641,6 +748,7 @@ async function reloadCurrentPage() {
     if (!restored) {
       state.processed = { ...result.data, __loom_ai_processed: false };
       state.form = buildDraft(state.mode, state.processed);
+      state.activeTagFields = {};
       state.formDirty = false;
       state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
     }
@@ -686,25 +794,45 @@ function bindAutoSync() {
 
   if (!autoSyncPoller) {
     autoSyncPoller = setInterval(() => {
-      void scheduleAutoSync();
-    }, 5000);
+      void observeActiveTabUrl("poll");
+    }, URL_WATCH_INTERVAL_MS);
   }
+}
+
+async function observeActiveTabUrl(reason = "watch", options = {}) {
+  if (!state.token) return;
+  let tab = null;
+  try {
+    [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  } catch {
+    return;
+  }
+  if (!tab?.id) return;
+  const nextTabId = tab.id || null;
+  const nextUrl = tab.url || "";
+  if (!nextUrl) return;
+
+  const observedChanged = nextTabId !== lastObservedTabId || nextUrl !== lastObservedUrl;
+  lastObservedTabId = nextTabId;
+  lastObservedUrl = nextUrl;
+  if (!observedChanged && !options.force) return;
+
+  const knownChanged = nextTabId !== state.lastSeenTabId || nextUrl !== state.lastSeenUrl;
+  if (!knownChanged) return;
+  debugEvent("collect:url-observed", { reason, url: nextUrl });
+  await syncIfUrlChanged({ reason, tab, forceUrlChange: true });
 }
 
 function bindRuntimePageSignals() {
   if (runtimeMessageBound || !chrome.runtime?.onMessage) return;
   runtimeMessageBound = true;
   chrome.runtime.onMessage.addListener((message, sender) => {
-    if (!["LOOM_PAGE_URL_CHANGED", "LOOM_PAGE_STATE_CHANGED"].includes(message?.type)) return undefined;
+    if (message?.type !== "LOOM_PAGE_URL_CHANGED") return undefined;
     const tabId = sender.tab?.id || null;
     const url = message.url || sender.tab?.url || "";
     if (!tabId || !url || !shouldAutoSyncUrl(url)) return undefined;
     if (tabId !== state.lastSeenTabId && state.lastSeenTabId !== null) return undefined;
-    if (message.type === "LOOM_PAGE_URL_CHANGED") {
-      void scheduleAutoSync(0);
-    } else {
-      void scheduleQuietRefresh(0);
-    }
+    void scheduleAutoSync(0);
     return undefined;
   });
 }
@@ -724,41 +852,6 @@ function pageDataSignature(result) {
     comments: data.comments || comments.length || 0,
     visibleCommentCount: comments.length,
   });
-}
-
-async function scheduleQuietRefresh(delayMs = 500) {
-  if (quietRefreshTimer) clearTimeout(quietRefreshTimer);
-  quietRefreshTimer = setTimeout(async () => {
-    quietRefreshTimer = null;
-    await quietRefreshCurrentPage();
-  }, delayMs);
-}
-
-async function quietRefreshCurrentPage() {
-  if (state.busy || state.processingAi || state.reloading || !state.page || state.formDirty || isEditingForm()) return;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || tab.id !== state.lastSeenTabId || (tab.url || "") !== state.lastSeenUrl) {
-    await scheduleAutoSync(0);
-    return;
-  }
-  try {
-    const result = await readPageData(tab);
-    if (!result?.ok) return;
-    const nextSignature = pageDataSignature(result);
-    if (nextSignature === state.pageSignature) return;
-    state.page = result;
-    state.pageSignature = nextSignature;
-    const restored = await restoreDraftState(result, state.mode);
-    if (!restored) {
-      state.processed = { ...result.data, __loom_ai_processed: false };
-      state.form = buildDraft(state.mode, state.processed);
-      state.formDirty = false;
-      state.message = "页面内容已更新，可继续编辑或保存。";
-    }
-    renderMain();
-  } catch {
-    // Quiet refresh is a best-effort freshness path; manual reload remains available.
-  }
 }
 
 function bindStorageStateSync() {
@@ -790,6 +883,7 @@ function bindStorageStateSync() {
       state.syncedSessionCookie = state.sessionCookie;
       bindAutoSync();
       await loadTagGroups();
+      if (state.page && state.form) return;
       const stored = await getStoredSettings();
       await loadCurrentPage(stored[DEFAULT_MODE_KEY] || "auto");
     })();
@@ -804,19 +898,49 @@ async function scheduleAutoSync(delayMs = 120) {
   }, delayMs);
 }
 
-async function syncIfUrlChanged() {
-  if (state.busy || state.reloading) {
+async function syncIfUrlChanged(options = {}) {
+  if (state.busy || state.reloading || state.processingAi) {
     pendingUrlSync = true;
     return;
   }
-  if (isEditingForm()) return;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  let tab = options.tab || null;
+  if (!tab) {
+    [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  }
   if (!tab?.id) return;
   const nextUrl = tab.url || "";
   const nextTabId = tab.id || null;
   const tabChanged = nextTabId !== state.lastSeenTabId;
   const urlChanged = nextUrl !== state.lastSeenUrl;
   if (!nextUrl || (!tabChanged && !urlChanged)) return;
+  const detection = detectPageTarget(nextUrl);
+  if (captureLocked && state.page) {
+    if (detection.platform && !detection.detail) {
+      if (state.form) await persistDraftState();
+      state.tab = tab;
+      state.lastSeenTabId = nextTabId;
+      state.lastSeenUrl = nextUrl;
+      debugEvent("collect:unlock-on-exit-detail", { platform: detection.platform, url: nextUrl });
+      clearCapturedPageState();
+      renderWaitingForDetail();
+      return;
+    }
+    if (detection.platform && detection.detail) {
+      state.tab = tab;
+      state.lastSeenTabId = nextTabId;
+      state.lastSeenUrl = nextUrl;
+      debugEvent("collect:locked-ignore-detail-url", { platform: detection.platform, url: nextUrl });
+      return;
+    }
+  }
+  const navigatingToNewDetail = Boolean((tabChanged || urlChanged) && detection.platform && detection.detail);
+  if (!options.forceUrlChange && shouldDeferAutoRefresh()) {
+    pendingUrlSync = true;
+    return;
+  }
+  if ((tabChanged || urlChanged) && state.page && state.form) {
+    await persistDraftState();
+  }
   if (!shouldAutoSyncUrl(nextUrl)) {
     state.tab = tab;
     state.lastSeenTabId = nextTabId;
@@ -828,7 +952,10 @@ async function syncIfUrlChanged() {
   state.tab = tab;
   state.lastSeenTabId = nextTabId;
   state.lastSeenUrl = nextUrl;
-  const detection = detectPageTarget(nextUrl);
+  if (state.page || state.form) {
+    state.message = navigatingToNewDetail ? "检测到新的详情页，正在重新识别…" : "检测到页面变化，正在重新识别…";
+    renderMain();
+  }
   if (detection.platform && !detection.detail) {
     debugEvent("collect:detail-wait", { platform: detection.platform, url: nextUrl });
     clearCapturedPageState();
@@ -910,13 +1037,36 @@ async function maybeAutoProcessAfterCapture(storedSettings = null) {
   if (!state.llmConfigured || state.processingAi || state.busy) return;
   if (state.formDirty) return;
   if (state.processed?.__loom_ai_processed) return;
+  await runAiProcess("auto");
+}
+
+async function runAiProcess(source = "manual") {
+  if (state.processingAi) return;
   state.busy = true;
   state.processingAi = true;
-  state.message = "正在自动执行 AI 整理…";
+  state.message = source === "auto" ? "正在自动执行 AI 整理…" : "正在执行 AI 整理…";
   renderMain();
-  await processRaw();
-  state.processingAi = false;
-  state.busy = false;
+  try {
+    await processRaw();
+  } catch (error) {
+    debugEvent("parse-raw:runner-error", { source, error: error.message || "ai_runner_failed" });
+    state.message = `AI 处理失败，已保留当前内容：${error.message || "未知错误"}`;
+  } finally {
+    state.processingAi = false;
+    state.busy = false;
+    schedulePersistDraftState(0);
+  }
+  if (pendingUrlSync) {
+    pendingUrlSync = false;
+    try {
+      await observeActiveTabUrl(`pending-after-${source}-ai`, { force: true });
+    } catch (error) {
+      debugEvent("collect:pending-url-error", { source, error: error.message || "pending_url_sync_failed" });
+      state.message = "AI 整理已结束，但页面变化刷新失败；可以点重新抓取。";
+      renderMain();
+    }
+    return;
+  }
   renderMain();
 }
 
@@ -937,8 +1087,11 @@ async function applyExtensionSession(data, sessionCookie = "") {
   state.user = data.user || null;
   state.syncedSessionCookie = sessionCookie || state.sessionCookie || "";
   debugEvent("auth:token-ok", { userId: data.user?.id || "", userName: data.user?.name || "" });
-  if (isEditingForm() && state.page && state.form) return true;
   bindAutoSync();
+  if (state.page && state.form) {
+    await loadTagGroups();
+    return true;
+  }
   await loadTagGroups();
   await loadCurrentPage((await getStoredSettings())[DEFAULT_MODE_KEY] || "auto");
   return true;
@@ -1102,7 +1255,7 @@ function bindLoginStateSync() {
 
   if (!loginStatusTimer) {
     loginStatusTimer = setInterval(() => {
-      if (isEditingForm()) return;
+      if (state.page || state.form || isEditingForm()) return;
       const shouldForce = !state.token;
       void syncAuthFromWebSession({ silent: true, force: shouldForce });
     }, 4000);
@@ -1113,18 +1266,30 @@ async function loadTagGroups() {
   try {
     const data = await api("/api/bootstrap");
     const settings = data?.settings || {};
-    state.tagGroups = safeArray(settings.tag_groups).length ? settings.tag_groups : DEFAULT_TAG_GROUPS;
+    state.tagGroups = safeArray(settings.tag_groups);
     state.fields = normalizeFieldList(settings.fields, state.tagGroups);
     state.llmConfigured = Boolean(settings.llm_configured);
+    if (settings.extension_ai_before_save !== undefined) {
+      await chrome.storage.local.set({ [AI_BEFORE_SAVE_KEY]: settings.extension_ai_before_save !== false });
+    }
     if (state.llmConfigured && state.llmNoticeDismissed) {
       state.llmNoticeDismissed = false;
       await chrome.storage.local.set({ [LLM_NOTICE_DISMISSED_KEY]: false });
     }
   } catch {
     state.tagGroups = DEFAULT_TAG_GROUPS;
-    state.fields = normalizeFieldList(DEFAULT_FIELDS, DEFAULT_TAG_GROUPS);
+    state.fields = normalizeFieldList(DEFAULT_FIELDS, DEFAULT_TAG_GROUPS, { useDefaults: true });
     state.llmConfigured = false;
   }
+}
+
+/** 左上角用户状态 chip：绿点 + 名字，无用户时返回空字符串 */
+function userChipHtml() {
+  const u = state.user;
+  if (!u) return "";
+  const name = u.name || u.username || u.display_name || u.email?.split("@")[0] || u.id || "";
+  if (!name) return "";
+  return `<div class="login-user-chip"><span class="login-user-dot"></span><span class="login-user-name">${escapeHtml(String(name))}</span></div>`;
 }
 
 function renderLoginWait(statusText = "请先在 Web 端登录 LOOM") {
@@ -1132,6 +1297,7 @@ function renderLoginWait(statusText = "请先在 Web 端登录 LOOM") {
   document.getElementById("app").innerHTML = `
     <div class="shell shell-login-minimal">
       <button class="icon-btn login-minimal-settings" id="open-options" title="设置">⚙</button>
+      ${userChipHtml()}
       <div class="login-minimal">
         <div class="login-minimal-spinner" aria-hidden="true">
           ${swirlSpinnerIcon()}
@@ -1144,7 +1310,7 @@ function renderLoginWait(statusText = "请先在 Web 端登录 LOOM") {
     </div>`;
 
   document.getElementById("open-options").onclick = () => chrome.runtime.openOptionsPage();
-  document.getElementById("open-web-login").onclick = () => chrome.tabs.create({ url: `${state.apiBase}/app?login=1` });
+  document.getElementById("open-web-login").onclick = () => chrome.tabs.create({ url: loginWebUrl() });
 }
 
 function renderLoading(text) {
@@ -1208,6 +1374,7 @@ function renderCollectionWait(reason = "waiting_for_collect") {
   document.getElementById("app").innerHTML = `
     <div class="shell shell-login-minimal">
       <button class="icon-btn login-minimal-settings" id="open-options" title="设置">⚙</button>
+      ${userChipHtml()}
       <div class="login-minimal">
         <div class="login-minimal-spinner" aria-hidden="true">
           ${swirlSpinnerIcon()}
@@ -1239,6 +1406,7 @@ function renderWaitingForDetail() {
   document.getElementById("app").innerHTML = `
     <div class="shell shell-login-minimal">
       <button class="icon-btn login-minimal-settings" id="open-options" title="设置">⚙</button>
+      ${userChipHtml()}
       <div class="login-minimal">
         <div class="login-minimal-spinner" aria-hidden="true">
           ${swirlSpinnerIcon()}
@@ -1260,9 +1428,7 @@ function renderMain() {
   const platform = state.page.platform;
   const canProduct = PRODUCT_PLATFORMS.has(platform);
   const canDemand = DEMAND_PLATFORMS.has(platform) || platform === "kickstarter";
-  const aiLabel = state.processingAi
-    ? `<span class="top-action-spinner" aria-label="AI 整理中">${spinIcon()}</span>`
-    : "AI 整理";
+  const aiLabel = aiActionLabel();
   document.getElementById("app").innerHTML = `
     <div class="shell">
       ${headerHtml({ platform, mode: state.mode, loading: state.reloading })}
@@ -1288,10 +1454,7 @@ function renderMain() {
         <div class="cl-spacer"></div>
       </div>
 
-      <div class="cl-foot${state.mode === "product" && isCommercePlatform(platform) ? " with-relation" : ""}">
-        <button class="btn ghost grow" id="refresh-bottom" type="button" ${state.busy ? "disabled" : ""}>重新抓取</button>
-        ${state.mode === "product" && isCommercePlatform(platform) ? `<button class="btn primary grow" id="open-relation" type="button">${item.related_product_name ? "重新关联" : "关联同一产品"}</button>` : ""}
-      </div>
+      ${state.mode === "product" && isCommercePlatform(platform) ? `<div class="cl-foot"><button class="btn primary grow" id="open-relation" type="button">${item.related_product_name ? "重新关联" : "关联同一产品"}</button></div>` : ""}
       ${state.relationPickerOpen ? `<div class="relation-layer">${relationPickerView()}</div>` : ""}
     </div>`;
   bindHeader();
@@ -1304,18 +1467,11 @@ function renderMain() {
       renderMain();
       return;
     }
-    state.busy = true;
-    state.processingAi = true;
-    renderMain();
-    await processRaw();
-    state.processingAi = false;
-    state.busy = false;
-    renderMain();
+    await runAiProcess("manual");
   };
   document.getElementById("process-top").onclick = handleProcess;
   document.getElementById("save-top").onclick = saveCurrent;
-  document.getElementById("refresh-bottom").onclick = () => reloadCurrentPage();
-  const dismissNoticeButton = document.getElementById("dismiss-llm-notice");
+const dismissNoticeButton = document.getElementById("dismiss-llm-notice");
   if (dismissNoticeButton) {
     dismissNoticeButton.onclick = async () => {
       state.llmNoticeDismissed = true;
@@ -1364,11 +1520,51 @@ function renderMain() {
     };
   }
   schedulePersistDraftState();
-  requestAnimationFrame(syncAutosizeTextareas);
+  syncActionButtons();
+  scheduleAutosizeTextareas();
+}
+
+function syncActionButtons() {
+  const saveButton = document.getElementById("save-top");
+  const processButton = document.getElementById("process-top");
+  if (saveButton) saveButton.disabled = Boolean(state.busy);
+  if (!processButton) return;
+  processButton.disabled = Boolean(state.busy);
+  processButton.classList.toggle("is-processing", Boolean(state.processingAi));
+  processButton.innerHTML = aiActionLabel();
+}
+
+function aiActionLabel() {
+  if (state.processingAi) {
+    return `<span class="top-action-spinner" aria-label="AI 整理中">${spinIcon()}</span>`;
+  }
+  return state.processed?.__loom_ai_processed ? "重新整理" : "AI 整理";
+}
+
+function bindUiStateWatchdog() {
+  if (uiStateWatchTimer) return;
+  uiStateWatchTimer = setInterval(() => {
+    const processButton = document.getElementById("process-top");
+    if (!processButton) return;
+    const domLooksBusy = processButton.disabled || processButton.classList.contains("is-processing") || Boolean(processButton.querySelector(".top-action-spinner"));
+    if (domLooksBusy && !state.busy && !state.processingAi) {
+      debugEvent("ui:stale-processing-reset", {
+        message: state.message || "",
+        platform: state.page?.platform || "",
+        mode: state.mode || "",
+      });
+      syncActionButtons();
+      const hint = document.querySelector(".cl-hint");
+      if (hint && /正在/.test(hint.textContent || "")) {
+        hint.textContent = state.message || (state.processed?.__loom_ai_processed ? "AI 结构化完成" : "已恢复，可继续操作。");
+      }
+    }
+  }, 800);
 }
 
 async function switchMode(mode, supported, message) {
   if (!supported && !confirm(`${message}，仍然切换吗？`)) return;
+  const entity = mode === "product" ? "competitor" : "inspiration";
   state.mode = mode;
   state.tagPicker = null;
   state.processed = state.page.data;
@@ -1378,6 +1574,7 @@ async function switchMode(mode, supported, message) {
     related_product_id: previous.related_product_id || "",
     related_product_name: previous.related_product_name || "",
   };
+  state.activeTagFields = { ...(state.activeTagFields || {}), [entity]: [] };
   state.formDirty = false;
   state.message = "模式已切换，可直接保存；如需摘要和标签，再点 AI 整理。";
   renderMain();
@@ -1559,12 +1756,115 @@ function buildDraft(mode, item) {
 }
 
 function setField(key, value) {
+  markUserEdited();
   state.form = { ...(state.form || {}), [key]: value };
   state.formDirty = true;
 }
 
 function fieldsForEntity(entity) {
+  const activeKeys = new Set(safeArray(state.activeTagFields?.[entity]));
+  return safeArray(state.fields).filter((field) =>
+    safeArray(field.entities).includes(entity) && activeKeys.has(field.key)
+  );
+}
+
+function allFieldsForEntity(entity) {
   return safeArray(state.fields).filter((field) => safeArray(field.entities).includes(entity));
+}
+
+function activeTagFieldsForDraft(mode, form, processed = null) {
+  const entity = mode === "product" ? "competitor" : "inspiration";
+  const source = processed || form || {};
+  const active = allFieldsForEntity(entity)
+    .filter((field) => fieldValues(source, field).length > 0)
+    .map((field) => field.key);
+  return { [entity]: active };
+}
+
+function aiFieldSuggestionText(processed) {
+  const suggestions = uniqueList(processed?.field_suggestions).slice(0, 3);
+  return suggestions.length ? ` 可添加字段：${suggestions.join("、")}` : "";
+}
+
+function activateTagField(fieldKey, entity) {
+  state.activeTagFields = {
+    ...(state.activeTagFields || {}),
+    [entity]: Array.from(new Set([...safeArray(state.activeTagFields?.[entity]), fieldKey])),
+  };
+}
+
+function deactivateTagField(fieldKey, entity) {
+  state.activeTagFields = {
+    ...(state.activeTagFields || {}),
+    [entity]: safeArray(state.activeTagFields?.[entity]).filter((key) => key !== fieldKey),
+  };
+  clearTagFieldValue(fieldKey);
+}
+
+function clearTagFieldValue(fieldKey) {
+  const form = state.form || {};
+  const nextTagValues = { ...(form.tag_values || {}) };
+  delete nextTagValues[fieldKey];
+  const next = { ...form, tag_values: nextTagValues };
+  if (fieldKey === "brand") next.brand = "";
+  if (fieldKey === "host") next.host = "";
+  if (fieldKey === "category") next.category = "";
+  if (fieldKey === "custom_tags") {
+    next.tags = [];
+    next.tags_custom = [];
+  }
+  if (fieldKey === "innovation") next.innovation = "";
+  if (fieldKey === "scenarios") next.scenarios = [];
+  if (fieldKey === "painpoints") next.painpoints = [];
+  state.form = next;
+}
+
+function addFieldPopoverHtml(entity) {
+  const activeKeys = new Set(safeArray(state.activeTagFields?.[entity]));
+  const unattached = allFieldsForEntity(entity).filter((f) => !activeKeys.has(f.key));
+  const tagIcon = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-3);flex-shrink:0"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>`;
+  const sparkIcon = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent);flex-shrink:0"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1-1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>`;
+  return `
+    <div class="add-field-popover" data-add-field-popover>
+      <div class="add-field-popover-head">添加字段</div>
+      ${unattached.length === 0 ? `
+        <div class="add-field-empty">所有字段已添加</div>
+      ` : `
+        <div class="add-field-list">
+          ${unattached.map((f) => `
+            <button class="add-field-item" type="button" data-attach-field="${escapeAttr(f.key)}" data-attach-entity="${escapeAttr(entity)}">
+              ${f.official === false ? sparkIcon : tagIcon}
+              <span class="add-field-item-name">${escapeHtml(f.name)}</span>
+              <span class="add-field-item-meta">${f.multi === false ? "单选" : "多选"}</span>
+            </button>
+          `).join("")}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function attachFieldToEntity(fieldKey, entity) {
+  const field = safeArray(state.fields).find((f) => f.key === fieldKey);
+  if (!field) return;
+  markUserEdited();
+  activateTagField(fieldKey, entity);
+  state.addFieldOpen = null;
+  state.formDirty = true;
+  renderMain();
+  schedulePersistDraftState(0);
+}
+
+function detachFieldFromEntity(fieldKey, entity) {
+  const field = safeArray(state.fields).find((f) => f.key === fieldKey);
+  if (!field) return;
+  markUserEdited();
+  deactivateTagField(fieldKey, entity);
+  if (state.tagPicker?.key === fieldKey) state.tagPicker = null;
+  state.addFieldOpen = null;
+  state.formDirty = true;
+  renderMain();
+  schedulePersistDraftState(0);
 }
 
 function fieldValues(item, field) {
@@ -1574,7 +1874,7 @@ function fieldValues(item, field) {
   if (field.key === "host" && item?.host) return String(item.host).split(/\s*\/\s*/).filter(Boolean);
   if (field.key === "category" && item?.category) return String(item.category).split(/\s*\/\s*/).filter(Boolean);
   if (field.key === "custom_tags") return safeArray(item?.tags || item?.tags_custom);
-  if (field.key === "innovation") return [item?.innovation || "待分类"].filter(Boolean);
+  if (field.key === "innovation") return [item?.innovation].filter(Boolean);
   if (field.key === "scenarios") return safeArray(item?.scenarios);
   if (field.key === "painpoints") return safeArray(item?.painpoints);
   return [];
@@ -1582,25 +1882,35 @@ function fieldValues(item, field) {
 
 function schemaFieldsView(entity, item) {
   const fields = fieldsForEntity(entity);
-  if (!fields.length) return "";
   const isCompetitor = entity === "competitor";
+  const plusIcon = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
   return `
     <div class="cl-section">
       <div class="cl-section-label">标签字段</div>
-      <div class="${isCompetitor ? "product-taxonomy-stack" : "product-taxonomy-stack inspiration-taxonomy-stack"}">
-      ${fields.map((field) => `
-        ${fieldSelect(field.key, field.name, fieldValues(item, field), field.tone || "outline", {
-          single: field.multi === false,
-          groupKey: field.legacyKey || field.key,
-          official: field.official,
-        })}
-      `).join("")}
+      ${fields.length ? `
+        <div class="${isCompetitor ? "product-taxonomy-stack" : "product-taxonomy-stack inspiration-taxonomy-stack"}">
+        ${fields.map((field) => `
+          ${fieldSelect(field.key, field.name, fieldValues(item, field), field.tone || "outline", {
+            single: field.multi === false,
+            groupKey: field.legacyKey || field.key,
+            official: field.official,
+            entity,
+          })}
+        `).join("")}
+        </div>
+      ` : ""}
+      <div class="detail-add-field-wrap">
+        <button class="add-field-trigger" type="button" data-add-field-trigger="${escapeAttr(entity)}">
+          ${plusIcon} 添加字段
+        </button>
+        ${state.addFieldOpen === entity ? addFieldPopoverHtml(entity) : ""}
       </div>
     </div>
   `;
 }
 
 function setTagValue(key, values) {
+  markUserEdited();
   const nextValues = uniqueList(values);
   const next = {
     ...(state.form || {}),
@@ -1684,7 +1994,7 @@ async function collectVisibleComments({ silent = false } = {}) {
         ? `已采集 ${next.length} 条当前可见评论。`
         : "当前可见评论还没有读到，向下滚动评论区后再试。";
     }
-    if (!silent || (!isEditingForm() && next.length !== previousCount)) renderMain();
+    if (!silent) renderMain();
   } catch (error) {
     if (!silent) {
       state.message = `评论采集失败：${error.message}`;
@@ -1871,7 +2181,7 @@ function demandView(item) {
     </div>
     <div class="cl-section">
       <div class="cl-section-label">原文正文</div>
-      <textarea class="ghost-input full source-content-input" data-key="content" placeholder="采集到的原文正文">${escapeHtml(originalText)}</textarea>
+      <textarea class="ghost-input full source-content-input" data-key="content" data-min-height="132" placeholder="采集到的原文正文">${escapeHtml(originalText)}</textarea>
     </div>
     ${schemaFieldsView("inspiration", item)}
     ${state.page?.platform === "xiaohongshu" ? commentsCaptureView(item) : ""}
@@ -1981,24 +2291,25 @@ function fieldSelect(key, label, selectedValues, tone = "accent", options = {}) 
   const selected = safeArray(selectedValues).filter(Boolean);
   const active = state.tagPicker?.key === key;
   const isCustom = options.official === false;
+  const removeButton = options.entity
+    ? `<button class="field-remove" type="button" data-detach-field="${escapeAttr(key)}" data-detach-entity="${escapeAttr(options.entity)}" aria-label="移除此字段">×</button>`
+    : "";
   return `
     <div class="field-select ${active ? "open" : ""}" data-field-select="${escapeAttr(key)}">
-      <div class="field-select-head">
-        <div class="cl-section-label">
-          ${isCustom ? `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent);flex-shrink:0"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>` : ""}
-          ${escapeHtml(label)}
-          ${isCustom ? `<span class="field-custom-chip">自定义</span>` : ""}
-        </div>
-        <button class="field-select-trigger" type="button" data-open-tag-picker="${escapeAttr(key)}">
-          ${selected.length ? `${selected.length} 项` : "选择"}
-        </button>
+      <div class="cl-section-label">
+        ${isCustom ? `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent);flex-shrink:0"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>` : ""}
+        <span class="field-label-text">${escapeHtml(label)}</span>
+        ${isCustom ? `<span class="field-custom-chip">自定义</span>` : ""}
+        ${removeButton}
       </div>
-      <div class="field-selected-row">
-        ${selected.length ? selected.map((item) => `
-          <span class="tag ${tone} removable" data-tag-key="${escapeAttr(key)}" data-tag-value="${escapeAttr(item)}">
-            ${escapeHtml(item)}<button type="button">×</button>
-          </span>
-        `).join("") : `<span class="field-empty">未选择</span>`}
+      <div class="field-select-shell" data-open-tag-picker="${escapeAttr(key)}">
+        <div class="field-selected-row">
+          ${selected.length ? selected.map((item) => `
+            <span class="tag ${tone} removable" data-tag-key="${escapeAttr(key)}" data-tag-value="${escapeAttr(item)}">
+              ${escapeHtml(item)}<button type="button">×</button>
+            </span>
+          `).join("") : `<span class="field-empty">点击选择…</span>`}
+        </div>
       </div>
       ${active ? tagPickerPanel(key, group, selected, tone, options) : ""}
     </div>
@@ -2207,16 +2518,63 @@ function bindHeader() {
 
 function autosizeTextarea(el) {
   if (!(el instanceof HTMLTextAreaElement)) return;
+  const minHeight = Number(el.dataset.minHeight || 0) || (el.classList.contains("source-content-input") ? 132 : 96);
+  const manualHeight = Number(el.dataset.manualHeight || 0);
+  const previousScrollTop = el.scrollTop;
+  const computed = window.getComputedStyle(el);
+  const borderBoxExtra = computed.boxSizing === "border-box"
+    ? (parseFloat(computed.borderTopWidth) || 0) + (parseFloat(computed.borderBottomWidth) || 0)
+    : 0;
+  const previousHeight = el.style.height;
   el.style.height = "auto";
-  const minHeight = el.classList.contains("source-content-input") ? 180 : 96;
-  el.style.height = `${Math.max(el.scrollHeight, minHeight)}px`;
+  const contentHeight = Math.ceil(el.scrollHeight + borderBoxExtra + 2);
+  const nextHeight = Math.max(contentHeight, manualHeight, minHeight);
+  const currentHeight = parseFloat(previousHeight) || el.offsetHeight || 0;
+  if (Math.abs(currentHeight - nextHeight) > 1) {
+    el.style.height = `${nextHeight}px`;
+  } else if (previousHeight) {
+    el.style.height = previousHeight;
+  }
+  el.style.overflowY = "auto";
+  el.scrollTop = previousScrollTop;
+}
+
+function rememberManualTextareaResize() {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLTextAreaElement) || !el.classList.contains("ghost-input")) return;
+  const minHeight = Number(el.dataset.minHeight || 0) || (el.classList.contains("source-content-input") ? 132 : 96);
+  const currentHeight = el.offsetHeight || 0;
+  const computed = window.getComputedStyle(el);
+  const borderBoxExtra = computed.boxSizing === "border-box"
+    ? (parseFloat(computed.borderTopWidth) || 0) + (parseFloat(computed.borderBottomWidth) || 0)
+    : 0;
+  el.style.height = "auto";
+  const contentHeight = Math.max(Math.ceil(el.scrollHeight + borderBoxExtra + 2), minHeight);
+  if (currentHeight > contentHeight + 12) {
+    el.dataset.manualHeight = String(currentHeight);
+    el.style.height = `${currentHeight}px`;
+    return;
+  }
+  delete el.dataset.manualHeight;
+  el.style.height = `${contentHeight}px`;
 }
 
 function syncAutosizeTextareas(root = document) {
   const textareas = Array.from(root.querySelectorAll("textarea.ghost-input"));
   textareas.forEach(autosizeTextarea);
-  if (!textareas.length) return;
-  requestAnimationFrame(() => textareas.forEach(autosizeTextarea));
+}
+
+function scheduleAutosizeTextareas(root = document, delayMs = 0) {
+  if (autosizeTimer) clearTimeout(autosizeTimer);
+  const run = () => {
+    autosizeTimer = null;
+    syncAutosizeTextareas(root);
+  };
+  if (delayMs > 0) {
+    autosizeTimer = setTimeout(run, delayMs);
+  } else {
+    requestAnimationFrame(run);
+  }
 }
 
 function handleGlobalClick(event) {
@@ -2224,6 +2582,18 @@ function handleGlobalClick(event) {
   if (tab) {
     tab.parentElement.querySelectorAll(".cl-tab").forEach((item) => item.classList.remove("active"));
     tab.classList.add("active");
+    return;
+  }
+
+  // 先拦截 removable tag 内部的点击（× 按钮），防止冒泡误触发 picker toggle
+  const removable = event.target.closest(".tag.removable");
+  if (removable) {
+    const key = removable.getAttribute("data-tag-key");
+    const value = removable.getAttribute("data-tag-value");
+    if (!key || !value) return;
+    const current = safeArray(state.form?.tag_values?.[key] || state.form?.[key]);
+    setTagValue(key, key === "innovation" ? [] : current.filter((item) => item !== value));
+    renderMain();
     return;
   }
 
@@ -2254,19 +2624,38 @@ function handleGlobalClick(event) {
     return;
   }
 
-  const removable = event.target.closest(".tag.removable");
-  if (removable) {
-    const key = removable.getAttribute("data-tag-key");
-    const value = removable.getAttribute("data-tag-value");
-    if (!key || !value) return;
-    const current = safeArray(state.form?.tag_values?.[key] || state.form?.[key]);
-    setTagValue(key, key === "innovation" ? [] : current.filter((item) => item !== value));
+  if (state.tagPicker && !event.target.closest("[data-field-select]")) {
+    state.tagPicker = null;
     renderMain();
     return;
   }
 
-  if (state.tagPicker && !event.target.closest("[data-field-select]")) {
-    state.tagPicker = null;
+  const addFieldTrigger = event.target.closest("[data-add-field-trigger]");
+  if (addFieldTrigger) {
+    const entity = addFieldTrigger.getAttribute("data-add-field-trigger");
+    state.addFieldOpen = state.addFieldOpen === entity ? null : entity;
+    renderMain();
+    return;
+  }
+
+  const attachFieldBtn = event.target.closest("[data-attach-field]");
+  if (attachFieldBtn) {
+    const fieldKey = attachFieldBtn.getAttribute("data-attach-field");
+    const entity = attachFieldBtn.getAttribute("data-attach-entity");
+    attachFieldToEntity(fieldKey, entity);
+    return;
+  }
+
+  const detachFieldBtn = event.target.closest("[data-detach-field]");
+  if (detachFieldBtn) {
+    const fieldKey = detachFieldBtn.getAttribute("data-detach-field");
+    const entity = detachFieldBtn.getAttribute("data-detach-entity");
+    detachFieldFromEntity(fieldKey, entity);
+    return;
+  }
+
+  if (state.addFieldOpen && !event.target.closest("[data-add-field-popover]") && !event.target.closest("[data-add-field-trigger]")) {
+    state.addFieldOpen = null;
     renderMain();
     return;
   }
@@ -2277,6 +2666,7 @@ function handleGlobalClick(event) {
     const key = row?.getAttribute("data-list-key");
     const index = Number(row?.getAttribute("data-index"));
     if (!key || Number.isNaN(index)) return;
+    markUserEdited();
     state.form = { ...(state.form || {}), [key]: safeArray(state.form?.[key]).filter((_, i) => i !== index) };
     state.formDirty = true;
     renderMain();
@@ -2290,6 +2680,7 @@ function handleGlobalClick(event) {
     const input = row?.querySelector("input");
     const value = String(input?.value || "").trim();
     if (!value || !key) return;
+    markUserEdited();
     const next = safeArray(state.form?.[key]);
     next.push(value);
     state.form = { ...(state.form || {}), [key]: next };
@@ -2301,6 +2692,7 @@ function handleGlobalClick(event) {
 document.addEventListener("input", (event) => {
   const el = event.target;
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return;
+  markUserEdited();
   const tagQueryKey = el.getAttribute("data-tag-query");
   if (tagQueryKey) {
     state.tagPicker = { key: tagQueryKey, query: el.value };
@@ -2355,7 +2747,7 @@ function handleSaveMutation() {
 
 function normalizedTagValues(item, entity) {
   const fields = fieldsForEntity(entity);
-  const values = { ...(item?.tag_values || {}) };
+  const values = {};
   for (const field of fields) {
     const current = fieldValues(item, field);
     values[field.key] = field.multi === false ? current.slice(0, 1) : current;
@@ -2368,15 +2760,15 @@ function productPayload(item) {
   const brand = uniqueList(tagValues.brand).join(" / ");
   const host = uniqueList(tagValues.host).join(" / ");
   const category = uniqueList(tagValues.category).join(" / ");
-  const customTags = uniqueList(tagValues.custom_tags || item.tags);
+  const customTags = uniqueList(tagValues.custom_tags);
   return {
     ...item,
     source_url: item.url || state.page.data.url,
     platform: state.page.platform,
     name: item.name,
-    brand: brand || item.brand || "",
-    host: host || item.host || "",
-    category: category || item.category || "",
+    brand,
+    host,
+    category,
     tag_values: tagValues,
     price: item.price || "",
     cost_estimate: item.cost_estimate || "",
@@ -2414,10 +2806,10 @@ function productPayload(item) {
 
 function demandPayload(item) {
   const tagValues = normalizedTagValues(item, "inspiration");
-  const innovation = uniqueList(tagValues.innovation)[0] || item.innovation || "待分类";
-  const scenarios = uniqueList(tagValues.scenarios || item.scenarios);
-  const painpoints = uniqueList(tagValues.painpoints || item.painpoints);
-  const customTags = uniqueList(tagValues.custom_tags || item.tags_custom || item.tags);
+  const innovation = uniqueList(tagValues.innovation)[0] || "";
+  const scenarios = uniqueList(tagValues.scenarios);
+  const painpoints = uniqueList(tagValues.painpoints);
+  const customTags = uniqueList(tagValues.custom_tags);
   return {
     ...item,
     title: item.title,
@@ -2464,6 +2856,7 @@ async function saveCurrent() {
     await clearPersistedDraftState();
     state.message = "保存成功";
     state.formDirty = false;
+    clearEditGuard();
     debugEvent("save:ok", { mode: state.mode, title: payload.name || payload.title || "" });
     renderSuccess(payload);
   } catch (error) {
