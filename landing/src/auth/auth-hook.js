@@ -7,14 +7,14 @@
  * fails after 1.5s — that's intentional, so the form's error
  * state is visible during design review.
  *
- * To wire to the real Loom auth, replace the body of
+ * To wire to the real LOOM auth, replace the body of
  * `loginRequest()` below. The function signature must stay the
  * same so <LoginPanel /> keeps working.
  *
  * Search for `TODO(codex)` to find the swap point.
  *
  * Reference implementation (drop-in once landing is integrated
- * with the Loom Express server at same origin):
+ * with the LOOM Express server at same origin):
  *
  *   export async function loginRequest({ username, password }) {
  *     const res = await fetch("/api/auth/login", {
@@ -27,7 +27,7 @@
  *       const data = await res.json().catch(() => ({}));
  *       throw new Error(data.message || `登录失败 (${res.status})`);
  *     }
- *     // Loom uses session cookies; on success redirect into the app.
+ *     // LOOM uses session cookies; on success redirect into the app.
  *     window.location.href = "/";
  *   }
  * ============================================================ */

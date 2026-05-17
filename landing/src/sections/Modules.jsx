@@ -1,4 +1,4 @@
-// Module names + sublabels mirror src/App.jsx:20-29 in the main Loom app.
+// Module names + sublabels mirror src/App.jsx:20-29 in the main LOOM app.
 // Keep these in sync if NAV ever changes.
 
 const MODULES = [
@@ -108,7 +108,7 @@ export default function Modules() {
 
 /* ============================================================
  * Lucide-style inline SVG icons (no dependency).
- * Mirrors the iconography used in main Loom nav (newspaper /
+ * Mirrors the iconography used in main LOOM nav (newspaper /
  * boxes / lightbulb / compass).
  * ============================================================ */
 

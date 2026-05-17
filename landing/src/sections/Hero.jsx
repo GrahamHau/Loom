@@ -5,7 +5,7 @@ const LOOM_URL = import.meta.env.VITE_LOOM_APP_URL || "/";
 export default function Hero() {
   const onPrimary = (e) => {
     e.preventDefault();
-    // Two-mode CTA: if Loom URL is set to same-origin, scroll to login;
+    // Two-mode CTA: if LOOM URL is set to same-origin, scroll to login;
     // otherwise navigate out. Default behavior: scroll to embedded login.
     smoothScrollTo("login");
     window.setTimeout(() => {

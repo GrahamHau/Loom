@@ -109,14 +109,12 @@ export default function LoginPanel() {
 
       <div className="login-actions">
 
-        {/* ① 飞书登录 — 主要入口 */}
-        {feishuEnabled && (
-          <button className="login-feishu-btn" type="button"
-            onClick={startFeishuLogin} disabled={submitting || succeeded}>
-            <img src="/feishu.png" alt="" />
-            使用飞书登录
-          </button>
-        )}
+        {/* ① 飞书登录 — 主要入口，始终常驻 */}
+        <button className="login-feishu-btn" type="button"
+          onClick={startFeishuLogin} disabled={submitting || succeeded}>
+          <img src="/feishu.png" alt="" />
+          使用飞书登录
+        </button>
 
         {/* ② 演示模式 — 次要入口 */}
         <button className="login-demo-btn" type="button"

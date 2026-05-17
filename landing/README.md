@@ -1,9 +1,9 @@
-# Loom — Launch Landing Page
+# LOOM — Launch Landing Page
 
-独立的产品 launch 页。讲清楚 Loom 是干什么的、为什么这件事现在重要，
+独立的产品 launch 页。讲清楚 LOOM 是干什么的、为什么这件事现在重要，
 并把登录交互直接做进页面尾部。
 
-> 这个目录是**独立子项目**。开发时独立跑在 5174；生产环境下会被 Loom
+> 这个目录是**独立子项目**。开发时独立跑在 5174；生产环境下会被 LOOM
 > 主服务托管为首页 `/` 和插件引导页 `/extension`。
 
 ## 本地启动
@@ -15,7 +15,7 @@ cp .env.example .env       # 调整 VITE_LOOM_APP_URL（默认指向 http://loca
 npm run dev                # 监听 http://localhost:5174
 ```
 
-主 Loom 应用占用 5173，这里用 5174，可以同时跑。
+主 LOOM 应用占用 5173，这里用 5174，可以同时跑。
 
 ## 构建
 

@@ -12,7 +12,7 @@ import Footer from "./sections/Footer.jsx";
 import ExtensionPage from "./sections/ExtensionPage.jsx";
 
 /**
- * Loom landing — single-page scroll.
+ * LOOM landing — single-page scroll.
  *
  * Each section is a stateless component; this shell wires up:
  *   - scroll-reveal intersection observer (.reveal -> .is-visible)

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Standalone product launch landing page for Loom. Designed to be wired into the main Loom app by Codex.",
+  "description": "Standalone product launch landing page for LOOM. Designed to be wired into the main LOOM app by Codex.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
