@@ -29,7 +29,7 @@ function headingLevel(line) {
   const numbered = line.match(/^(\d+(?:\.\d+)*|[一二三四五六七八九十]+)[、.]\s*(.+)$/);
   if (numbered && numbered[2].length <= 40) return { level: numbered[1].includes(".") ? 3 : 2, text: numbered[2].trim() };
   if (/^[^\s]{2,24}[：:]$/.test(line)) return { level: 2, text: line.replace(/[：:]$/, "").trim() };
-  if (line.length <= 24 && /(需求|要求|定义|背景|结构|包装|测试|风险|问题|竞品|用户|场景|机会|建议|工艺|供应商|说明|交付|沟通|CMF|ID)/i.test(line)) {
+  if (line.length <= 24 && !/[：:].+/.test(line) && /(SKU|SPU|成本|报价|毛利|需求|要求|定义|背景|结构|包装|测试|风险|问题|竞品|用户|场景|机会|建议|工艺|供应商|说明|交付|沟通|CMF|ID)/i.test(line)) {
     return { level: 2, text: line };
   }
   return null;
@@ -114,6 +114,7 @@ function documentTitleFrom(input, rawBlocks) {
 }
 
 const SECTION_ENTITY_MAP = {
+  sku_spu: "sku_spu",
   functional_attributes: "feature",
   structure: "feature",
   materials_process: "feature",
@@ -124,6 +125,7 @@ const SECTION_ENTITY_MAP = {
   demands_painpoints: "need",
   target_users_scenarios: "need",
   competitor_landscape: "competitor",
+  cost_estimation: "cost_estimation",
   risks_uncertainties: "evidence",
   internal_risks: "evidence",
   open_questions: "evidence",
@@ -269,17 +271,72 @@ function sourceImportMethod(value) {
   return value === "feishu_doc" ? "feishu_doc" : "paste";
 }
 
+function supportedStructuredDocType(value) {
+  const docType = cleanText(value, "other").toLowerCase();
+  return docType === "prd" || docType === "mrd";
+}
+
+function shouldRequireTemplateMatch(input = {}) {
+  return sourceImportMethod(input.import_method) === "feishu_doc";
+}
+
 export async function importPastedDocument(input = {}) {
   const workspaceId = cleanText(input.workspace_id);
   if (!workspaceId) throw new Error("workspace_id_required");
   ensureDefaultKnowledgeTemplates(workspaceId);
   const importMethod = sourceImportMethod(input.import_method);
   const docType = cleanText(input.doc_type, "other");
+  if (shouldRequireTemplateMatch(input) && !supportedStructuredDocType(docType)) {
+    const failed = input.existing_import_id
+      ? updateDocumentImport(input.existing_import_id, {
+        status: "failed",
+        raw_blocks: Array.isArray(input.raw_blocks) ? input.raw_blocks : [],
+        error: "当前只支持能匹配 PRD / MRD 模板的飞书文档导入，避免污染知识库。",
+      })
+      : createDocumentImport({
+        id: input.id || nanoid(12),
+        workspace_id: workspaceId,
+        project_id: input.project_id,
+        import_method: importMethod,
+        doc_type: docType,
+        template_id: input.template_id,
+        title: input.title,
+        source_uri: input.source_uri,
+        raw_blocks: Array.isArray(input.raw_blocks) ? input.raw_blocks : [],
+        status: "failed",
+        error: "当前只支持能匹配 PRD / MRD 模板的飞书文档导入，避免污染知识库。",
+        created_by: input.created_by,
+      });
+    return { import: failed, document: null, error: failed.error };
+  }
   const rawBlocks = Array.isArray(input.raw_blocks) && input.raw_blocks.length
     ? input.raw_blocks
     : parsePasteToRawBlocks(input.text || input.content || "");
   const template = resolveDocumentTemplate({ workspaceId, docType, templateId: input.template_id });
   const normalized = normalizeBlocksWithTemplate(rawBlocks, template);
+  if (shouldRequireTemplateMatch(input) && !normalized.normalized_sections.length) {
+    const failed = input.existing_import_id
+      ? updateDocumentImport(input.existing_import_id, {
+        status: "failed",
+        raw_blocks: rawBlocks,
+        error: "未命中当前 PRD / MRD 模板章节，已跳过入库，避免污染知识库。",
+      })
+      : createDocumentImport({
+        id: input.id || nanoid(12),
+        workspace_id: workspaceId,
+        project_id: input.project_id,
+        import_method: importMethod,
+        doc_type: docType,
+        template_id: template?.id || input.template_id,
+        title: input.title,
+        source_uri: input.source_uri,
+        raw_blocks: rawBlocks,
+        status: "failed",
+        error: "未命中当前 PRD / MRD 模板章节，已跳过入库，避免污染知识库。",
+        created_by: input.created_by,
+      });
+    return { import: failed, document: null, error: failed.error };
+  }
   const title = documentTitleFrom(input, rawBlocks);
   const importJob = input.existing_import_id
     ? updateDocumentImport(input.existing_import_id, { status: "normalizing", raw_blocks: rawBlocks, error: "" })

@@ -4,6 +4,7 @@ process.env.DATABASE_PATH = ":memory:";
 
 const dbModule = await import("./db.js");
 const imports = await import("./document-import-service.js");
+const feishuReader = await import("./feishu-doc-reader-service.js");
 const knowledge = await import("./knowledge-repository.js");
 
 function clearKnowledgeTables() {
@@ -100,6 +101,9 @@ describe("document import service", () => {
       workspace_id: "ws-company",
       doc_type: "mrd",
       source_uri: "https://example.feishu.cn/docx/abc",
+      reader: async () => {
+        throw new feishuReader.FeishuDocumentReadError();
+      },
     });
 
     expect(result.document).toBeNull();
@@ -125,6 +129,30 @@ describe("document import service", () => {
     expect(result.document.metadata.import_method).toBe("feishu_doc");
   });
 
+  it("maps SKU/SPU and MRD cost estimation sections into structured knowledge", async () => {
+    const result = await imports.importPastedDocument({
+      workspace_id: "ws-company",
+      doc_type: "mrd",
+      import_method: "feishu_doc",
+      source_uri: "https://example.feishu.cn/docx/mrd",
+      text: `
+# SKU / SPU 信息
+SPU：Tripod Wallet
+SKU：TW-001 / TW-002
+
+成本估算
+目标成本控制在 8 美金以内，重点关注材料、包装和打样报价。
+`,
+    });
+
+    const sectionKeys = result.document.content.normalized_sections.map((section) => section.key);
+    const entityTypes = result.knowledge.entities.map((entity) => entity.entity_type);
+
+    expect(result.import.status).toBe("indexed");
+    expect(sectionKeys).toEqual(expect.arrayContaining(["sku_spu", "cost_estimation"]));
+    expect(entityTypes).toEqual(expect.arrayContaining(["sku_spu", "cost_estimation"]));
+  });
+
   it("retries paste imports without inserting a duplicate import row", async () => {
     const first = await imports.importPastedDocument({
       workspace_id: "ws-company",
@@ -137,5 +165,24 @@ describe("document import service", () => {
     expect(retried.import.id).toBe(first.import.id);
     expect(retried.import.status).toBe("indexed");
     expect(rows).toHaveLength(1);
+  });
+
+  it("reads Feishu docs through lark-cli output and converts media to placeholders", async () => {
+    const result = feishuReader.__feishuDocReaderTestUtils.parseCliOutput(JSON.stringify({
+      ok: true,
+      data: {
+        document: {
+          document_id: "doc_test",
+          revision_id: 8,
+          content: "<title>Feishu PRD</title>\n\n# Feishu PRD\n\n功能需求\n支持快拆。\n<img token=\"img_1\"></img>",
+        },
+      },
+    }), "https://example.feishu.cn/docx/ok");
+
+    expect(result.title).toBe("Feishu PRD");
+    expect(result.text).toContain("# Feishu PRD");
+    expect(result.text).toContain("功能需求");
+    expect(result.text).toContain("[图片]");
+    expect(result.metadata.document_id).toBe("doc_test");
   });
 });

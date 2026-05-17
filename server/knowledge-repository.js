@@ -19,6 +19,7 @@ const DEFAULT_ACCESS_POLICY = {
 };
 
 const DEFAULT_PRD_SECTIONS = [
+  { key: "sku_spu", title: "SKU / SPU 信息", aliases: ["SKU", "SPU", "SKU信息", "SPU信息", "产品编码", "型号", "SKU/SPU"], required: false },
   { key: "product_definition", title: "产品定义", aliases: ["项目背景", "产品概述"], required: true },
   { key: "functional_attributes", title: "功能属性", aliases: ["功能需求", "功能定义"], required: true },
   { key: "structure", title: "结构要求", aliases: ["结构设计", "机构要求"], required: false },
@@ -32,10 +33,12 @@ const DEFAULT_PRD_SECTIONS = [
 ];
 
 const DEFAULT_MRD_SECTIONS = [
+  { key: "sku_spu", title: "SKU / SPU 信息", aliases: ["SKU", "SPU", "SKU信息", "SPU信息", "产品编码", "型号", "SKU/SPU"], required: false },
   { key: "market_background", title: "市场背景", aliases: ["背景", "行业背景"], required: true },
   { key: "target_users_scenarios", title: "目标用户与场景", aliases: ["目标用户", "用户场景"], required: true },
   { key: "demands_painpoints", title: "需求与痛点", aliases: ["需求", "痛点"], required: true },
   { key: "competitor_landscape", title: "竞品格局", aliases: ["竞品", "竞品分析"], required: true },
+  { key: "cost_estimation", title: "成本估算", aliases: ["成本", "成本估算", "目标成本", "成本测算", "报价", "毛利"], required: false },
   { key: "opportunity_judgement", title: "机会判断", aliases: ["机会", "机会点"], required: true },
   { key: "risks_uncertainties", title: "风险与不确定性", aliases: ["风险", "不确定性"], required: true },
   { key: "recommended_direction", title: "建议方向", aliases: ["建议", "方向"], required: true },
@@ -43,6 +46,7 @@ const DEFAULT_MRD_SECTIONS = [
 ];
 
 const DEFAULT_HARDWARE_MODULES = [
+  "sku_spu",
   "product_definition",
   "functional_attributes",
   "structure",
@@ -785,6 +789,8 @@ export function createKnowledgeEntity(input = {}) {
       "evidence",
       "document",
       "doc_section",
+      "sku_spu",
+      "cost_estimation",
       "test_requirement",
       "certification_requirement",
       "packaging_requirement",

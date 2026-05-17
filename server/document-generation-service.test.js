@@ -82,16 +82,18 @@ describe("document generation service", () => {
 
     expect(result.document.doc_type).toBe("mrd");
     expect(result.sections.map((section) => section.title)).toEqual([
+      "SKU / SPU 信息",
       "市场背景",
       "目标用户与场景",
       "需求与痛点",
       "竞品格局",
+      "成本估算",
       "机会判断",
       "风险与不确定性",
       "建议方向",
       "待确认问题",
     ]);
-    expect(result.document.content.normalized_sections).toHaveLength(8);
+    expect(result.document.content.normalized_sections).toHaveLength(10);
     expect(result.document.content_text).toContain("认证范围是否覆盖海外销售");
     expect(result.needs_review).toBe(true);
     expect(result.model_status.strong_model_available).toBe(false);

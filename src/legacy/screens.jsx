@@ -426,7 +426,7 @@ function newsEmptyState(tab, sampleWorkspace) {
   if (tab === "starred") {
     return {
       title: "还没有收藏的资讯",
-      body: "在 Stream 里点右侧星标后，这里会自动汇总你收藏过的内容。",
+      body: "在资讯流里点右侧星标后，这里会自动汇总你收藏过的内容。",
     };
   }
   if (tab === "微信公众号") {
@@ -1043,8 +1043,8 @@ window.LoginScreen = LoginScreen;
 
 // ============ NEWS ============
 const DIGEST_MOCK = [
-  { id: "d1", kind: "launch", headline: "友商新品首次切入低价带，产品线明显下探", connection: "可对照你 Lens 中追踪的同类竞品", sourceCount: 2 },
-  { id: "d2", kind: "trend", headline: "本周 AI 搜索相关报道密集，多家媒体集中发声", connection: "与 Spark 中 2 条关注的用户痛点关键词重叠", sourceCount: 5 },
+  { id: "d1", kind: "launch", headline: "友商新品首次切入低价带，产品线明显下探", connection: "可对照你竞品库中追踪的同类竞品", sourceCount: 2 },
+  { id: "d2", kind: "trend", headline: "本周 AI 搜索相关报道密集，多家媒体集中发声", connection: "与需求雷达中 2 条关注的用户痛点关键词重叠", sourceCount: 5 },
   { id: "d3", kind: "unknown_signal", headline: "新兴品牌获融资，专注你尚未追踪的细分赛道", connection: null, sourceCount: 1 },
 ];
 
@@ -1093,7 +1093,7 @@ function InsightItem({ item }) {
         </div>
       )}
       <div className="insight-actions">
-        <Btn size="sm" variant="ghost" icon="plus">加入 Weave</Btn>
+        <Btn size="sm" variant="ghost" icon="plus">加入调研工坊</Btn>
         <Btn size="sm" variant="ghost" icon="x">忽略</Btn>
       </div>
     </div>
@@ -2237,7 +2237,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
     try {
       await api("/api/sync/feishu", { method: "POST", body: JSON.stringify({ kinds: ["demands"] }) });
       await refreshData?.();
-      setNotice("Spark 灵感库已同步到飞书。");
+      setNotice("需求雷达已同步到飞书。");
     } catch (error) {
       setNotice(error.message);
     }
@@ -2879,8 +2879,8 @@ function ResearchScreen({ data, api, refreshData }) {
       <div className="page page-fluid">
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div>
-            <h1 className="h1">Weave 调研工坊</h1>
-            <div className="muted text-sm">从 Lens 与 Spark 中匹配数据，AI 生成结构化分析报告</div>
+            <h1 className="h1">调研工坊</h1>
+            <div className="muted text-sm">从竞品库与需求雷达中匹配数据，AI 生成结构化分析报告</div>
           </div>
           <div className="page-actions">
             {selectMode &&
@@ -3289,7 +3289,7 @@ function KnowledgeScreen({ data, api, initialPane = "import" }) {
             {activePane === "query" && <section className="knowledge-panel knowledge-panel-main">
               <div className="knowledge-panel-head">
                 <Icon name="database" size={15} />
-                <div><h3>资料包与问答</h3><p>把已发布文档、竞品、需求、Stream 汇入同一个项目资料包。</p></div>
+                <div><h3>资料包与问答</h3><p>把已发布文档、竞品、需求、资讯流汇入同一个项目资料包。</p></div>
               </div>
               <div className="knowledge-pack-bar">
                 <Btn variant="primary" icon="sync" onClick={buildPack} disabled={!workspaceReady || Boolean(busy)}>构建资料包</Btn>
@@ -3524,7 +3524,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
                 {demands.length === 0 &&
                 <button className="research-empty-add"
                 onClick={() => setPicker("demand")}>
-                    <Icon name="plus" size={12} /> 从 Spark 添加
+                    <Icon name="plus" size={12} /> 从需求雷达添加
                   </button>
                 }
               </div>
@@ -4055,13 +4055,13 @@ function SettingsScreen({ data, api, refreshData }) {
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="rss" size={14} style={{ color: "var(--accent)" }} />
-            <div><h3>官方 RSS 源</h3><div className="desc">系统统一在后端采集并分发到 Stream。你只需要决定是否接收。</div></div>
+            <div><h3>官方 RSS 源</h3><div className="desc">系统统一在后端采集并分发到资讯流。你只需要决定是否接收。</div></div>
           </div>
           <div className="settings-section-body">
             <div className="settings-row">
               <div className="label">
                 接收官方信息流
-                <div className="hint">关闭后，Stream 将隐藏系统统一分发的官方 RSS 与公众号内容。</div>
+                <div className="hint">关闭后，资讯流将隐藏系统统一分发的官方 RSS 与公众号内容。</div>
               </div>
               <Switch on={settings.official_news_enabled !== false} onChange={async (on) => {
                 const next = { ...settings, official_news_enabled: on };

@@ -2,10 +2,12 @@ import { createDocument, getKnowledgePack } from "./knowledge-repository.js";
 import { resolvePrdTemplate } from "./prd-template-service.js";
 
 export const MRD_SECTIONS = [
+  { key: "sku_spu", title: "SKU / SPU 信息", keywords: ["SKU", "SPU", "型号", "编码", "款式", "变体"] },
   { key: "market_background", title: "市场背景", keywords: ["市场", "行业", "趋势", "规模", "背景"] },
   { key: "target_users_scenarios", title: "目标用户与场景", keywords: ["用户", "人群", "场景", "使用", "画像"] },
   { key: "demands_painpoints", title: "需求与痛点", keywords: ["需求", "痛点", "问题", "不便", "期待"] },
   { key: "competitor_landscape", title: "竞品格局", keywords: ["竞品", "对手", "替代", "品牌", "方案"] },
+  { key: "cost_estimation", title: "成本估算", keywords: ["成本", "报价", "毛利", "目标成本", "BOM", "模具", "认证", "包装"] },
   { key: "opportunity_judgement", title: "机会判断", keywords: ["机会", "差异", "优势", "空间", "判断"] },
   { key: "risks_uncertainties", title: "风险与不确定性", keywords: ["风险", "不确定", "依赖", "限制", "挑战"] },
   { key: "recommended_direction", title: "建议方向", keywords: ["建议", "方向", "策略", "优先", "推荐"] },
@@ -13,6 +15,7 @@ export const MRD_SECTIONS = [
 ];
 
 const PRD_KEYWORDS = {
+  sku_spu: ["SKU", "SPU", "型号", "编码", "款式", "变体"],
   product_definition: ["定义", "定位", "目标", "范围", "产品"],
   functional_attributes: ["功能", "属性", "能力", "参数", "规格"],
   structure: ["结构", "机构", "装配", "尺寸", "固定"],

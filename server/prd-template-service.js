@@ -1,6 +1,7 @@
 import { enabledModulesForProductType, resolveProductTypeTemplate } from "./product-type-template-service.js";
 
 export const PRD_MODULES = [
+  { key: "sku_spu", title: "SKU / SPU 信息", required: false },
   { key: "product_definition", title: "产品定义", required: true },
   { key: "functional_attributes", title: "功能属性", required: true },
   { key: "structure", title: "结构要求", required: false },
@@ -32,7 +33,7 @@ export function resolvePrdModules(input = {}) {
     ...input,
     product_type_template: productTypeTemplate,
   }));
-  const keys = enabled.length ? enabled : ["product_definition", "functional_attributes", "structure", "materials_process", "id_cmf", "packaging", "testing", "supplier_delivery", "open_questions"];
+  const keys = enabled.length ? enabled : ["sku_spu", "product_definition", "functional_attributes", "structure", "materials_process", "id_cmf", "packaging", "testing", "supplier_delivery", "open_questions"];
 
   return keys.map((key) => MODULE_BY_KEY.get(key) || { key, title: key.replace(/_/g, " "), required: false });
 }

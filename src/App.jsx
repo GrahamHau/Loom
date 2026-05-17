@@ -20,36 +20,36 @@ const { useEffect, useMemo, useRef, useState } = React;
 
 const NAV = [
   { group: "采集", items: [
-    { key: "news", label: "Stream", subLabel: "资讯流", icon: "newspaper" },
-    { key: "products", label: "Lens", subLabel: "竞品库", icon: "boxes" },
-    { key: "demands", label: "Spark", subLabel: "需求雷达", icon: "lightbulb" },
+    { key: "news", label: "资讯流", icon: "newspaper" },
+    { key: "products", label: "竞品库", icon: "boxes" },
+    { key: "demands", label: "需求雷达", icon: "lightbulb" },
   ] },
   { group: "调研", items: [
-    { key: "research", label: "Weave", subLabel: "调研工坊", icon: "compass" },
+    { key: "research", label: "调研工坊", icon: "compass" },
   ] },
   { group: "文档", items: [
-    { key: "mrd", label: "MRD", subLabel: "市场分析", icon: "bar-chart" },
-    { key: "prd", label: "PRD", subLabel: "产品定义", icon: "clipboard" },
-    { key: "feishu_space", label: "Feishu", subLabel: "飞书空间", icon: "folder-open" },
+    { key: "mrd", label: "市场分析", icon: "bar-chart" },
+    { key: "prd", label: "产品定义", icon: "clipboard" },
+    { key: "feishu_space", label: "飞书空间", icon: "folder-open" },
   ] },
   { group: "知识", items: [
-    { key: "library", label: "Library", subLabel: "资料库", icon: "file-text" },
-    { key: "ask", label: "Ask", subLabel: "智能问答", icon: "bot" },
+    { key: "library", label: "资料库", icon: "file-text" },
+    { key: "ask", label: "智能问答", icon: "bot" },
   ] },
 ];
 
 const TITLES = {
-  news: { label: "Stream", subLabel: "资讯流" },
-  products: { label: "Lens", subLabel: "竞品库" },
-  demands: { label: "Spark", subLabel: "需求雷达" },
-  library: { label: "Library", subLabel: "资料库" },
-  "library-import": { label: "Library", subLabel: "导入资料" },
-  ask: { label: "Ask", subLabel: "智能问答" },
-  mrd: { label: "MRD", subLabel: "市场分析" },
-  prd: { label: "PRD", subLabel: "产品定义" },
-  research: { label: "Weave", subLabel: "调研工坊" },
-  settings: { label: "Settings", subLabel: "系统设置" },
-  feishu_space: { label: "Feishu", subLabel: "飞书空间" },
+  news: { label: "资讯流", subLabel: "官方源与行业动态" },
+  products: { label: "竞品库", subLabel: "产品与平台采集" },
+  demands: { label: "需求雷达", subLabel: "用户痛点与机会" },
+  library: { label: "资料库", subLabel: "知识中台" },
+  "library-import": { label: "资料库", subLabel: "导入资料" },
+  ask: { label: "智能问答", subLabel: "基于资料库的 AI 问答" },
+  mrd: { label: "市场分析", subLabel: "MRD · 市场需求文档" },
+  prd: { label: "产品定义", subLabel: "PRD · 产品需求文档" },
+  research: { label: "调研工坊", subLabel: "结构化分析报告" },
+  settings: { label: "设置", subLabel: "系统设置" },
+  feishu_space: { label: "飞书空间", subLabel: "飞书文档同步" },
 };
 
 const SEARCH_ICON = {
@@ -130,7 +130,7 @@ function GlobalSearchModal({ data, onClose, onPick }) {
             style={{ width: "100%" }}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索 Spark、Lens、Stream、Weave..."
+            placeholder="搜索需求雷达、竞品库、资讯流、调研工坊..."
           />
         </div>
         <div className="modal-body" style={{ paddingTop: 10, maxHeight: 420 }}>
@@ -178,7 +178,7 @@ function DemoModeIntroModal({ onClose, onExit }) {
         </div>
         <div className="modal-body demo-mode-modal-body">
           <p>
-            这里展示的是一套可直接体验的示例工作区，用来让你快速感受 Stream、Lens、Spark 和 Weave 的完整效果。
+            这里展示的是一套可直接体验的示例工作区，用来让你快速感受资讯流、竞品库、需求雷达和调研工坊的完整效果。
           </p>
           <p>
             如果你想回到自己的真实工作区，可以使用右上角的 <strong>退出演示模式</strong> 按钮。
@@ -287,9 +287,9 @@ const MRD_SECTIONS = [
   { key: "market", label: "市场背景", desc: "说明市场规模、趋势变化、关键赛道和为什么现在值得做。", tags: ["行业趋势", "市场窗口", "关键证据"] },
   { key: "audience", label: "目标用户", desc: "定义核心用户、使用场景、购买角色和他们最真实的决策动机。", tags: ["用户画像", "场景", "购买动机"] },
   { key: "pain", label: "场景与痛点", desc: "把用户任务拆成具体场景，沉淀高频痛点、未满足需求和现有替代方案。", tags: ["任务链路", "痛点", "替代方案"] },
-  { key: "competitors", label: "竞品地图", desc: "对比主要竞品的定位、价格、卖点和口碑短板，形成可复用竞品地图。", tags: ["Lens", "价格带", "差异点"] },
+  { key: "competitors", label: "竞品地图", desc: "对比主要竞品的定位、价格、卖点和口碑短板，形成可复用竞品地图。", tags: ["竞品库", "价格带", "差异点"] },
   { key: "price", label: "价格带分析", desc: "梳理主流价格段、成本约束、溢价理由和用户可接受区间。", tags: ["价格带", "成本", "溢价"] },
-  { key: "demand", label: "需求热力", desc: "汇总 Stream、Spark 和社媒信号，判断哪些需求在近期升温。", tags: ["Spark", "热力", "信号"] },
+  { key: "demand", label: "需求热力", desc: "汇总资讯流、需求雷达和社媒信号，判断哪些需求在近期升温。", tags: ["需求雷达", "热力", "信号"] },
   { key: "opportunity", label: "机会判断", desc: "结合用户痛点与竞品空位，提炼最值得投入的机会方向。", tags: ["机会点", "优先级", "判断"] },
   { key: "risk", label: "风险判断", desc: "列出市场、供应链、认证、成本和需求不确定性，避免只看乐观面。", tags: ["风险", "待验证", "边界"] },
   { key: "questions", label: "待确认问题", desc: "把缺证据、缺数据或需要团队判断的问题集中放在这里。", tags: ["待确认", "下一步", "负责人"], warn: true },
@@ -679,15 +679,13 @@ function Sidebar({ active, onNav, data, onLogout, onFeedback, isAdmin, collapsed
       <button type="button" className="sb-item sb-item-button sb-feedback" onClick={onFeedback}>
         <Icon name="message-circle" size={15} className="ico" />
         <span className="sb-item-label">
-          <span className="sb-item-main">Feedback</span>
-          <span className="sb-item-sub">用户反馈</span>
+          <span className="sb-item-main">反馈</span>
         </span>
       </button>
       <div className={`sb-item ${active === "settings" ? "active" : ""}`} onClick={() => onNav("settings")}>
         <Icon name="settings" size={15} className="ico" />
         <span className="sb-item-label">
-          <span className="sb-item-main">Settings</span>
-          <span className="sb-item-sub">系统设置</span>
+          <span className="sb-item-main">设置</span>
         </span>
       </div>
 
@@ -1128,7 +1126,7 @@ function App() {
             icon="bar-chart"
             title="从知识库生成 MRD"
             desc="先在 Library 导入资料并构建知识包，再一键生成结构化 MRD。"
-            tags={["Lens 竞品库", "Spark 需求", "Stream 信号"]}
+            tags={["竞品库", "需求雷达", "资讯流信号"]}
           />
         </div>
       </div>
@@ -1174,7 +1172,7 @@ function App() {
             <Icon name="folder-open" size={28} style={{ color: "var(--accent)", marginBottom: 12 }} />
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>飞书集成即将上线</div>
             <div style={{ fontSize: 12.5, color: "var(--text-3)", lineHeight: 1.7, maxWidth: 320, margin: "0 auto" }}>
-              接入后可同步飞书多维表格、文档和项目，与 Lens / Spark / Weave 双向联动，告别手动复制粘贴。
+              接入后可同步飞书多维表格、文档和项目，与竞品库、需求雷达、调研工坊双向联动，告别手动复制粘贴。
             </div>
             <div style={{ marginTop: 20, display: "flex", gap: 8, justifyContent: "center" }}>
               <span style={{ fontSize: 11.5, color: "var(--text-4)", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 10px" }}>多维表格</span>

@@ -42,6 +42,8 @@ describe("knowledge repository", () => {
 
     expect(seeded.document_templates.map((item) => item.doc_type).sort()).toEqual(["mrd", "prd"]);
     expect(seeded.document_templates.find((item) => item.doc_type === "prd").sections.map((item) => item.key)).toContain("packaging");
+    expect(seeded.document_templates.find((item) => item.doc_type === "prd").sections.map((item) => item.key)).toContain("sku_spu");
+    expect(seeded.document_templates.find((item) => item.doc_type === "mrd").sections.map((item) => item.key)).toContain("cost_estimation");
     expect(seeded.product_type_templates).toHaveLength(1);
     expect(seeded.product_type_templates[0]).toMatchObject({
       code: "generic_hardware",
