@@ -1,40 +1,40 @@
 const PIPELINE = [
   {
-    label: "Step 01 · 目标",
-    title: "设定调研方向",
-    body: "比如：「背包场景的相机快拆方案」—— 一句话锁定问题域。",
+    label: "步骤 01 · 课题",
+    title: "设定研究方向",
+    body: "例如「适合背包的相机快装方案」— 一句话锁定问题空间。",
   },
   {
-    label: "Step 02 · 关联",
-    title: "拉入竞品库 + 灵感库数据",
-    body: "SmallRig、Ulanzi、Peak Design 的同类品 × 小红书、B 站、Reddit 上的真实抱怨与需求线索。",
+    label: "步骤 02 · 关联",
+    title: "拉入竞品 + 需求数据",
+    body: "竞品库的产品 × 需求雷达的真实用户痛点和需求信号。",
   },
   {
-    label: "Step 03 · 融合",
-    title: "AI 融合结构化数据 + 你的注解",
-    body: "前三个模块里你留下的每一条判断、写过的每一行点评，在这一步全部被调用。",
+    label: "步骤 03 · 融合",
+    title: "AI 融合结构化数据 + 你的标注",
+    body: "采集模块中你的每一条判断和标注在这里被调用。",
   },
 ];
 
 const CHIPS = [
   "快装板",
   "腰夹",
-  "背包肩带",
+  "肩带",
   "单手操作",
-  "阿卡标准",
-  "户外徒步",
-  "竖拍需求",
+  "Arca-Swiss",
+  "徒步",
+  "竖拍",
 ];
 
 export default function Weave() {
   return (
-    <section id="weave" className="section">
+    <section id="weave" className="section weave">
       <div className="container reveal">
         <div className="kicker">调研工坊</div>
-        <h2 className="section-title">不是收集，是组合</h2>
-        <p className="section-lead">
-          Weave 是飞轮的中心。前三个模块沉下来的信息和判断，
-          在这里被关联、交叉、重组 —— 一头是结构化的产品洞察，一头是你想不到的新方向。
+        <h2 className="headline-lg">不是采集 — 是融合</h2>
+        <p className="lead">
+          调研工坊是飞轮的核心。来自其他模块的信息和判断
+          在这里交叉、关联、重新组合。
         </p>
 
         <div className="weave-pipeline">
@@ -46,56 +46,50 @@ export default function Weave() {
             </div>
           ))}
 
-          <div className="pipeline-fork" aria-label="AI 输出双叉">
+          <div className="pipeline-fork">
             <div className="pipeline-step">
-              <div className="pipeline-step-label">输出 A · 洞察</div>
-              <h3 className="pipeline-step-title">结构化的产品分析</h3>
+              <div className="pipeline-step-label">产出 A · 洞察</div>
+              <h3 className="pipeline-step-title">结构化产品分析</h3>
               <p className="pipeline-step-body">
-                定位、卖点、价格带、差异点 —— 每个论断都能追溯回你在 Lens / Spark
-                里留下的判断。边看边整理的内容，到这里直接成型 ——
-                省掉了传统 MRD 里最费时间的信息梳理。
+                定位、卖点、价格带、差异化 — 每个结论都可追溯到你的采集判断。
               </p>
             </div>
             <div className="pipeline-step">
-              <div className="pipeline-step-label">输出 B · 新方向</div>
-              <h3 className="pipeline-step-title">跨维度交叉组合</h3>
+              <div className="pipeline-step-label">产出 B · 方向</div>
+              <h3 className="pipeline-step-title">跨维度重组</h3>
               <p className="pipeline-step-body">
-                AI 把已有元素交叉穷举，抛开经验惯性，给你想不到的新方向。
+                AI 穷举现有元素的交叉组合，突破经验偏见，发现意料之外的新方向。
               </p>
             </div>
           </div>
         </div>
 
-        <div className="brainstorm" aria-label="排列组合演示">
-          <div className="brainstorm-label">元素交叉组合演示</div>
+        <div className="brainstorm">
+          <div className="brainstorm-label">元素重组演示</div>
           <div className="brainstorm-chips">
             {CHIPS.map((c, i) => (
               <span key={c} className="brainstorm-chip">
                 {c}
                 {i < CHIPS.length - 1 && (
-                  <span className="brainstorm-op" aria-hidden="true">
-                    {" "}
-                    ×
-                  </span>
+                  <span className="brainstorm-op"> ×</span>
                 )}
               </span>
             ))}
-            <span className="brainstorm-op" aria-hidden="true">
-              =
-            </span>
+            <span className="brainstorm-op"> =</span>
             <span className="brainstorm-chip" style={{ borderStyle: "dashed" }}>
               ?
             </span>
           </div>
           <div className="brainstorm-result">
-            Peak Design 的 Capture Clip 就是这么来的 —— 快装板 × 腰夹 × 背包肩带 ×
-            单手操作。AI 可以每天帮你穷举这种组合。
+            Peak Design 的 Capture Clip 就是从这种重组中诞生的 —
+            快装 × 腰夹 × 肩带 × 单手操作。
+            AI 可以每天为你运行这些排列组合。
           </div>
         </div>
 
         <blockquote className="weave-quote">
-          AI 跟人不同的一点：它能抛开经验惯性。
-          你会被「快装板就是装三脚架的」框死；它不会。
+          AI 和人类的关键区别：它没有经验偏见。
+          你会被困在「快装板是给三脚架用的」这个思维里。它不会。
         </blockquote>
       </div>
     </section>

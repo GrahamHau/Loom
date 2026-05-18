@@ -1,4 +1,4 @@
-const WEB_APP_URL = "https://loom.my1panelsite.xyz/app";
+const WEB_APP_URL = "https://loom.palecedar.site/app";
 const TUTORIAL_URL =
   "https://ulanzichina.feishu.cn/wiki/Xv2DwmqmfibDe2kubvfcXXoAn5g?from=from_copylink";
 
@@ -13,14 +13,14 @@ const STEPS = [
   {
     num: "02",
     title: "打开 Chrome 扩展管理页",
-    body: "在 Chrome 地址栏输入 chrome://extensions/，并打开右上角“开发者模式”。",
+    body: "在 Chrome 地址栏输入 chrome://extensions/，并打开右上角「开发者模式」。",
     ctaLabel: "查看安装步骤",
     href: TUTORIAL_URL,
   },
   {
     num: "03",
     title: "加载本地插件目录",
-    body: "点击“加载已解压的扩展程序”，选择 LOOM 插件目录，让插件出现在浏览器侧边栏。",
+    body: "点击「加载已解压的扩展程序」，选择 LOOM 插件目录，让插件出现在浏览器侧边栏。",
     ctaLabel: "回看教程说明",
     href: TUTORIAL_URL,
   },
@@ -39,7 +39,7 @@ export default function ExtensionPage() {
       <section className="extension-hero">
         <div className="container extension-hero-inner">
           <a className="extension-backlink" href="/">
-            返回首页
+            ‹ 返回首页
           </a>
           <div className="kicker">LOOM Extension</div>
           <h1 className="extension-title">安装 LOOM 浏览器插件</h1>
@@ -48,11 +48,11 @@ export default function ExtensionPage() {
             整个流程不复杂，按下面几步走就可以。
           </p>
           <div className="extension-hero-actions">
-            <a className="btn btn-primary" href={TUTORIAL_URL} target="_blank" rel="noopener noreferrer">
-              打开飞书教程 <span aria-hidden="true">→</span>
+            <a className="btn btn-link" href={TUTORIAL_URL} target="_blank" rel="noopener noreferrer">
+              打开飞书教程
             </a>
-            <a className="btn btn-secondary" href={WEB_APP_URL} target="_blank" rel="noopener noreferrer">
-              打开 Web 工作台 <span aria-hidden="true">→</span>
+            <a className="btn btn-link" href={WEB_APP_URL} target="_blank" rel="noopener noreferrer">
+              打开 Web 工作台
             </a>
           </div>
         </div>
@@ -68,12 +68,12 @@ export default function ExtensionPage() {
                   <h2 className="extension-step-title">{step.title}</h2>
                   <p className="extension-step-body">{step.body}</p>
                   <a
-                    className="btn btn-primary"
+                    className="btn btn-link"
                     href={step.href}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    {step.ctaLabel} <span aria-hidden="true">→</span>
+                    {step.ctaLabel}
                   </a>
                 </div>
               </article>
@@ -83,7 +83,7 @@ export default function ExtensionPage() {
           <div className="extension-note">
             <strong>当前状态</strong>
             <p>
-              插件默认连接到 <code>https://loom.my1panelsite.xyz</code>。
+              插件默认连接到 <code>https://loom.palecedar.site</code>。
               登录时会跳转到 <code>/app</code>，插件再自动同步 Web 登录态。
             </p>
           </div>

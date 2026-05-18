@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <title>LOOM · Organic Star 动效预览</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../styles/design-tokens.css">
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
@@ -30,9 +30,9 @@
       border:1px solid var(--border);background:var(--surface);
       box-shadow:var(--shadow);
     }
-    .tile.dark{background:oklch(0.13 0.018 252);border-color:oklch(0.22 0.025 252)}
+    .tile.dark{background:#1c1c1e;border-color:#38383a}
     .label{font-size:11px;font-weight:600;color:var(--text-4);text-transform:uppercase;letter-spacing:.08em}
-    .tile.dark .label{color:oklch(0.42 0.03 252)}
+    .tile.dark .label{color:#636366}
 
     /* login mock */
     .login-mock{
@@ -43,12 +43,12 @@
       width:64px;height:64px;display:grid;place-items:center;
       transform:translateY(-8px);margin-bottom:-4px;
     }
-    .login-title{font-size:26px;font-weight:800;letter-spacing:-.03em;color:var(--text)}
+    .login-title{font-size:26px;font-weight:700;letter-spacing:-.03em;color:var(--text)}
     .login-sub{font-size:13.5px;line-height:1.6;color:var(--text-3);max-width:220px}
     .btn-primary{
-      height:32px;padding:0 20px;border-radius:6px;border:none;
-      background:oklch(0.56 0.16 252);color:#fff;
-      font-family:var(--font-sans);font-size:13px;font-weight:500;cursor:pointer;margin-top:4px;
+      height:32px;padding:0 20px;border-radius:var(--radius-sm);border:none;
+      background:var(--accent);color:#fff;
+      font-family:var(--font-sans);font-size:13px;font-weight:400;cursor:pointer;margin-top:4px;
     }
   </style>
 </head>

@@ -1,50 +1,37 @@
-const PILLARS = [
+const SCENES = [
   {
     num: "01",
-    title: "越用，AI 越懂你",
-    body: "它学的不是摄影配件，是你怎么看摄影配件。哪个卡口好、哪种材质不行、哪个价格带能打 —— 你的判断越多，AI 的输出就越贴近你的直觉，而不是全网平均水平。",
+    title: "证据链",
+    body: "每一个 MRD 判断，都能点开看来源：3 条竞品数据 + 2 条用户需求 + 1 条行业报告。没有来源的部分，标为「待确认」。",
   },
   {
     num: "02",
-    title: "你的经验，团队也能调用",
-    body: "你日常积累下来的每一条结构化认知，团队都能继承 —— 不再是飞书里翻不到的会议纪要。新人入职第一天，就能调用整个团队的行业直觉。",
+    title: "飞书问答",
+    body: "飞书群里 @LOOM：「客户问续航怎么回答？」3 秒返回：可对外口径 + 测试数据来源。答不上来的问题自动回流，补完后下次能答。",
   },
   {
     num: "03",
-    title: "从单用户走向团队",
-    body: "今天它先是你一个人的工作台 —— 先把你自己的行业直觉沉进来。架构已预留多用户，长期目标是整个团队共建的行业知识体系。",
+    title: "知识继承",
+    body: "新同事搜「三脚架品类竞争格局」。得到的不是一篇过期文档，而是基于团队过去一年判断的结构化知识，每条都有来源和时间。",
   },
 ];
 
 export default function Vision() {
   return (
-    <section id="vision" className="section">
+    <section id="vision" className="section vision tile-dark">
       <div className="container reveal">
         <div className="kicker">愿景</div>
-        <h2 className="section-title">越用越懂你的飞轮</h2>
-        <p className="section-lead">
-          LOOM 不是一次性工具，是一个会越用越懂你的工作台 ——
-          一份能长期积累、可被继承的行业资产。
+        <h2 className="headline-lg">不只是工具 —<br />是可继承的知识网络。</h2>
+        <p className="lead">
+          当 LOOM 的飞轮转起来，每一条判断都在编织一个越来越密的网。
         </p>
 
-        <div className="vision-flywheel" aria-label="LOOM 飞轮">
-          <span className="flywheel-node">采集</span>
-          <span className="flywheel-arrow">→</span>
-          <span className="flywheel-node">判断 / 点评</span>
-          <span className="flywheel-arrow">→</span>
-          <span className="flywheel-node">AI 调用</span>
-          <span className="flywheel-arrow">→</span>
-          <span className="flywheel-node">洞察 / 新方向</span>
-          <span className="flywheel-arrow">↻</span>
-          <span className="flywheel-node">反哺认知</span>
-        </div>
-
-        <div className="vision-pillars">
-          {PILLARS.map((p) => (
-            <div className="vision-pillar" key={p.num}>
-              <div className="vision-pillar-num">{p.num}</div>
-              <h3 className="vision-pillar-title">{p.title}</h3>
-              <p className="vision-pillar-body">{p.body}</p>
+        <div className="vision-scenes">
+          {SCENES.map((s) => (
+            <div className="vision-scene" key={s.num}>
+              <div className="vision-scene-num">{s.num}</div>
+              <h3 className="vision-scene-title">{s.title}</h3>
+              <p className="vision-scene-body">{s.body}</p>
             </div>
           ))}
         </div>

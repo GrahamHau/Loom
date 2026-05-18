@@ -1073,6 +1073,14 @@ const DIGEST_MOCK = [
 function DailyDigestCard({ data }) {
   const today = new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
   const hasLlm = Boolean(data.settings?.llm_configured);
+  if (!hasLlm) {
+    return (
+      <div className="briefing-card briefing-card-collapsed">
+        <Icon name="sparkles" size={12} style={{ color: "var(--text-4)" }} />
+        <span className="briefing-collapsed-text">配置 LLM 后，每天自动生成行业摘要</span>
+      </div>
+    );
+  }
   return (
     <div className="briefing-card">
       <div className="briefing-card-head">
@@ -1082,12 +1090,7 @@ function DailyDigestCard({ data }) {
         <Btn size="sm" variant="ghost" icon="sync" />
       </div>
       <div className="briefing-card-body">
-        {!hasLlm ? (
-          <div className="briefing-empty">
-            <Icon name="sparkles" size={22} style={{ color: "var(--text-4)" }} />
-            <div className="briefing-empty-text">配置 LLM 后，每天自动生成行业动态摘要，并标注与你研究上下文的关联</div>
-          </div>
-        ) : DIGEST_MOCK.map((item) => <InsightItem key={item.id} item={item} />)}
+        {DIGEST_MOCK.map((item) => <InsightItem key={item.id} item={item} />)}
       </div>
     </div>
   );
@@ -1137,7 +1140,8 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   const loadMoreRef = useRef(null);
   const initialBatchSize = 18;
   const [visibleCount, setVisibleCount] = useState(initialBatchSize);
-  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const hasLlm = Boolean(data.settings?.llm_configured);
+  const [sidebarWidth, setSidebarWidth] = useState(hasLlm ? 300 : 260);
   const draggingRef = useRef(false);
   const dragStartXRef = useRef(0);
   const dragStartWidthRef = useRef(0);
@@ -1496,12 +1500,16 @@ function NewsSourceModal({ group, onClose, onOpen }) {
 function NewsThumb({ item }) {
   const [failed, setFailed] = useState(false);
   const image = item.thumbnail_url || item.image || "";
+  // Derive a deterministic hue from item id/title so the placeholder is stable
+  const fallbackHue = typeof item.thumbHue === "number"
+    ? item.thumbHue
+    : Math.abs((item.id || item.title || "x").split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % 360;
   const label = item.type === "新品发布" ? "PRODUCT IMG" : "TREND IMG";
   return (
     <div className="news-thumb">
       {image && !failed ?
         <img src={image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> :
-        <DemandThumb hue={item.thumbHue} label={label} />
+        <DemandThumb hue={fallbackHue} label={label} />
       }
     </div>
   );
@@ -2939,9 +2947,9 @@ function ResearchScreen({ data, api, refreshData }) {
   return (
     <div className="viewport">
       <div className="page page-fluid">
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
-          <div>
-            <h1 className="h1">调研工坊</h1>
+        <div className="screen-header screen-header-compact" style={{ marginBottom: 18 }}>
+          <div className="screen-header-left">
+            <div className="screen-icon-box"><Icon name="compass" size={18} /></div>
             <div className="muted text-sm">从竞品库与需求雷达中匹配数据，AI 生成结构化分析报告</div>
           </div>
           <div className="page-actions">
@@ -3610,29 +3618,33 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
             </Section>
           </div>
           <aside className="research-detail-side">
-            <div className="research-side-card">
-              <div className="research-side-label">状态</div>
-              <select
-                className="input sm"
-                value={status}
-                onChange={(e) => saveStatus(e.target.value)}
-              >
-                <option value="草稿">草稿</option>
-                <option value="分析中">分析中</option>
-                <option value="已完成">已完成</option>
-              </select>
-            </div>
-            <div className="research-side-card">
-              <div className="research-side-label">关联资产</div>
-              <div className="research-side-metrics">
-                <div><strong>{products.length}</strong><span>竞品</span></div>
-                <div><strong>{demands.length}</strong><span>需求</span></div>
-                <div><strong>{research.analysis?.length || 0}</strong><span>分析</span></div>
+            <div className="research-side-card research-side-card-merged">
+              <div className="research-side-row">
+                <div className="research-side-label">状态</div>
+                <select
+                  className="input sm"
+                  value={status}
+                  onChange={(e) => saveStatus(e.target.value)}
+                >
+                  <option value="草稿">草稿</option>
+                  <option value="分析中">分析中</option>
+                  <option value="已完成">已完成</option>
+                </select>
               </div>
-            </div>
-            <div className="research-side-card">
-              <div className="research-side-label">下一步</div>
-              <p>{research.analysis ? "可以导出报告，或继续补充竞品与需求证据。" : "补充关联竞品和需求后，点击重新分析生成报告。"}</p>
+              <div className="research-side-divider" />
+              <div className="research-side-row">
+                <div className="research-side-label">关联资产</div>
+                <div className="research-side-metrics">
+                  <div><strong>{products.length}</strong><span>竞品</span></div>
+                  <div><strong>{demands.length}</strong><span>需求</span></div>
+                  <div><strong>{research.analysis?.length || 0}</strong><span>分析</span></div>
+                </div>
+              </div>
+              <div className="research-side-divider" />
+              <div className="research-side-row">
+                <div className="research-side-label">下一步</div>
+                <p className="research-side-next">{research.analysis ? "可以导出报告，或继续补充竞品与需求证据。" : "补充关联竞品和需求后，点击重新分析生成报告。"}</p>
+              </div>
             </div>
           </aside>
         </div>

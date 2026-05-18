@@ -65,7 +65,7 @@ describe("feishu-service", () => {
       "来源": "Web App",
     });
     expect(fields["页面路径"]).toEqual({
-      link: "https://loom.my1panelsite.xyz/app?screen=products",
+      link: "https://loom.palecedar.site/app?screen=products",
       text: "/app?screen=products",
     });
     expect(fields["提交时间"]).toBe(new Date("2026-05-15T01:02:03+08:00").getTime());

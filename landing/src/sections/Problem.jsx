@@ -1,38 +1,37 @@
-const PROBLEMS = [
+const SCENES = [
   {
     num: "01",
-    title: "FOMO 不是因为找不到信息",
-    body: "你已经被信息淹没，缺的是一个为你筛过的、及时的推送 —— 不是再多一个搜索框。",
+    label: "周一早上",
+    body: "亚马逊上出了一款竞品云台，想做对比分析。价格在淘宝收藏夹里，评测在 YouTube 书签里，上次的判断在飞书群消息里。花了半天找齐，又花半天整理成表格。",
   },
   {
     num: "02",
-    title: "竞品散落在到处都是",
-    body: "飞书发给自己、淘宝收藏、链接保存、截图存相册…后期想批量调用、结构化分析 = 不可能。",
+    label: "季度评审",
+    body: "「这个品类最近用户在抱怨什么？」答案你知道 — 但证据散落在小红书截图、客服反馈和上个月的会议纪要里。无法在 10 分钟内给出有出处的回答。",
   },
   {
     num: "03",
-    title: "AI 有资料，但没 skill",
-    body: "它读过整个小红书，但没读过你对「这个云台为什么跟手」的判断。它缺的是经验，不是数据。",
+    label: "新人入职",
+    body: "新同事问：「我们为什么选了这个方案？」决策依据在某个人的脑子里，那个飞书文档早就沉底了。隐性知识，从来没被结构化地留下来过。",
   },
 ];
 
 export default function Problem() {
   return (
-    <section id="problem" className="section">
+    <section id="problem" className="section problem">
       <div className="container reveal">
-        <div className="kicker">问题</div>
-        <h2 className="section-title">为什么现在的 AI 不懂你的业务</h2>
-        <p className="section-lead">
-          不是因为模型不够大，是因为它从没读过你在这个行业里沉淀下来的那些
-          —— 关于摄影配件的判断、直觉和评价。
+        <div className="kicker">为什么需要 LOOM</div>
+        <h2 className="headline-lg">这些场景，你一定不陌生。</h2>
+        <p className="lead">
+          知识不是没有 — 是散在各处，每次都要重新找。
         </p>
 
         <div className="problem-grid">
-          {PROBLEMS.map((p) => (
-            <div className="problem-card" key={p.num}>
-              <div className="problem-card-num">{p.num}</div>
-              <h3 className="problem-card-title">{p.title}</h3>
-              <p className="problem-card-body">{p.body}</p>
+          {SCENES.map((s) => (
+            <div className="problem-card" key={s.num}>
+              <div className="problem-card-num">{s.num}</div>
+              <div className="problem-card-label">{s.label}</div>
+              <p className="problem-card-body">{s.body}</p>
             </div>
           ))}
         </div>

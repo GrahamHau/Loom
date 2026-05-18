@@ -205,7 +205,7 @@ function loginMethodLabel(provider) {
 function feedbackLinkValue(value) {
   const text = cleanFeedbackText(value, 1000);
   if (!text) return "";
-  const link = /^https?:\/\//i.test(text) ? text : `https://loom.my1panelsite.xyz${text.startsWith("/") ? text : `/${text}`}`;
+  const link = /^https?:\/\//i.test(text) ? text : `https://loom.palecedar.site${text.startsWith("/") ? text : `/${text}`}`;
   return { link, text };
 }
 

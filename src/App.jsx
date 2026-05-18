@@ -517,13 +517,10 @@ function LibraryScreen({ data, api, reloadKey = 0, onNavigate, onOpenDocumentMod
   return (
     <div className="viewport">
       <div className="page page-fluid">
-        <div className="screen-header">
+        <div className="screen-header screen-header-compact">
           <div className="screen-header-left">
-            <div className="screen-icon-box"><Icon name="file-text" size={20} /></div>
-            <div>
-              <h1 className="h1" style={{ marginBottom: 2 }}>资料库</h1>
-              <div className="muted text-sm">导入飞书文档、PRD / MRD 文本，自动标准化入库</div>
-            </div>
+            <div className="screen-icon-box"><Icon name="file-text" size={18} /></div>
+            <div className="muted text-sm">导入飞书文档、PRD / MRD 文本，自动标准化入库</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <Btn size="sm" variant="ghost" icon="sync" onClick={loadDocuments} disabled={status === "loading"}>刷新</Btn>
@@ -636,13 +633,10 @@ function LibraryImportScreen({ onOpenDocumentModal }) {
   return (
     <div className="viewport">
       <div className="page page-fluid">
-        <div className="screen-header">
+        <div className="screen-header screen-header-compact">
           <div className="screen-header-left">
-            <div className="screen-icon-box"><Icon name="upload" size={20} /></div>
-            <div>
-              <h1 className="h1" style={{ marginBottom: 2 }}>导入资料</h1>
-              <div className="muted text-sm">把飞书文档、PRD / MRD 文本和网页证据沉淀进 Library</div>
-            </div>
+            <div className="screen-icon-box"><Icon name="upload" size={18} /></div>
+            <div className="muted text-sm">把飞书文档、PRD / MRD 文本和网页证据沉淀进 Library</div>
           </div>
           <Btn size="sm" variant="primary" icon="plus" onClick={() => onOpenDocumentModal("create")}>新建资料</Btn>
         </div>
@@ -1167,13 +1161,10 @@ function App() {
     ask: (
       <div className="viewport">
         <div className="page page-fluid">
-          <div className="screen-header">
+          <div className="screen-header screen-header-compact">
             <div className="screen-header-left">
-              <div className="screen-icon-box"><Icon name="bot" size={20} /></div>
-              <div>
-                <h1 className="h1" style={{ marginBottom: 2 }}>Ask</h1>
-                <div className="muted text-sm">基于公司知识库的智能问答，每个回答都带来源引用</div>
-              </div>
+              <div className="screen-icon-box"><Icon name="bot" size={18} /></div>
+              <div className="muted text-sm">基于公司知识库的智能问答，每个回答都带来源引用</div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <Tag tone="outline">0 个知识片段</Tag>
@@ -1204,13 +1195,10 @@ function App() {
     mrd: (
       <div className="viewport">
         <div className="page page-fluid">
-          <div className="screen-header">
+          <div className="screen-header screen-header-compact">
             <div className="screen-header-left">
-              <div className="screen-icon-box"><Icon name="bar-chart" size={20} /></div>
-              <div>
-                <h1 className="h1" style={{ marginBottom: 2 }}>MRD Studio</h1>
-                <div className="muted text-sm">结构化市场分析文档，每个判断都可追溯到证据</div>
-              </div>
+              <div className="screen-icon-box"><Icon name="bar-chart" size={18} /></div>
+              <div className="muted text-sm">结构化市场分析文档，每个判断都可追溯到证据</div>
             </div>
             <Btn size="sm" variant="primary" icon="plus">新建 MRD</Btn>
           </div>
@@ -1228,13 +1216,10 @@ function App() {
     prd: (
       <div className="viewport">
         <div className="page page-fluid">
-          <div className="screen-header">
+          <div className="screen-header screen-header-compact">
             <div className="screen-header-left">
-              <div className="screen-icon-box"><Icon name="clipboard" size={20} /></div>
-              <div>
-                <h1 className="h1" style={{ marginBottom: 2 }}>PRD Builder</h1>
-                <div className="muted text-sm">硬件产品定义文档，从 MRD 和需求直接生成</div>
-              </div>
+              <div className="screen-icon-box"><Icon name="clipboard" size={18} /></div>
+              <div className="muted text-sm">硬件产品定义文档，从 MRD 和需求直接生成</div>
             </div>
             <Btn size="sm" variant="primary" icon="plus">新建 PRD</Btn>
           </div>
@@ -1296,14 +1281,6 @@ function App() {
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
       <main className="main" data-screen-label={TITLES[active]?.label || active}>
-        {sampleWorkspace && (
-          <div className="sample-workspace-banner">
-            <div className="sample-workspace-copy">
-              <Tag tone="accent">示例工作区</Tag>
-              <span>{latestNewsAt ? `示例数据 · 更新 ${formatSampleDate(latestNewsAt)}` : "示例数据"}</span>
-            </div>
-          </div>
-        )}
         <div className="topbar">
           <div className="topbar-title">
             {TITLES[active]?.label || active}
@@ -1314,6 +1291,12 @@ function App() {
           {active === "demands" && <span className="topbar-crumb">· {data.demands.length} 条需求</span>}
           {active === "research" && <span className="topbar-crumb">· {data.research.length} 个项目</span>}
           <div className="topbar-actions">
+            {sampleWorkspace && (
+              <span className="topbar-sample-chip" title={latestNewsAt ? `示例数据 · 更新 ${formatSampleDate(latestNewsAt)}` : "示例数据"}>
+                <span className="topbar-sample-dot" aria-hidden="true" />
+                示例工作区
+              </span>
+            )}
             {isAdmin ? (
               <a className="topbar-admin-link" href="/admin">
                 <Icon name="settings" size={13} />

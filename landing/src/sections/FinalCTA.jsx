@@ -6,65 +6,65 @@ const EXTENSION_DOWNLOAD_URL = "/downloads/loom-extension.zip";
 
 export default function FinalCTA() {
   return (
-    <section id="login" className="section finalcta">
+    <section id="login" className="section finalcta tile-dark">
       <div className="container finalcta-stack reveal">
         <div className="finalcta-copy">
           <div className="kicker">开始使用</div>
           <h2 className="finalcta-title">
-            让 AI 变成一个
+            让每一条判断
             <br />
-            真正懂你这一行的同事。
+            都不白做。
           </h2>
           <p className="finalcta-body">
-            LOOM 当前是单用户工作台。先用一个月 ——
-            等四个模块攒下你真实的判断和点评，Weave
-            给出的洞察会越来越像一个和你共事过一年的同事，而不是一个只读过全网文章的通用
-            AI。这些认知沉下来，团队里其他人也能调用。
+            持续使用一个月 —
+            当四个阶段积累了真实的判断和标注后，
+            输出会越来越接近团队的行业直觉，
+            而不是互联网平均水平。
           </p>
         </div>
 
         <div className="finalcta-steps">
           <div className="finalcta-step">
-            <div className="finalcta-step-num">①</div>
+            <div className="finalcta-step-num">1</div>
             <div className="finalcta-step-content">
-              <h3 className="finalcta-step-title">先看教程</h3>
+              <h3 className="finalcta-step-title">阅读教程</h3>
               <p className="finalcta-step-desc">
-                第一次用，建议先按教程走一遍 —— 几分钟就能上手。
+                第一次使用？先看飞书教程，几分钟就能上手。
               </p>
               <a
-                className="btn btn-primary"
+                className="btn btn-link"
                 href={TUTORIAL_URL}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                打开飞书教程 <span aria-hidden="true">→</span>
+                打开飞书教程
               </a>
             </div>
           </div>
 
           <div className="finalcta-step">
-            <div className="finalcta-step-num">②</div>
+            <div className="finalcta-step-num">2</div>
             <div className="finalcta-step-content">
-              <h3 className="finalcta-step-title">下载浏览器插件</h3>
+              <h3 className="finalcta-step-title">安装插件</h3>
               <p className="finalcta-step-desc">
-                LOOM 靠插件在你浏览竞品、看资讯时一键采集 —— 这是入口。
+                浏览器插件是 LOOM 采集数据的核心工具。
               </p>
               <a
-                className="btn btn-primary"
+                className="btn btn-link"
                 href={EXTENSION_DOWNLOAD_URL}
                 download="loom-extension.zip"
               >
-                下载 Chrome 插件 <span aria-hidden="true">→</span>
+                下载 Chrome 插件
               </a>
             </div>
           </div>
 
           <div className="finalcta-step">
-            <div className="finalcta-step-num">③</div>
+            <div className="finalcta-step-num">3</div>
             <div className="finalcta-step-content">
               <h3 className="finalcta-step-title">登录工作台</h3>
               <p className="finalcta-step-desc">
-                插件装好后，登录进入你的 LOOM 工作台。
+                插件安装完成？登录 LOOM 工作台。
               </p>
               <LoginPanel />
             </div>

@@ -6,7 +6,7 @@
   <title>LOOM · 状态画板</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../styles/design-tokens.css">
   <link rel="stylesheet" href="../sidepanel/sidepanel.css">
   <style>
@@ -190,7 +190,7 @@
     }
     .state-card-tag {
       font-size: 10px;
-      font-weight: 500;
+      font-weight: 400;
       color: var(--text-3);
       letter-spacing: 0.06em;
       text-transform: uppercase;
@@ -515,12 +515,12 @@
       document.body.innerHTML = `<div id="app"></div>`;
       const activeScenario = scenarios[stateKey] || scenarios.amazon;
       const previewStore = {
-        loom_api_base: "https://loom.my1panelsite.xyz",
+        loom_api_base: "https://loom.palecedar.site",
         loom_token: "preview-token",
         loom_user: { id: "preview-user", name: "Graham" },
         loom_default_mode: "auto",
         loom_ai_before_save: true,
-        pmcopilot_api_base: "https://loom.my1panelsite.xyz",
+        pmcopilot_api_base: "https://loom.palecedar.site",
         pmcopilot_token: "preview-token",
         pmcopilot_user: { username: "Graham" },
         pmcopilot_default_mode: "auto",

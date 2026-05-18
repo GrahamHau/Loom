@@ -60,6 +60,7 @@
     "*://*.kickstarter.com/*",
     "http://127.0.0.1:*/*",
     "http://localhost:*/*",
+    "https://loom.palecedar.site/*",
     "https://loom.my1panelsite.xyz/*"
   ]
 }

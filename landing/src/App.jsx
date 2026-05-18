@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import SiteNav from "./sections/SiteNav.jsx";
 import Hero from "./sections/Hero.jsx";
 import Problem from "./sections/Problem.jsx";
 import Modules from "./sections/Modules.jsx";
-import WhyNow from "./sections/WhyNow.jsx";
-import Weave from "./sections/Weave.jsx";
+import Pipeline from "./sections/Pipeline.jsx";
 import Vision from "./sections/Vision.jsx";
 import Milestones from "./sections/Milestones.jsx";
 import FinalCTA from "./sections/FinalCTA.jsx";
@@ -14,10 +13,9 @@ import ExtensionPage from "./sections/ExtensionPage.jsx";
 /**
  * LOOM landing — single-page scroll.
  *
- * Each section is a stateless component; this shell wires up:
- *   - scroll-reveal intersection observer (.reveal -> .is-visible)
- *   - sticky-nav scroll state
- *   - smooth anchor scrolling
+ * Narrative arc: L·O·O·M four-letter story
+ *   Hero (brand) → Problem (scenes) → Modules (L·O·O·M stages)
+ *   → Pipeline (data flow) → Vision (future) → Status → CTA
  */
 export default function App() {
   useScrollReveal();
@@ -35,8 +33,7 @@ export default function App() {
         <Hero />
         <Problem />
         <Modules />
-        <WhyNow />
-        <Weave />
+        <Pipeline />
         <Vision />
         <Milestones />
         <FinalCTA />
@@ -85,8 +82,6 @@ function useScrollReveal() {
   }, []);
 }
 
-// Tiny helper so sections can share scrollIntoView behavior without
-// importing react-router; keeps the bundle lean.
 export function smoothScrollTo(id) {
   const el = document.getElementById(id);
   if (!el) return;

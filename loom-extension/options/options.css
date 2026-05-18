@@ -203,11 +203,11 @@ input:focus, select:focus {
   justify-content: center;
   gap: 6px;
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 400;
   transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast);
 }
 .btn:hover { background: var(--hover); border-color: var(--border-strong); }
-.btn:active { transform: translateY(0.5px); }
+.btn:active { transform: scale(0.97); transition-duration: 0.06s; }
 .btn.primary {
   border-color: var(--accent);
   background: var(--accent);
@@ -248,7 +248,7 @@ input:focus, select:focus {
   text-transform: none;
   letter-spacing: normal;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 400;
 }
 .check-row input { width: auto; }
 

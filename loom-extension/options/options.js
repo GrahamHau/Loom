@@ -1,10 +1,12 @@
-const DEFAULT_API_BASE = "https://loom.my1panelsite.xyz";
+const DEFAULT_API_BASE = "https://loom.palecedar.site";
 const LOGIN_WEB_BASE = DEFAULT_API_BASE;
 const LEGACY_API_BASE_HOSTS = new Set([
   "ulanzi-copilot.my1panelsite.xyz",
   "loom.43.156.166.134.sslip.io",
+  "loom.my1panelsite.xyz",
 ]);
 const LOOM_WEB_HOSTS = new Set([
+  "loom.palecedar.site",
   "loom.my1panelsite.xyz",
 ]);
 
