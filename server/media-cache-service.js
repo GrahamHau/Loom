@@ -34,6 +34,29 @@ function isCacheableRemoteImage(value) {
   }
 }
 
+function isXiaohongshuImage(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host.includes("xhscdn.com") || host.includes("xiaohongshu.com");
+  } catch {
+    return false;
+  }
+}
+
+function imageRequestHeaders(url) {
+  const base = {
+    "User-Agent": "Mozilla/5.0 LOOM/0.1",
+    Accept: "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
+    Referer: new URL(url).origin,
+  };
+  if (!isXiaohongshuImage(url)) return base;
+  return {
+    ...base,
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+    Referer: "https://www.xiaohongshu.com/",
+  };
+}
+
 function extensionFor(contentType, url) {
   const fromType = EXT_BY_TYPE[String(contentType || "").split(";")[0].trim().toLowerCase()];
   if (fromType) return fromType;
@@ -65,11 +88,7 @@ export async function cacheRemoteImage(url) {
     const response = await fetch(url, {
       signal: controller.signal,
       redirect: "follow",
-      headers: {
-        "User-Agent": "Mozilla/5.0 LOOM/0.1",
-        Accept: "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
-        Referer: new URL(url).origin,
-      },
+      headers: imageRequestHeaders(url),
     });
     if (!response.ok) return "";
     const contentType = response.headers.get("content-type") || "";

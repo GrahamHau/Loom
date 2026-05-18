@@ -756,6 +756,30 @@ export function getDocumentImport(id) {
   return mapImport(db.prepare("SELECT * FROM document_imports WHERE id = ?").get(id));
 }
 
+export function listDocumentImports(workspaceId, filters = {}) {
+  const clauses = ["workspace_id = ?"];
+  const params = [workspaceId];
+  if (filters.project_id) {
+    clauses.push("project_id = ?");
+    params.push(filters.project_id);
+  }
+  if (filters.doc_type) {
+    clauses.push("doc_type = ?");
+    params.push(filters.doc_type);
+  }
+  if (filters.status) {
+    clauses.push("status = ?");
+    params.push(filters.status);
+  }
+  const limit = Math.min(100, Math.max(1, Number(filters.limit || 30)));
+  return db.prepare(`
+    SELECT * FROM document_imports
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY updated_at DESC, created_at DESC
+    LIMIT ?
+  `).all(...params, limit).map(mapImport);
+}
+
 export function updateDocumentImport(id, patch = {}) {
   const current = getDocumentImport(id);
   if (!current) return null;

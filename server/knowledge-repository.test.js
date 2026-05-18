@@ -103,6 +103,19 @@ describe("knowledge repository", () => {
     expect(item.status).toBe("pending");
   });
 
+  it("lists document imports for a workspace", () => {
+    const created = knowledge.createDocumentImport({
+      workspace_id: "ws-company",
+      doc_type: "mrd",
+      title: "Import One",
+      import_method: "paste",
+      status: "indexed",
+    });
+
+    const items = knowledge.listDocumentImports("ws-company");
+    expect(items.map((item) => item.id)).toContain(created.id);
+  });
+
   it("stores ontology entities, relations, fusion candidates, graph views, and Feishu Base mappings", () => {
     const feature = knowledge.createKnowledgeEntity({
       workspace_id: "ws-company",

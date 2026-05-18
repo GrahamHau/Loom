@@ -194,6 +194,51 @@ describe("media cache", () => {
       global.fetch = originalFetch;
     }
   });
+
+  it("re-caches xiaohongshu images during demand updates", async () => {
+    const { cookie } = await login();
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options = {}) => {
+      if (String(url).includes("xhscdn.com")) {
+        if (String(options.headers?.Referer || "").includes("xiaohongshu.com")) {
+          return new Response(new Uint8Array([1, 2, 3, 4]), {
+            status: 200,
+            headers: { "Content-Type": "image/webp" },
+          });
+        }
+        return new Response(null, { status: 403 });
+      }
+      return originalFetch(url, options);
+    };
+    try {
+      const createResponse = await fetch(`${baseUrl}/api/demands`, {
+        method: "POST",
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "XHS source",
+          source: "xiaohongshu",
+          thumbnail_url: "https://sns-webpic-qc.xhscdn.com/202605181115/test.webp",
+        }),
+      });
+      const created = await createResponse.json();
+      expect(created.thumbnail_url).toMatch(/^\/uploads\/remote-media\//);
+
+      const patchResponse = await fetch(`${baseUrl}/api/demands/${created.id}`, {
+        method: "PATCH",
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "XHS updated",
+          thumbnail_url: "https://sns-webpic-qc.xhscdn.com/202605181115/test.webp",
+        }),
+      });
+      const patched = await patchResponse.json();
+      expect(patchResponse.status).toBe(200);
+      expect(patched.thumbnail_url).toMatch(/^\/uploads\/remote-media\//);
+      expect(patched.original_image_url).toBe("https://sns-webpic-qc.xhscdn.com/202605181115/test.webp");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });
 
 describe("knowledge project and document APIs", () => {

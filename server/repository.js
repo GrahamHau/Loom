@@ -63,6 +63,40 @@ function resolveProductImagePatch(item, patch) {
   return {};
 }
 
+function hasIncomingImagePatch(patch = {}) {
+  return patch.image !== undefined || patch.thumbnail_url !== undefined;
+}
+
+function imagePatchWithExistingFallback(item = {}, patch = {}) {
+  if (!hasIncomingImagePatch(patch)) return {};
+  const incomingImage = cleanText(
+    patch.image !== undefined ? patch.image : patch.thumbnail_url,
+    item.image || item.thumbnail_url || ""
+  );
+  const incomingThumbnail = cleanText(
+    patch.thumbnail_url !== undefined ? patch.thumbnail_url : patch.image,
+    item.thumbnail_url || item.image || ""
+  );
+  const currentImage = cleanText(item.image, "");
+  const currentThumbnail = cleanText(item.thumbnail_url, "");
+  const currentOriginal = cleanText(item.original_image_url, "");
+  const incomingOriginal = cleanText(patch.original_image_url, "");
+  const hasLocalCachedCover = /^\/uploads\/remote-media\//.test(currentImage) || /^\/uploads\/remote-media\//.test(currentThumbnail);
+  const incomingIsRemote = /^https?:\/\//i.test(incomingImage) || /^https?:\/\//i.test(incomingThumbnail);
+  if (hasLocalCachedCover && incomingIsRemote) {
+    return {
+      image: currentImage || currentThumbnail,
+      thumbnail_url: currentThumbnail || currentImage,
+      original_image_url: currentOriginal || incomingOriginal || incomingImage || incomingThumbnail,
+    };
+  }
+  return {
+    image: incomingImage,
+    thumbnail_url: incomingThumbnail,
+    original_image_url: incomingOriginal || currentOriginal,
+  };
+}
+
 function userSummaryFromState(state, fallback = {}) {
   const source = state?.user || {};
   return {
@@ -845,6 +879,7 @@ export function updateDemand(userId, id, patch) {
   return mutateUserState(userId, (state) => {
     const item = (state.demands || []).find((demand) => demand.id === id);
     if (!item) return null;
+    const imagePatch = imagePatchWithExistingFallback(item, patch);
     const next = {
       ...patch,
       ...(patch.title !== undefined ? { title: cleanTitle(patch.title, item.title) } : {}),
@@ -859,8 +894,7 @@ export function updateDemand(userId, id, patch) {
       ...(patch.shares !== undefined ? { shares: Number(patch.shares || 0) } : {}),
       ...(patch.comments !== undefined ? { comments: Number(patch.comments || 0) } : {}),
       ...(patch.visible_comments !== undefined ? { visible_comments: cleanVisibleComments(patch.visible_comments) } : {}),
-      ...(patch.thumbnail_url !== undefined ? { thumbnail_url: cleanText(patch.thumbnail_url, item.thumbnail_url || "") } : {}),
-      ...(patch.image !== undefined ? { image: cleanText(patch.image, item.image || "") } : {}),
+      ...imagePatch,
       ...(patch.innovation !== undefined ? { innovation: cleanTitle(patch.innovation, item.innovation) } : {}),
       ...(patch.tag_values !== undefined ? { tag_values: { ...cleanTagValues(item.tag_values), ...demandTagValuesForState(state, { tag_values: patch.tag_values }) } } : {}),
       ...(patch.scenarios !== undefined ? { scenarios: cleanArray(patch.scenarios) } : {}),

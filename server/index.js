@@ -59,6 +59,7 @@ import {
   createProject,
   getDocument,
   getProject,
+  listDocumentImports,
   getKnowledgeGap,
   getKnowledgeEntity,
   getKnowledgeEntityGraph,
@@ -765,6 +766,16 @@ app.get("/api/documents", requireAuth, (req, res) => {
   res.json(documents);
 });
 
+app.get("/api/document-imports", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listDocumentImports(workspaceId, {
+    project_id: req.query?.project_id,
+    doc_type: req.query?.doc_type,
+    status: req.query?.status,
+    limit: req.query?.limit,
+  }));
+});
+
 app.post("/api/documents", requireAuth, (req, res) => {
   const workspaceId = requestWorkspaceId(req);
   res.status(201).json(createDocument({ ...(req.body || {}), workspace_id: workspaceId, owner_user_id: currentUserId(req) }));
@@ -1077,11 +1088,12 @@ app.get("/api/products/find-similar", requireAuth, (req, res) => {
   });
   res.json({ product: product ? { id: product.id, name: product.name } : null });
 });
-app.patch("/api/products/:id", requireAuth, (req, res) => {
-  const item = updateProduct(currentUserId(req), req.params.id, req.body || {});
+app.patch("/api/products/:id", requireAuth, asyncHandler(async (req, res) => {
+  const payload = await withCachedImageFields(req.body || {});
+  const item = updateProduct(currentUserId(req), req.params.id, payload);
   if (!item) return res.status(404).json({ error: "product_not_found" });
   res.json(item);
-});
+}));
 app.post("/api/products/:id/platforms", requireAuth, (req, res) => {
   const userId = currentUserId(req);
   const current = rawState(userId).products.find((product) => product.id === req.params.id);
@@ -1116,11 +1128,12 @@ app.post("/api/demands", requireAuth, asyncHandler(async (req, res) => {
   const payload = await withCachedImageFields(req.body || {});
   res.status(201).json(createDemand(currentUserId(req), payload));
 }));
-app.patch("/api/demands/:id", requireAuth, (req, res) => {
-  const item = updateDemand(currentUserId(req), req.params.id, req.body || {});
+app.patch("/api/demands/:id", requireAuth, asyncHandler(async (req, res) => {
+  const payload = await withCachedImageFields(req.body || {});
+  const item = updateDemand(currentUserId(req), req.params.id, payload);
   if (!item) return res.status(404).json({ error: "demand_not_found" });
   res.json(item);
-});
+}));
 app.delete("/api/demands/:id", requireAuth, (req, res) => {
   if (!deleteDemand(currentUserId(req), req.params.id)) return res.status(404).json({ error: "demand_not_found" });
   res.json({ ok: true });

@@ -479,6 +479,7 @@ function DocumentModal({ mode, defaultDocType = "prd", onClose, onDone }) {
 function LibraryScreen({ data, api, reloadKey = 0, onNavigate, onOpenDocumentModal }) {
   const [activeTab, setActiveTab] = useState("all");
   const [documents, setDocuments] = useState([]);
+  const [imports, setImports] = useState([]);
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
   const current = LIBRARY_TABS.find((tab) => tab.key === activeTab) || LIBRARY_TABS[0];
@@ -498,8 +499,19 @@ function LibraryScreen({ data, api, reloadKey = 0, onNavigate, onOpenDocumentMod
       setMessage(error.message || "资料加载失败");
     }
   };
+  const loadImports = async () => {
+    if (!api || !workspaceId) return;
+    try {
+      const query = new URLSearchParams({ workspace_id: workspaceId, limit: "8" });
+      const result = await api(`/api/document-imports?${query.toString()}`);
+      setImports(Array.isArray(result) ? result : []);
+    } catch {
+      setImports([]);
+    }
+  };
   useEffect(() => {
     loadDocuments();
+    loadImports();
   }, [workspaceId, reloadKey]);
 
   return (
@@ -599,6 +611,20 @@ function LibraryScreen({ data, api, reloadKey = 0, onNavigate, onOpenDocumentMod
               <div className="screen-action-card-desc">浏览时一键采集页面内容</div>
             </button>
           </div>
+          {imports.length ? (
+            <div className="library-import-note">
+              <div className="library-import-note-title">最近导入</div>
+              <div className="library-import-note-list">
+                {imports.map((item) => (
+                  <div key={item.id} className="library-import-note-row">
+                    <span className={`library-import-status ${item.status || "pending"}`}>{item.status || "pending"}</span>
+                    <span className="library-import-title">{item.title || "未命名导入"}</span>
+                    <span className="library-import-meta">{item.doc_type?.toUpperCase?.() || "OTHER"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
         )}
       </div>
