@@ -37,6 +37,48 @@ beforeEach(() => {
 });
 
 describe("knowledge repository", () => {
+  it("migrates legacy knowledge_gaps before creating question_hash indexes", async () => {
+    const dbPath = process.env.DATABASE_PATH;
+    const moduleUrl = new URL("./knowledge-schema.js", import.meta.url);
+    moduleUrl.searchParams.set("legacy-gap-migration", String(Date.now()));
+    dbModule.db.exec("DROP TABLE IF EXISTS knowledge_gaps");
+    dbModule.db.exec(`
+      CREATE TABLE knowledge_gaps (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        project_id TEXT,
+        pack_id TEXT,
+        question TEXT NOT NULL,
+        reason TEXT DEFAULT '',
+        related_source_ids_json TEXT DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'open',
+        owner_user_id TEXT,
+        answer_document_id TEXT,
+        answer_chunk_id TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    dbModule.db.prepare(`
+      INSERT INTO knowledge_gaps (id, workspace_id, question, status)
+      VALUES ('legacy-gap-1', 'ws-company', 'Legacy gap question', 'open')
+    `).run();
+
+    const { migrateKnowledgeSchema } = await import(moduleUrl.href);
+    expect(() => migrateKnowledgeSchema()).not.toThrow();
+
+    const columns = dbModule.db.prepare("PRAGMA table_info(knowledge_gaps)").all().map((column) => column.name);
+    const indexes = dbModule.db.prepare("PRAGMA index_list(knowledge_gaps)").all().map((index) => index.name);
+    const gap = dbModule.db.prepare("SELECT question_text, question_hash FROM knowledge_gaps WHERE id = 'legacy-gap-1'").get();
+
+    expect(process.env.DATABASE_PATH).toBe(dbPath);
+    expect(columns).toContain("question_hash");
+    expect(indexes).toContain("idx_knowledge_gaps_hash");
+    expect(gap.question_text).toBe("Legacy gap question");
+    expect(gap.question_hash).not.toBe("");
+  });
+
   it("seeds default document and product type templates without hard-coding company product types", () => {
     const seeded = knowledge.ensureDefaultKnowledgeTemplates("ws-company");
 

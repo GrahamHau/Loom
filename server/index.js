@@ -3,6 +3,7 @@ import express from "express";
 import session from "express-session";
 import SQLiteStoreFactory from "connect-sqlite3";
 import fs from "node:fs";
+import { timingSafeEqual } from "node:crypto";
 import signature from "cookie-signature";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,14 @@ import {
   validateAuthConfig,
 } from "./auth-service.js";
 import { parseDemandRaw, parseDemandUrl, parseProductRaw, parseProductUrl } from "./parsers.js";
+import {
+  addCompetitorPlatform,
+  createCompetitor,
+  listCategoryTemplates,
+  listCompetitors,
+  mergeCompetitors,
+} from "./competitor-service.js";
+import { DEFAULT_FIELDS } from "./field-config.js";
 import { matchFieldKey, matchFieldOption, normalizeTagValues } from "./field-matcher.js";
 import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-service.js";
 import { analyzeResearch } from "./research-service.js";
@@ -42,11 +51,68 @@ import {
   exportSupplierDocument,
 } from "./feishu-doc-export-service.js";
 import { syncDocumentReviewToFeishuBase, syncKnowledgeGapToFeishu } from "./feishu-base-sync-service.js";
-import { handleFeishuBotQuestion } from "./feishu-bot-service.js";
+import {
+  handleFeishuBotEvent,
+  handleFeishuCardAction,
+  registerFeishuUser,
+  upsertFeishuChat,
+} from "./feishu-bot-service.js";
 import { withCachedImageFields } from "./media-cache-service.js";
 import { indexKnowledgeRecord } from "./knowledge-indexer.js";
 import { generateProjectKnowledgePack, generateResearchKnowledgePack } from "./knowledge-pack-service.js";
 import { evaluateKnowledgeRegression, listKnowledgeQueryLogs, queryKnowledge } from "./knowledge-query-service.js";
+import { getCitation, queryApi, queryHealth, upsertQuerySources } from "./query-api-service.js";
+import {
+  answerKnowledgeGap,
+  createOrBumpKnowledgeGap,
+  dismissKnowledgeGap,
+  listKnowledgeGapInbox,
+} from "./knowledge-gap-service.js";
+import {
+  createStructuredDocument,
+  getStructuredSectionDocument,
+  getStructuredDocument,
+  lintStructuredDocument,
+  patchStructuredSection,
+  publishStructuredDocument,
+} from "./mrd-prd-service.js";
+import {
+  explainQueryPolicy,
+  getKnowledgeSourcePolicyById,
+  listKnowledgeSourcePolicies,
+  patchKnowledgeSourcePolicy,
+  testModelRoute,
+  upsertKnowledgePolicy,
+  upsertKnowledgeSourcePolicy,
+  upsertModelRoute,
+} from "./governance-service.js";
+import {
+  acceptFusionCandidate,
+  createOntologyRelation,
+  getOntologyEntityWithRelations,
+  listOntologyFusionCandidates,
+  projectToOntology,
+  rejectFusionCandidate,
+  searchOntologyEntities,
+} from "./ontology-service.js";
+import { createGraphView, getGraph, listGraphViews, updateGraphView } from "./graph-service.js";
+import { getGraphView } from "./graph-service.js";
+import {
+  getImportWithBlocks,
+  importCsvDataset,
+  importFeishuReviewDocument,
+  importPasteReviewDocument,
+  publishDocumentImport,
+  runDocumentImport,
+} from "./external-import-service.js";
+import {
+  getDemandCluster,
+  listDemandClusters,
+  mergeDemandCluster,
+  recomputeDemandClusters,
+  recordDemandClusterQuestionHit,
+  splitDemandCluster,
+} from "./demand-cluster-service.js";
 import {
   assertSameWorkspace,
   authorizedChunkPredicate,
@@ -55,9 +121,18 @@ import {
   roleCodesForUser,
 } from "./knowledge-access-service.js";
 import {
+  createEvidence,
+  getSignal,
+  listEvidenceLinksForInput,
+  listEvidencesForEntity,
+  upsertSignal,
+} from "./signal-evidence-service.js";
+import {
   createDocument,
   createProject,
   getDocument,
+  getDocumentSectionDocuments,
+  getKnowledgeChunk,
   getProject,
   listDocumentImports,
   getKnowledgeGap,
@@ -121,6 +196,7 @@ import {
   listAllUsers,
   listNews,
   listNewsSources,
+  markEntityEvidenceStatus,
   pruneNewsOlderThan,
   rawState,
   revokeApiToken,
@@ -266,6 +342,21 @@ function requireAuth(req, res, next) {
   res.locals.loomUserId = user.id;
   req.session.userId = user.id;
   req.session.user = sessionUserResponse(user);
+  next();
+}
+
+function requireBotIngress(req, res, next) {
+  const expected = String(process.env.LOOM_BOT_INGRESS_KEY || "").trim();
+  const provided = String(req.headers["x-loom-bot-ingress-key"] || "").trim();
+  if (!expected || (process.env.NODE_ENV === "production" && expected === "test_ingress_key")) {
+    return res.status(500).json({ error: "bot_ingress_not_configured" });
+  }
+  const expectedBuffer = Buffer.from(expected);
+  const providedBuffer = Buffer.from(provided);
+  const matches = expectedBuffer.length === providedBuffer.length && timingSafeEqual(expectedBuffer, providedBuffer);
+  if (!provided || !matches) {
+    return res.status(401).json({ error: "bot_ingress_unauthorized" });
+  }
   next();
 }
 
@@ -766,6 +857,13 @@ app.get("/api/documents", requireAuth, (req, res) => {
   res.json(documents);
 });
 
+app.get("/api/documents/:id/sections", requireAuth, (req, res) => {
+  const document = getDocument(req.params.id);
+  if (!document) return res.status(404).json({ error: "document_not_found" });
+  assertCanReadDocument(req, document);
+  res.json(getDocumentSectionDocuments(document.workspace_id, document.id) || []);
+});
+
 app.get("/api/document-imports", requireAuth, (req, res) => {
   const workspaceId = requestWorkspaceId(req, "query");
   res.json(listDocumentImports(workspaceId, {
@@ -799,6 +897,30 @@ app.get("/api/document-templates", requireAuth, (req, res) => {
   res.json(listDocumentTemplates(workspaceId, req.query?.doc_type || ""));
 });
 
+app.get("/api/field-config", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json({
+    workspace_id: workspaceId,
+    fields: DEFAULT_FIELDS,
+  });
+});
+
+app.get("/api/knowledge/chunks/:id/source", requireAuth, (req, res) => {
+  const chunk = getKnowledgeChunk(req.params.id);
+  if (!chunk) return res.status(404).json({ error: "knowledge_chunk_not_found" });
+  resourceInRequestWorkspace(req, chunk, "knowledge_chunk");
+  const ref = Array.isArray(chunk.source_refs) ? chunk.source_refs[0] || {} : {};
+  const documentId = String(ref.document_id || ref.source_id || "").trim();
+  const document = documentId ? getDocument(documentId) : null;
+  res.json({
+    chunk_id: chunk.id,
+    document_id: document?.id || documentId || "",
+    section_key: String(ref.section_key || "").trim(),
+    doc_type: document?.doc_type || "",
+    title: document?.title || chunk.source_title || chunk.title || "",
+  });
+});
+
 app.post("/api/document-templates", requireAuth, (req, res) => {
   const workspaceId = requestWorkspaceId(req);
   res.status(201).json(upsertDocumentTemplate({ ...(req.body || {}), workspace_id: workspaceId }));
@@ -816,7 +938,7 @@ app.post("/api/product-type-templates", requireAuth, (req, res) => {
 
 app.post("/api/document-imports/paste", requireAuth, asyncHandler(async (req, res) => {
   const workspaceId = requestWorkspaceId(req);
-  const result = await importPastedDocument({
+  const result = await importPasteReviewDocument({
     ...(req.body || {}),
     workspace_id: workspaceId,
     created_by: currentUserId(req),
@@ -826,18 +948,48 @@ app.post("/api/document-imports/paste", requireAuth, asyncHandler(async (req, re
 
 app.post("/api/document-imports/feishu", requireAuth, asyncHandler(async (req, res) => {
   const workspaceId = requestWorkspaceId(req);
-  const result = await importFeishuDocument({
+  const result = await importFeishuReviewDocument({
     ...(req.body || {}),
     workspace_id: workspaceId,
     created_by: currentUserId(req),
   });
-  res.status(result.document ? 201 : 422).json(result);
+  res.status(202).json(result);
 }));
 
+app.post("/api/document-imports/csv", requireAuth, (req, res, next) => {
+  try {
+    const workspaceId = requestWorkspaceId(req);
+    res.status(202).json(importCsvDataset({
+      ...(req.body || {}),
+      workspace_id: workspaceId,
+      created_by: currentUserId(req),
+    }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
 app.get("/api/document-imports/:id", requireAuth, (req, res) => {
-  const result = getDocumentImportResult(req.params.id);
+  const result = getImportWithBlocks(req.params.id) || getDocumentImportResult(req.params.id);
   if (!result) return res.status(404).json({ error: "document_import_not_found" });
   resourceInRequestWorkspace(req, result.import, "document_import");
+  res.json(result);
+});
+
+app.post("/api/document-imports/:id/run", requireAuth, asyncHandler(async (req, res) => {
+  const current = getImportWithBlocks(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_import_not_found" });
+  resourceInRequestWorkspace(req, current.import, "document_import");
+  res.json(await runDocumentImport(req.params.id));
+}));
+
+app.post("/api/document-imports/:id/publish", requireAuth, (req, res) => {
+  const current = getImportWithBlocks(req.params.id);
+  if (!current) return res.status(404).json({ error: "document_import_not_found" });
+  resourceInRequestWorkspace(req, current.import, "document_import");
+  const result = publishDocumentImport(req.params.id, req.body || {});
+  if (!result) return res.status(409).json({ error: "document_import_not_publishable" });
   res.json(result);
 });
 
@@ -873,6 +1025,39 @@ app.get("/api/knowledge/entities/:id/graph", requireAuth, (req, res) => {
   });
 });
 
+app.get("/api/graph/:entity_id", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  const graph = getGraph(req.params.entity_id, {
+    ...(req.query || {}),
+    workspace_id: workspaceId,
+    user_id: req.query?.user_id || currentUserId(req),
+  });
+  if (!graph) return res.status(404).json({ error: "graph_root_not_found" });
+  res.json(graph);
+});
+
+app.get("/api/graph/views", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listGraphViews(workspaceId));
+});
+
+app.post("/api/graph/views", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.status(201).json(createGraphView({
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    owner_user_id: req.body?.owner_user_id || currentUserId(req),
+  }));
+});
+
+app.patch("/api/graph/views/:id", requireAuth, (req, res) => {
+  const current = getGraphView(req.params.id);
+  if (!current) return res.status(404).json({ error: "graph_view_not_found" });
+  resourceInRequestWorkspace(req, current, "graph_view");
+  const updated = updateGraphView(req.params.id, req.body || {});
+  res.json(updated);
+});
+
 app.get("/api/knowledge/fusion-candidates", requireAuth, (req, res) => {
   const workspaceId = requestWorkspaceId(req, "query");
   res.json(listKnowledgeFusionCandidates(workspaceId, {
@@ -900,6 +1085,59 @@ app.patch("/api/knowledge/fusion-candidates/:id", requireAuth, (req, res) => {
     throw error;
   }
   res.json(updated);
+});
+
+app.post("/api/ontology/project", requireAuth, (req, res, next) => {
+  try {
+    const workspaceId = requestWorkspaceId(req);
+    res.json(projectToOntology({ ...(req.body || {}), workspace_id: workspaceId }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.get("/api/ontology/entities", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(searchOntologyEntities(workspaceId, req.query || {}));
+});
+
+app.get("/api/ontology/entities/:id", requireAuth, (req, res) => {
+  const entity = getOntologyEntityWithRelations(req.params.id);
+  if (!entity) return res.status(404).json({ error: "ontology_entity_not_found" });
+  resourceInRequestWorkspace(req, entity, "ontology_entity");
+  res.json(entity);
+});
+
+app.post("/api/ontology/relations", requireAuth, (req, res, next) => {
+  try {
+    const workspaceId = requestWorkspaceId(req);
+    res.status(201).json(createOntologyRelation({ ...(req.body || {}), workspace_id: workspaceId }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.get("/api/ontology/fusion-candidates", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listOntologyFusionCandidates(workspaceId, req.query || {}));
+});
+
+app.post("/api/ontology/fusion-candidates/:id/accept", requireAuth, (req, res) => {
+  const current = getKnowledgeFusionCandidate(req.params.id);
+  if (!current) return res.status(404).json({ error: "fusion_candidate_not_found" });
+  resourceInRequestWorkspace(req, current, "fusion_candidate");
+  const result = acceptFusionCandidate(req.params.id, req.body || {});
+  res.json(result);
+});
+
+app.post("/api/ontology/fusion-candidates/:id/reject", requireAuth, (req, res) => {
+  const current = getKnowledgeFusionCandidate(req.params.id);
+  if (!current) return res.status(404).json({ error: "fusion_candidate_not_found" });
+  resourceInRequestWorkspace(req, current, "fusion_candidate");
+  const result = rejectFusionCandidate(req.params.id, req.body || {});
+  res.json(result);
 });
 
 app.post("/api/knowledge/index", requireAuth, (req, res) => {
@@ -941,6 +1179,146 @@ app.post("/api/knowledge/query", requireAuth, asyncHandler(async (req, res) => {
     roles: currentWorkspaceRoles(req, workspaceId),
   }));
 }));
+
+app.post("/api/query", requireAuth, asyncHandler(async (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.json(await queryApi({
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    user_id: req.body?.user_id || currentUserId(req),
+    user: currentUser(req),
+    roles: currentWorkspaceRoles(req, workspaceId),
+  }));
+}));
+
+app.post("/api/knowledge-gaps", requireAuth, (req, res, next) => {
+  try {
+    const workspaceId = requestWorkspaceId(req);
+    res.json(createOrBumpKnowledgeGap({
+      ...(req.body || {}),
+      workspace_id: workspaceId,
+      created_by: currentUserId(req),
+    }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.get("/api/knowledge-gaps", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listKnowledgeGapInbox(workspaceId, String(req.query?.status || "open")));
+});
+
+app.post("/api/knowledge-gaps/:id/answer", requireAuth, (req, res, next) => {
+  try {
+    const current = getKnowledgeGap(req.params.id);
+    if (!current) return res.status(404).json({ error: "knowledge_gap_not_found" });
+    resourceInRequestWorkspace(req, current, "knowledge_gap");
+    const result = answerKnowledgeGap(req.params.id, {
+      ...(req.body || {}),
+      author_user_id: req.body?.author_user_id || currentUserId(req),
+    });
+    res.json(result);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.post("/api/knowledge-gaps/:id/dismiss", requireAuth, (req, res, next) => {
+  try {
+    const current = getKnowledgeGap(req.params.id);
+    if (!current) return res.status(404).json({ error: "knowledge_gap_not_found" });
+    resourceInRequestWorkspace(req, current, "knowledge_gap");
+    const gap = dismissKnowledgeGap(req.params.id, req.body || {});
+    res.json(gap);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.get("/api/query/health", requireAuth, (_req, res) => {
+  res.json(queryHealth());
+});
+
+app.post("/api/query/explain", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.json(explainQueryPolicy({ ...(req.body || {}), workspace_id: workspaceId }));
+});
+
+app.post("/api/query/upsert", requireAuth, (req, res, next) => {
+  try {
+    const workspaceId = requestWorkspaceId(req);
+    res.json(upsertQuerySources({ ...(req.body || {}), workspace_id: workspaceId }));
+  } catch (error) {
+    if (error.message) return res.status(400).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.get("/api/knowledge/source-policies", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listKnowledgeSourcePolicies(workspaceId, { source_type: req.query?.source_type }));
+});
+
+app.post("/api/knowledge/source-policies", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.status(201).json(upsertKnowledgeSourcePolicy({ ...(req.body || {}), workspace_id: workspaceId }));
+});
+
+app.patch("/api/knowledge/source-policies/:id", requireAuth, (req, res) => {
+  const current = getKnowledgeSourcePolicyById(req.params.id);
+  if (!current) return res.status(404).json({ error: "knowledge_source_policy_not_found" });
+  resourceInRequestWorkspace(req, current, "knowledge_source_policy");
+  const updated = patchKnowledgeSourcePolicy(req.params.id, req.body || {});
+  res.json(updated);
+});
+
+app.get("/api/citations/:id", requireAuth, (req, res) => {
+  const citation = getCitation(req.params.id, requestWorkspaceId(req, "query"));
+  if (!citation) return res.status(404).json({ error: "citation_not_found" });
+  res.json(citation);
+});
+
+app.get("/api/category-templates", requireAuth, (req, res) => {
+  res.json(listCategoryTemplates(requestWorkspaceId(req, "query")));
+});
+
+app.get("/api/competitors", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  res.json(listCompetitors(workspaceId, {
+    category: req.query.category,
+    filter: req.query.filter,
+    limit: req.query.limit,
+  }));
+});
+
+app.post("/api/competitors", requireAuth, (req, res, next) => {
+  try {
+    res.json(createCompetitor({ ...(req.body || {}), workspace_id: requestWorkspaceId(req) }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/competitors/merge", requireAuth, (req, res, next) => {
+  try {
+    res.json(mergeCompetitors({ ...(req.body || {}), workspace_id: requestWorkspaceId(req) }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/competitors/:id/platforms", requireAuth, (req, res, next) => {
+  try {
+    res.json(addCompetitorPlatform(req.params.id, { ...(req.body || {}), workspace_id: requestWorkspaceId(req) }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
 
 app.get("/api/knowledge/query-logs", requireAuth, (req, res) => {
   const workspaceId = requestWorkspaceId(req, "query");
@@ -989,6 +1367,94 @@ app.post("/api/documents/prd/draft", requireAuth, (req, res) => {
   if (req.body?.pack_id && !pack) return res.status(404).json({ error: "knowledge_pack_not_found" });
   if (pack) resourceInRequestWorkspace(req, pack, "knowledge_pack");
   res.status(201).json(generatePrdDraft(draftGenerationInput(req, workspaceId, pack)));
+});
+
+app.post("/api/mrd-documents", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.status(200).json(createStructuredDocument("mrd", {
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    created_by: currentUserId(req),
+  }));
+});
+
+app.get("/api/mrd-documents/:id", requireAuth, (req, res) => {
+  const doc = getStructuredDocument(req.params.id);
+  if (!doc || doc.doc_type !== "mrd") return res.status(404).json({ error: "mrd_document_not_found" });
+  resourceInRequestWorkspace(req, doc, "mrd_document");
+  res.json(doc);
+});
+
+app.get("/api/mrd-documents/:id/lint", requireAuth, (req, res) => {
+  const result = lintStructuredDocument(req.params.id);
+  if (!result || result.document.doc_type !== "mrd") return res.status(404).json({ error: "mrd_document_not_found" });
+  resourceInRequestWorkspace(req, result.document, "mrd_document");
+  res.json({ errors: result.errors });
+});
+
+app.post("/api/mrd-documents/:id/publish", requireAuth, (req, res, next) => {
+  try {
+    const current = getDocument(req.params.id);
+    if (!current || current.doc_type !== "mrd") return res.status(404).json({ error: "mrd_document_not_found" });
+    assertCanManageResource(req, current, "mrd_document");
+    res.json(publishStructuredDocument(req.params.id));
+  } catch (error) {
+    if (error.status === 409) return res.status(409).json({ error: error.message, errors: error.errors || [] });
+    next(error);
+  }
+});
+
+app.patch("/api/mrd-sections/:id", requireAuth, (req, res) => {
+  const current = getStructuredSectionDocument(req.params.id, req.body || {});
+  if (!current || current.doc_type !== "mrd") return res.status(404).json({ error: "mrd_section_not_found" });
+  assertCanManageResource(req, current, "mrd_document");
+  const result = patchStructuredSection(req.params.id, req.body || {});
+  if (!result) return res.status(404).json({ error: "mrd_section_not_found" });
+  res.json(result);
+});
+
+app.post("/api/prd-documents", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.status(200).json(createStructuredDocument("prd", {
+    ...(req.body || {}),
+    workspace_id: workspaceId,
+    created_by: currentUserId(req),
+  }));
+});
+
+app.get("/api/prd-documents/:id", requireAuth, (req, res) => {
+  const doc = getStructuredDocument(req.params.id);
+  if (!doc || doc.doc_type !== "prd") return res.status(404).json({ error: "prd_document_not_found" });
+  resourceInRequestWorkspace(req, doc, "prd_document");
+  res.json(doc);
+});
+
+app.get("/api/prd-documents/:id/lint", requireAuth, (req, res) => {
+  const result = lintStructuredDocument(req.params.id);
+  if (!result || result.document.doc_type !== "prd") return res.status(404).json({ error: "prd_document_not_found" });
+  resourceInRequestWorkspace(req, result.document, "prd_document");
+  res.json({ errors: result.errors });
+});
+
+app.post("/api/prd-documents/:id/publish", requireAuth, (req, res, next) => {
+  try {
+    const current = getDocument(req.params.id);
+    if (!current || current.doc_type !== "prd") return res.status(404).json({ error: "prd_document_not_found" });
+    assertCanManageResource(req, current, "prd_document");
+    res.json(publishStructuredDocument(req.params.id));
+  } catch (error) {
+    if (error.status === 409) return res.status(409).json({ error: error.message, errors: error.errors || [] });
+    next(error);
+  }
+});
+
+app.patch("/api/prd-sections/:id", requireAuth, (req, res) => {
+  const current = getStructuredSectionDocument(req.params.id, req.body || {});
+  if (!current || current.doc_type !== "prd") return res.status(404).json({ error: "prd_section_not_found" });
+  assertCanManageResource(req, current, "prd_document");
+  const result = patchStructuredSection(req.params.id, req.body || {});
+  if (!result) return res.status(404).json({ error: "prd_section_not_found" });
+  res.json(result);
 });
 
 app.patch("/api/documents/:id/sections/:key", requireAuth, (req, res) => {
@@ -1060,16 +1526,101 @@ app.post("/api/documents/:id/sync-review-base", requireAuth, (req, res) => {
   res.json(syncDocumentReviewToFeishuBase(req.params.id, req.body || {}));
 });
 
-app.post("/api/bot/feishu/events", requireAuth, asyncHandler(async (req, res) => {
-  const workspaceId = requestWorkspaceId(req);
-  res.json(await handleFeishuBotQuestion({
+app.post("/api/bot/feishu/users", requireAuth, (req, res, next) => {
+  try {
+    const workspaceId = requestWorkspaceId(req);
+    res.json(registerFeishuUser({
+      ...(req.body || {}),
+      workspace_id: workspaceId,
+    }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.post("/api/bot/feishu/chats", requireAuth, (req, res, next) => {
+  try {
+    const workspaceId = requestWorkspaceId(req);
+    res.json(upsertFeishuChat({
+      ...(req.body || {}),
+      workspace_id: workspaceId,
+    }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.post("/api/bot/feishu/events", requireBotIngress, asyncHandler(async (req, res) => {
+  res.json(await handleFeishuBotEvent({
     ...(req.body || {}),
-    workspace_id: workspaceId,
-    user_id: currentUserId(req),
-    user: currentUser(req),
-    roles: currentWorkspaceRoles(req, workspaceId),
+    workspace_id: String(req.body?.workspace_id || "").trim(),
   }));
 }));
+
+app.post("/api/bot/feishu/card-actions", requireBotIngress, (req, res, next) => {
+  try {
+    const workspaceId = String(req.body?.workspace_id || "").trim();
+    res.json(handleFeishuCardAction({
+      ...(req.body || {}),
+      workspace_id: workspaceId,
+    }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.post("/api/signals", requireAuth, (req, res, next) => {
+  try {
+    const workspaceId = requestWorkspaceId(req);
+    res.json(upsertSignal({
+      ...(req.body || {}),
+      workspace_id: workspaceId,
+      created_by: currentUserId(req),
+    }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.get("/api/signals/:id", requireAuth, (req, res) => {
+  const signal = getSignal(req.params.id, requestWorkspaceId(req, "query"));
+  if (!signal) return res.status(404).json({ error: "signal_not_found" });
+  res.json(signal);
+});
+
+app.get("/api/evidences", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  const entityType = String(req.query.entity_type || "").trim();
+  const entityId = String(req.query.entity_id || "").trim();
+  if (!entityType || !entityId) return res.status(400).json({ error: "entity_type and entity_id required" });
+  res.json(
+    listEvidencesForEntity({
+      workspace_id: workspaceId,
+      entity_type: entityType,
+      entity_id: entityId,
+    })
+  );
+});
+
+app.post("/api/evidences", requireAuth, (req, res, next) => {
+  try {
+    const workspaceId = requestWorkspaceId(req);
+    const evidence = createEvidence({ ...(req.body || {}), workspace_id: workspaceId });
+    for (const link of listEvidenceLinksForInput(req.body || {})) {
+      if (link.entity_type === "product" || link.entity_type === "demand" || link.entity_type === "research") {
+        markEntityEvidenceStatus(currentUserId(req), link.entity_type, link.entity_id, "current");
+      }
+    }
+    res.json(evidence);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
 
 app.get("/api/products", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).products));
 app.post("/api/products", requireAuth, asyncHandler(async (req, res) => {
@@ -1087,6 +1638,23 @@ app.get("/api/products/find-similar", requireAuth, (req, res) => {
       (brand && itemBrand && itemBrand === brand);
   });
   res.json({ product: product ? { id: product.id, name: product.name } : null });
+});
+app.get("/api/products/:id", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  const product = rawState(currentUserId(req)).products.find((item) => item.id === req.params.id);
+  if (!product) return res.status(404).json({ error: "product_not_found" });
+  if (req.query.include !== "evidence") return res.json(product);
+  const evidences = listEvidencesForEntity({
+    workspace_id: workspaceId,
+    entity_type: "product",
+    entity_id: product.id,
+  });
+  res.json({
+    ...product,
+    evidence_status: evidences.length ? "current" : product.evidence_status || "legacy",
+    evidence_count: evidences.length,
+    evidences,
+  });
 });
 app.patch("/api/products/:id", requireAuth, asyncHandler(async (req, res) => {
   const payload = await withCachedImageFields(req.body || {});
@@ -1128,6 +1696,23 @@ app.post("/api/demands", requireAuth, asyncHandler(async (req, res) => {
   const payload = await withCachedImageFields(req.body || {});
   res.status(201).json(createDemand(currentUserId(req), payload));
 }));
+app.get("/api/demands/:id", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  const demand = rawState(currentUserId(req)).demands.find((item) => item.id === req.params.id);
+  if (!demand) return res.status(404).json({ error: "demand_not_found" });
+  if (req.query.include !== "evidence") return res.json(demand);
+  const evidences = listEvidencesForEntity({
+    workspace_id: workspaceId,
+    entity_type: "demand",
+    entity_id: demand.id,
+  });
+  res.json({
+    ...demand,
+    evidence_status: evidences.length ? "current" : demand.evidence_status || "legacy",
+    evidence_count: evidences.length,
+    evidences,
+  });
+});
 app.patch("/api/demands/:id", requireAuth, asyncHandler(async (req, res) => {
   const payload = await withCachedImageFields(req.body || {});
   const item = updateDemand(currentUserId(req), req.params.id, payload);
@@ -1144,6 +1729,59 @@ app.post("/api/demands/parse-url", requireAuth, asyncHandler(async (req, res) =>
 app.post("/api/demands/parse-raw", requireAuth, asyncHandler(async (req, res) => {
   res.json(await parseDemandRaw(currentUserId(req), req.body || {}));
 }));
+
+app.get("/api/demand-clusters", requireAuth, (req, res) => {
+  res.json(listDemandClusters(requestWorkspaceId(req, "query"), {
+    window: req.query.window,
+    order: req.query.order,
+    status: req.query.status,
+  }));
+});
+
+app.get("/api/demand-clusters/:id", requireAuth, (req, res) => {
+  const cluster = getDemandCluster(req.params.id, requestWorkspaceId(req, "query"));
+  if (!cluster) return res.status(404).json({ error: "demand_cluster_not_found" });
+  res.json(cluster);
+});
+
+app.post("/api/demand-clusters/recompute", requireAuth, (req, res, next) => {
+  try {
+    const userId = currentUserId(req);
+    const workspaceId = requestWorkspaceId(req);
+    res.json(recomputeDemandClusters({
+      ...(req.body || {}),
+      workspace_id: workspaceId,
+      demands: rawState(userId).demands || [],
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/demand-clusters/:id/question-hits", requireAuth, (req, res, next) => {
+  try {
+    res.json(recordDemandClusterQuestionHit(req.params.id, { ...(req.body || {}), workspace_id: requestWorkspaceId(req) }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.post("/api/demand-clusters/:id/merge", requireAuth, (req, res, next) => {
+  try {
+    res.json(mergeDemandCluster(req.params.id, { ...(req.body || {}), workspace_id: requestWorkspaceId(req) }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/demand-clusters/:id/split", requireAuth, (req, res, next) => {
+  try {
+    res.json(splitDemandCluster(req.params.id, { ...(req.body || {}), workspace_id: requestWorkspaceId(req) }));
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get("/api/stats/today", requireAuth, (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
@@ -1373,6 +2011,23 @@ app.get("/api/feed-hub/public/groups/:slug.xml", (req, res) => {
 
 app.get("/api/research", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).research || []));
 app.post("/api/research", requireAuth, (req, res) => res.status(201).json(createResearch(currentUserId(req), req.body || {})));
+app.get("/api/research/:id", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req, "query");
+  const research = (rawState(currentUserId(req)).research || []).find((item) => item.id === req.params.id);
+  if (!research) return res.status(404).json({ error: "research_not_found" });
+  if (req.query.include !== "evidence") return res.json(research);
+  const evidences = listEvidencesForEntity({
+    workspace_id: workspaceId,
+    entity_type: "research",
+    entity_id: research.id,
+  });
+  res.json({
+    ...research,
+    evidence_status: evidences.length ? "current" : research.evidence_status || "legacy",
+    evidence_count: evidences.length,
+    evidences,
+  });
+});
 app.patch("/api/research/:id", requireAuth, (req, res) => {
   const item = updateResearch(currentUserId(req), req.params.id, req.body || {});
   if (!item) return res.status(404).json({ error: "research_not_found" });
@@ -1389,7 +2044,18 @@ app.post("/api/research/:id/analyze", requireAuth, asyncHandler(async (req, res)
 }));
 
 app.get("/api/settings", requireAuth, (req, res) => res.json(bootstrap(currentUserId(req)).settings));
-app.patch("/api/settings", requireAuth, (req, res) => res.json(updateSettings(currentUserId(req), req.body || {})));
+app.patch("/api/settings", requireAuth, (req, res) => {
+  const userId = currentUserId(req);
+  const workspaceId = req.body?.workspace_id ? requestWorkspaceId(req) : "";
+  const body = req.body || {};
+  if (workspaceId && Array.isArray(body.knowledge_policies)) {
+    body.knowledge_policies.forEach((policy) => upsertKnowledgePolicy({ ...policy, workspace_id: workspaceId }));
+  }
+  if (workspaceId && Array.isArray(body.model_routes)) {
+    body.model_routes.forEach((route) => upsertModelRoute({ ...route, workspace_id: workspaceId }));
+  }
+  res.json(updateSettings(userId, body));
+});
 app.get("/api/fields", requireAuth, (req, res) => res.json(listFields(currentUserId(req), String(req.query.entity || ""))));
 app.get("/api/fields/catalog", requireAuth, (req, res) => res.json(listFields(currentUserId(req))));
 app.post("/api/fields/match", requireAuth, (req, res) => {
@@ -1431,6 +2097,10 @@ app.delete("/api/fields/:key/options/:value", requireAuth, (req, res) => {
 });
 app.post("/api/settings/test-llm", requireAuth, asyncHandler(async (req, res) => res.json(await testLLM(currentUserId(req)))));
 app.post("/api/settings/test-vision-llm", requireAuth, asyncHandler(async (req, res) => res.json(await testVisionLLM(currentUserId(req)))));
+app.post("/api/settings/test-llm-route", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  res.json(testModelRoute({ ...(req.body || {}), workspace_id: workspaceId, user_id: currentUserId(req) }));
+});
 app.post("/api/settings/test-feishu", requireAuth, asyncHandler(async (req, res) => res.json(await testFeishuForUser(currentUserId(req)))));
 app.post("/api/sync/feishu", requireAuth, asyncHandler(async (req, res) => res.json(await syncFeishuForUser(currentUserId(req), req.body || {}))));
 app.post("/api/feedback", requireAuth, asyncHandler(async (req, res) => {

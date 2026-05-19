@@ -25,10 +25,11 @@ const DEFAULT_PRD_SECTIONS = [
   { key: "structure", title: "结构要求", aliases: ["结构设计", "机构要求"], required: false },
   { key: "materials_process", title: "材料工艺", aliases: ["材料", "工艺", "表面处理"], required: false },
   { key: "id_cmf", title: "ID / CMF", aliases: ["工业设计", "外观", "CMF"], required: false },
-  { key: "packaging", title: "包装需求", aliases: ["包装", "包装设计"], required: false },
+  { key: "electronics_firmware_certification", title: "电子 / 固件 / 认证", aliases: ["电子", "固件", "认证", "电路", "蓝牙", "Wi-Fi", "CE", "FCC"], required: false },
   { key: "testing", title: "测试要求", aliases: ["测试", "验收标准"], required: false },
+  { key: "packaging", title: "包装需求", aliases: ["包装", "包装设计"], required: false },
   { key: "supplier_delivery", title: "供应商交付", aliases: ["交付要求", "打样要求"], required: false },
-  { key: "internal_risks", title: "内部风险", aliases: ["风险", "内部判断"], required: false },
+  { key: "quality_acceptance", title: "质量验收", aliases: ["质量", "验收", "AQL"], required: false },
   { key: "open_questions", title: "待确认问题", aliases: ["问题", "待确认"], required: true },
 ];
 
@@ -507,6 +508,25 @@ export function listDocuments(workspaceId, filters = {}) {
   return db.prepare(`SELECT * FROM documents WHERE ${clauses.join(" AND ")} ORDER BY updated_at DESC, created_at DESC`)
     .all(...params)
     .map(mapDocument);
+}
+
+export function listDocumentsByMetadata(workspaceId, { sampleKind = "" } = {}) {
+  const rows = listDocuments(workspaceId);
+  if (!sampleKind) return rows;
+  return rows.filter((document) => document.metadata?.sample_kind === sampleKind);
+}
+
+export function getDocumentSectionDocuments(workspaceId, documentId) {
+  const document = getDocument(documentId);
+  if (!document || document.workspace_id !== workspaceId) return null;
+  return listDocumentSections(documentId).map((section) => ({
+    ...section,
+    id: `${document.id}:${section.section_key}`,
+    document_id: document.id,
+    heading: section.title || section.section_key,
+    body_markdown: section.content || "",
+    workspace_id: workspaceId,
+  }));
 }
 
 export function updateDocument(id, patch = {}) {
@@ -1105,7 +1125,14 @@ export function upsertKnowledgeSource(input = {}) {
       "document",
       "project",
       "product",
+      "competitor",
       "demand",
+      "demand_cluster",
+      "evidence",
+      "mrd_section",
+      "prd_section",
+      "knowledge_answer",
+      "external_doc",
       "news",
       "research",
       "knowledge_entity",

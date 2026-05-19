@@ -18,6 +18,7 @@ import {
   ensureWorkspace,
   addWorkspaceMember,
 } from "./db.js";
+import { ensureWorkspaceSampleDocuments } from "./sample-document-seed.js";
 import { normalizeFields, normalizeSettingsFields } from "./field-config.js";
 import { normalizeDemandInputTags, normalizeProductInputTags } from "./field-matcher.js";
 import { isCrossSourceNewsStoryKey, isSpecificNewsStoryKey, withNewsDedupeKeys } from "./news-dedupe.js";
@@ -25,7 +26,8 @@ import { buildEmptyState } from "./seed.js";
 import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
 const STREAM_NEWS_MAX_AGE_DAYS = Math.max(1, Number(process.env.STREAM_NEWS_MAX_AGE_DAYS || 10));
-const ENABLE_PUBLIC_SAMPLE_DATA = process.env.LOOM_ENABLE_PUBLIC_SAMPLE_DATA === "true";
+// 默认开启 visitor 示例数据；要在生产环境关掉，设 LOOM_ENABLE_PUBLIC_SAMPLE_DATA=false
+const ENABLE_PUBLIC_SAMPLE_DATA = process.env.LOOM_ENABLE_PUBLIC_SAMPLE_DATA !== "false";
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -360,6 +362,11 @@ function cleanArray(value, limit = 20) {
   return value.map((item) => cleanText(item)).filter(Boolean).slice(0, limit);
 }
 
+function cleanEvidenceStatus(value, fallback = "legacy") {
+  const status = cleanText(value, fallback);
+  return ["legacy", "current", "needs_review"].includes(status) ? status : fallback;
+}
+
 function splitTokenText(value) {
   return cleanText(value)
     .split(/\s*(?:\/|,|，|、|\|)\s*/g)
@@ -411,6 +418,7 @@ function demandTagValuesForState(state, input = {}) {
 function syncLegacyProductFields(item) {
   const values = cleanTagValues(item.tag_values);
   item.tag_values = values;
+  item.evidence_status = cleanEvidenceStatus(item.evidence_status);
   item.brand = (values.brand || splitTokenText(item.brand)).join(" / ");
   item.host = (values.host || splitTokenText(item.host)).join(" / ");
   item.category = (values.category || splitTokenText(item.category)).join(" / ") || item.category || "未分类";
@@ -421,6 +429,7 @@ function syncLegacyProductFields(item) {
 function syncLegacyDemandFields(item) {
   const values = cleanTagValues(item.tag_values);
   item.tag_values = values;
+  item.evidence_status = cleanEvidenceStatus(item.evidence_status);
   item.innovation = (values.innovation || [item.innovation].filter(Boolean))[0] || "待分类";
   item.scenarios = values.scenarios || cleanArray(item.scenarios);
   item.painpoints = values.painpoints || cleanArray(item.painpoints);
@@ -517,7 +526,7 @@ function isWechatNewsRecord(record = {}, classification = undefined) {
 
 function isOfficialSourceGroup(value) {
   const group = String(value || "").toLowerCase();
-  return group === "official-default" || group === "sample-live" || group === "wechat-exporter";
+  return group === "official-default" || group === "sample-live" || group === "wechat-exporter" || group === "official-google-news";
 }
 
 function isOfficialSourceLike(source = {}) {
@@ -687,6 +696,10 @@ export function bootstrap(userId) {
   const state = requireState(userId);
   if (!state) return null;
   const workspaces = listUserWorkspaces(userId);
+  const workspaceId = workspaces[0]?.workspace_id || "";
+  if (workspaceId && !isSampleWorkspace(state)) {
+    ensureWorkspaceSampleDocuments(workspaceId);
+  }
   const news = visibleNewsItems(userId);
   state.news = news.slice(0, 30);
   state.newsCounts = newsCountsFrom(news);
@@ -773,6 +786,7 @@ export function createProduct(userId, input) {
       note: cleanSummary(input.note),
       related_product_id: cleanText(input.related_product_id, ""),
       related_product_name: cleanText(input.related_product_name, ""),
+      evidence_status: cleanEvidenceStatus(input.evidence_status),
       sample: Boolean(input.sample),
       synced_at: null,
       feishu_record_id: null,
@@ -809,6 +823,7 @@ export function updateProduct(userId, id, patch) {
       ...(patch.note !== undefined ? { note: cleanSummary(patch.note, item.note || "") } : {}),
       ...(patch.related_product_id !== undefined ? { related_product_id: cleanText(patch.related_product_id, item.related_product_id || "") } : {}),
       ...(patch.related_product_name !== undefined ? { related_product_name: cleanText(patch.related_product_name, item.related_product_name || "") } : {}),
+      ...(patch.evidence_status !== undefined ? { evidence_status: cleanEvidenceStatus(patch.evidence_status, item.evidence_status || "legacy") } : {}),
       ...(patch.platforms !== undefined ? { platforms: cleanPlatformArray(patch.platforms) } : {}),
       updated_at: nowIso(),
     };
@@ -862,6 +877,7 @@ export function createDemand(userId, input) {
       tags: cleanArray(input.tags),
       tag_values: demandTagValuesForState(state, input),
       note: cleanSummary(input.note),
+      evidence_status: cleanEvidenceStatus(input.evidence_status),
       sample: Boolean(input.sample),
       synced_at: null,
       feishu_record_id: null,
@@ -901,6 +917,7 @@ export function updateDemand(userId, id, patch) {
       ...(patch.painpoints !== undefined ? { painpoints: cleanArray(patch.painpoints) } : {}),
       ...(patch.tags !== undefined ? { tags: cleanArray(patch.tags) } : {}),
       ...(patch.note !== undefined ? { note: cleanSummary(patch.note, item.note || "") } : {}),
+      ...(patch.evidence_status !== undefined ? { evidence_status: cleanEvidenceStatus(patch.evidence_status, item.evidence_status || "legacy") } : {}),
       updated_at: nowIso(),
     };
     Object.assign(item, next);
@@ -926,6 +943,25 @@ export function deleteDemand(userId, id) {
   });
 }
 
+export function markEntityEvidenceStatus(userId, entityType, entityId, status = "current") {
+  return mutateUserState(userId, (state) => {
+    const collection = entityType === "product"
+      ? state.products
+      : entityType === "demand"
+        ? state.demands
+        : entityType === "research"
+          ? state.research
+          : null;
+    const item = (collection || []).find((entry) => entry.id === entityId);
+    if (!item) return null;
+    item.evidence_status = cleanEvidenceStatus(status, "current");
+    item.updated_at = nowIso();
+    if (entityType === "product") syncLegacyProductFields(item);
+    if (entityType === "demand") syncLegacyDemandFields(item);
+    return item;
+  });
+}
+
 export function createResearch(userId, input) {
   return mutateUserState(userId, (state) => {
     state.research ||= [];
@@ -934,6 +970,7 @@ export function createResearch(userId, input) {
       title: cleanTitle(input.title, "未命名调研项目"),
       desc: cleanSummary(input.desc || input.description || ""),
       status: cleanTitle(input.status, "草稿"),
+      evidence_status: cleanEvidenceStatus(input.evidence_status),
       date: input.date || new Date().toISOString().slice(0, 10),
       products: cleanRecordList(input.products || input.matched_products || []),
       demands: cleanRecordList(input.demands || input.matched_demands || []),
@@ -956,6 +993,7 @@ export function updateResearch(userId, id, patch) {
       ...(patch.desc !== undefined ? { desc: cleanSummary(patch.desc, item.desc) } : {}),
       ...(patch.description !== undefined && patch.desc === undefined ? { desc: cleanSummary(patch.description, item.desc) } : {}),
       ...(patch.status !== undefined ? { status: cleanTitle(patch.status, item.status) } : {}),
+      ...(patch.evidence_status !== undefined ? { evidence_status: cleanEvidenceStatus(patch.evidence_status, item.evidence_status || "legacy") } : {}),
       ...(patch.products !== undefined ? { products: cleanRecordList(patch.products) } : {}),
       ...(patch.demands !== undefined ? { demands: cleanRecordList(patch.demands) } : {}),
       ...(patch.matched_products !== undefined && patch.products === undefined ? { products: cleanRecordList(patch.matched_products) } : {}),
@@ -1252,7 +1290,7 @@ export function ensureOfficialNewsCache(userId) {
 
 export function syncOfficialNewsToUser(userId) {
   if (!userId || userId === getLegacyUserId()) return { inserted: [], updated: [] };
-  pruneNewsOlderThan(userId, { sourceGroups: ["official-default", "sample-live", "wechat-exporter"], olderThanDays: STREAM_NEWS_MAX_AGE_DAYS });
+  pruneNewsOlderThan(userId, { sourceGroups: ["official-default", "sample-live", "wechat-exporter", "official-google-news"], olderThanDays: STREAM_NEWS_MAX_AGE_DAYS });
   const items = officialNewsItems().map((item) => ({
     source_id: item.source_id,
     source: item.source,
@@ -1272,7 +1310,7 @@ export function syncOfficialNewsToUser(userId) {
     classification: item.classification,
   }));
   const result = upsertNews(userId, items);
-  pruneNewsOlderThan(userId, { sourceGroups: ["official-default", "sample-live", "wechat-exporter"], olderThanDays: STREAM_NEWS_MAX_AGE_DAYS });
+  pruneNewsOlderThan(userId, { sourceGroups: ["official-default", "sample-live", "wechat-exporter", "official-google-news"], olderThanDays: STREAM_NEWS_MAX_AGE_DAYS });
   return result;
 }
 

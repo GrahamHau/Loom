@@ -22,7 +22,8 @@
     "news:seed-sources": "npm run check:node && node scripts/seed-news-sources.js",
     "seal:apply": "npm run check:node && node scripts/apply-seal-config.js",
     "news:reclassify": "npm run check:node && node scripts/reclassify-news.js",
-    "listen:loom": "npm run check:node && node scripts/loom-listener.js"
+    "listen:loom": "npm run check:node && node scripts/loom-listener.js",
+    "stream:sync-feedhub": "npm run check:node && node scripts/sync-feedhub-official-stream.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",

@@ -36,6 +36,7 @@ export const DEFAULT_FIELDS = [
     multi: true,
     official: true,
     entities: ["competitor"],
+    entity_level: "competitor",
     options: tagsFor("competitor_brands"),
   },
   {
@@ -46,6 +47,7 @@ export const DEFAULT_FIELDS = [
     multi: false,
     official: true,
     entities: ["competitor"],
+    entity_level: "competitor",
     options: HOST_OPTIONS,
   },
   {
@@ -56,6 +58,7 @@ export const DEFAULT_FIELDS = [
     multi: true,
     official: true,
     entities: ["competitor"],
+    entity_level: "competitor",
     options: tagsFor("product_categories"),
   },
   {
@@ -66,6 +69,7 @@ export const DEFAULT_FIELDS = [
     multi: true,
     official: true,
     entities: ["competitor", "inspiration"],
+    entity_level: "competitor",
     options: tagsFor("scenarios"),
   },
   {
@@ -76,6 +80,7 @@ export const DEFAULT_FIELDS = [
     multi: true,
     official: true,
     entities: ["competitor", "inspiration"],
+    entity_level: "competitor",
     options: tagsFor("painpoints"),
   },
   {
@@ -86,6 +91,7 @@ export const DEFAULT_FIELDS = [
     multi: false,
     official: true,
     entities: ["inspiration"],
+    entity_level: "inspiration",
     options: tagsFor("innovation_types"),
   },
   {
@@ -96,7 +102,41 @@ export const DEFAULT_FIELDS = [
     multi: true,
     official: true,
     entities: ["competitor", "inspiration"],
+    entity_level: "competitor",
     options: tagsFor("custom_tags"),
+  },
+  {
+    key: "price",
+    legacyKey: "price",
+    name: "价格",
+    tone: "default",
+    multi: false,
+    official: true,
+    entities: ["product"],
+    entity_level: "product",
+    options: [],
+  },
+  {
+    key: "monthly_sales",
+    legacyKey: "monthly_sales",
+    name: "月销",
+    tone: "accent",
+    multi: false,
+    official: true,
+    entities: ["product"],
+    entity_level: "product",
+    options: [],
+  },
+  {
+    key: "rating",
+    legacyKey: "rating",
+    name: "评分",
+    tone: "success",
+    multi: false,
+    official: true,
+    entities: ["product"],
+    entity_level: "product",
+    options: [],
   },
 ];
 
@@ -123,7 +163,7 @@ function mergedOfficialOptions(currentOptions, fallbackOptions) {
 
 function cleanEntities(value, fallback = ["competitor"]) {
   const entities = Array.isArray(value)
-    ? value.filter((item) => item === "competitor" || item === "inspiration")
+    ? value.filter((item) => ["competitor", "inspiration", "product", "sku", "category", "demand"].includes(item))
     : [];
   return entities.length ? Array.from(new Set(entities)) : fallback;
 }
@@ -152,6 +192,7 @@ export function fieldsToTagGroups(fields = []) {
     tags: cleanOptions(field.options),
     multi: field.multi !== false,
     entities: cleanEntities(field.entities, ["competitor"]),
+    entity_level: field.entity_level || "competitor",
     field_key: field.key,
     official: Boolean(field.official),
   }));
@@ -172,6 +213,7 @@ export function fieldsFromTagGroups(tagGroups = []) {
         multi: group.multi !== false,
         official: false,
         entities: cleanEntities(group.entities, ["competitor", "inspiration"]),
+        entity_level: cleanText(group.entity_level, "competitor"),
         options: cleanOptions(group.tags),
       }))
     : [];
@@ -198,6 +240,7 @@ export function normalizeFields(fields = [], tagGroups = [], options = {}) {
       multi: item.multi !== false,
       official: fallback ? true : Boolean(item.official),
       entities: cleanEntities(item.entities, fallback?.entities || ["competitor"]),
+      entity_level: cleanText(item.entity_level, fallback?.entity_level || "competitor"),
       options: fallback
         ? mergedOfficialOptions(sourceOptions, fallback?.options)
         : cleanOptions(sourceOptions),

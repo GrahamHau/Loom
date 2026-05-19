@@ -1,4 +1,4 @@
-/* global LoginScreen, NewsScreen, ProductsScreen, DemandsScreen, ResearchScreen, KnowledgeScreen, SettingsScreen, Icon, Btn, Tag, useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle */
+/* global LoginScreen, NewsScreen, ProductsScreen, DemandsScreen, ResearchScreen, KnowledgeScreen, SettingsScreen, DocumentStudio, StandardsScreen, Icon, Btn, Tag, useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle */
 const React = globalThis.React;
 const ReactDOM = globalThis.ReactDOM;
 const LoginScreen = globalThis.LoginScreen;
@@ -8,6 +8,8 @@ const DemandsScreen = globalThis.DemandsScreen;
 const ResearchScreen = globalThis.ResearchScreen;
 const KnowledgeScreen = globalThis.KnowledgeScreen;
 const SettingsScreen = globalThis.SettingsScreen;
+const DocumentStudio = globalThis.DocumentStudio;
+const StandardsScreen = globalThis.StandardsScreen;
 const Icon = globalThis.Icon;
 const Btn = globalThis.Btn;
 const Tag = globalThis.Tag;
@@ -30,10 +32,12 @@ const NAV = [
   { group: "文档", items: [
     { key: "mrd", label: "市场分析", icon: "bar-chart" },
     { key: "prd", label: "产品定义", icon: "clipboard" },
-    { key: "feishu_space", label: "飞书空间", icon: "folder-open" },
+    { key: "feishu_space", label: "飞书项目", icon: "folder-open" },
   ] },
   { group: "知识", items: [
     { key: "library", label: "资料库", icon: "file-text" },
+    { key: "standards", label: "标准库", icon: "shield" },
+    { key: "knowledge", label: "知识工作台", icon: "network" },
     { key: "ask", label: "智能问答", icon: "bot" },
   ] },
 ];
@@ -44,12 +48,14 @@ const TITLES = {
   demands: { label: "需求雷达", subLabel: "用户痛点与机会" },
   library: { label: "资料库", subLabel: "知识中台" },
   "library-import": { label: "资料库", subLabel: "导入资料" },
+  knowledge: { label: "知识工作台", subLabel: "导入、索引、图谱、问答与文档生成" },
+  standards: { label: "标准库", subLabel: "PRD / MRD / 字段标准" },
   ask: { label: "智能问答", subLabel: "基于资料库的 AI 问答" },
   mrd: { label: "市场分析", subLabel: "MRD · 市场需求文档" },
   prd: { label: "产品定义", subLabel: "PRD · 产品需求文档" },
   research: { label: "调研工坊", subLabel: "结构化分析报告" },
   settings: { label: "设置", subLabel: "系统设置" },
-  feishu_space: { label: "飞书空间", subLabel: "飞书文档同步" },
+  feishu_space: { label: "飞书项目", subLabel: "项目自动同步" },
 };
 
 const SEARCH_ICON = {
@@ -226,6 +232,7 @@ function normalizeData(input = {}) {
     rssSources: Array.isArray(input.rssSources) ? input.rssSources : [],
     officialRssSources: Array.isArray(input.officialRssSources) ? input.officialRssSources : [],
     settings: input.settings || {},
+    workspace: input.workspace || null,
     onboarding: input.onboarding || {},
   };
 }
@@ -250,6 +257,24 @@ const DOCUMENT_TYPES = [
   { value: "sales_doc", label: "销售资料" },
   { value: "other", label: "其他" },
 ];
+const DOCUMENT_VIEW_TEMPLATES = {
+  mrd: {
+    icon: "bar-chart",
+    title: "MRD Studio",
+    desc: "结构化市场分析文档，每个判断都可追溯到证据",
+    sectionCount: 10,
+    newMode: "structured-mrd",
+    newLabel: "新建 MRD",
+  },
+  prd: {
+    icon: "clipboard",
+    title: "PRD Builder",
+    desc: "硬件产品定义文档，从 MRD 和需求直接生成",
+    sectionCount: 11,
+    newMode: "structured-prd",
+    newLabel: "新建 PRD",
+  },
+};
 const LIBRARY_TABS = [
   {
     key: "all",
@@ -352,26 +377,31 @@ function DocStudioPreview({ type, sections, icon, title, desc, tags }) {
 }
 
 function DocumentModal({ mode, defaultDocType = "prd", onClose, onDone }) {
-  const isImport = mode === "paste" || mode === "feishu";
+  const isImport = mode === "paste" || mode === "feishu" || mode === "csv";
+  const isStructured = mode === "structured-mrd" || mode === "structured-prd";
   const [docType, setDocType] = useState(defaultDocType);
   const [title, setTitle] = useState("");
   const [sourceUri, setSourceUri] = useState("");
   const [text, setText] = useState("");
+  const [csvName, setCsvName] = useState("外部数据集");
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
   const canSubmit = status !== "submitting" && (
     mode === "chrome"
       ? false
-      : mode === "create"
-      ? title.trim().length > 0
-      : mode === "feishu"
-        ? sourceUri.trim().length > 0
-        : text.trim().length > 0
+      : mode === "create" || isStructured
+        ? title.trim().length > 0
+        : mode === "feishu"
+          ? sourceUri.trim().length > 0
+          : text.trim().length > 0
   );
   const modeMeta = {
     create: { icon: "plus", title: "新建资料", desc: "先建立一个草稿文档，后续再补章节、权限和索引。" },
+    "structured-mrd": { icon: "bar-chart", title: "新建 MRD", desc: "创建一份可编辑的市场分析文档。" },
+    "structured-prd": { icon: "clipboard", title: "新建 PRD", desc: "创建一份可编辑的产品定义文档。" },
     paste: { icon: "clipboard", title: "粘贴文本导入", desc: "适合从飞书、PRD、MRD 或报告中复制文本后导入。" },
-    feishu: { icon: "link", title: "飞书文档导入", desc: "输入飞书文档链接，LOOM 会尝试读取并标准化。" },
+    feishu: { icon: "link", title: "飞书文档导入", desc: "粘贴飞书文档链接，LOOM 读取并标准化结构。" },
+    csv: { icon: "database", title: "CSV / 表格导入", desc: "导入月销、价格、评分等外部数据集到产品级字段。" },
     chrome: { icon: "chrome", title: "Chrome 插件采集", desc: "插件采集需要在浏览器扩展侧栏里触发，Web 端会接收保存后的资料。" },
   }[mode] || {};
 
@@ -382,22 +412,32 @@ function DocumentModal({ mode, defaultDocType = "prd", onClose, onDone }) {
     setMessage("");
     try {
       const payload = { title: title.trim(), doc_type: docType };
-      const result = mode === "create"
-        ? await api("/api/documents", {
+      const result = isStructured
+        ? await api(mode === "structured-mrd" ? "/api/mrd-documents" : "/api/prd-documents", {
           method: "POST",
           body: JSON.stringify(payload),
         })
-        : await api(mode === "feishu" ? "/api/document-imports/feishu" : "/api/document-imports/paste", {
-          method: "POST",
-          body: JSON.stringify({
-            ...payload,
-            source_uri: sourceUri.trim(),
-            url: sourceUri.trim(),
-            text,
-          }),
-        });
+        : mode === "create"
+          ? await api("/api/documents", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          })
+          : mode === "csv"
+            ? await api("/api/document-imports/csv", {
+              method: "POST",
+              body: JSON.stringify({ name: csvName.trim() || "外部数据集", csv_text: text }),
+            })
+            : await api(mode === "feishu" ? "/api/document-imports/feishu" : "/api/document-imports/paste", {
+              method: "POST",
+              body: JSON.stringify({
+                ...payload,
+                source_uri: sourceUri.trim(),
+                url: sourceUri.trim(),
+                text,
+              }),
+            });
       setStatus("sent");
-      setMessage(mode === "create" ? "资料已创建。" : "资料已导入并标准化。");
+      setMessage(mode === "create" ? "资料已创建。" : mode === "csv" ? "数据集已导入。" : "资料已导入并标准化。");
       onDone?.(result);
       setTimeout(onClose, 450);
     } catch (err) {
@@ -430,15 +470,17 @@ function DocumentModal({ mode, defaultDocType = "prd", onClose, onDone }) {
                   className="input lg"
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
-                  placeholder={isImport ? "可选，不填会自动取首个标题" : "例如：桌面支架 PRD"}
+                  placeholder={isStructured ? (mode === "structured-mrd" ? "例如：Pocket 3 市场分析" : "例如：Pocket 3 产品定义") : isImport ? "可选，不填会自动取首个标题" : "例如：桌面支架 PRD"}
                 />
               </label>
-              <label>
-                <span className="field-label">资料类型</span>
-                <select className="input lg" value={docType} onChange={(event) => setDocType(event.target.value)}>
-                  {DOCUMENT_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                </select>
-              </label>
+              {!isStructured && (
+                <label>
+                  <span className="field-label">资料类型</span>
+                  <select className="input lg" value={docType} onChange={(event) => setDocType(event.target.value)}>
+                    {DOCUMENT_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>
+                </label>
+              )}
             </>
           )}
           {mode === "feishu" && (
@@ -462,6 +504,23 @@ function DocumentModal({ mode, defaultDocType = "prd", onClose, onDone }) {
                 placeholder="粘贴 PRD / MRD / 报告文本。图片会先跳过，只保留结构和占位信息。"
               />
             </label>
+          )}
+          {mode === "csv" && (
+            <>
+              <label>
+                <span className="field-label">数据集名称</span>
+                <input className="input lg" value={csvName} onChange={(e) => setCsvName(e.target.value)} placeholder="例如：Pocket 3 月销" />
+              </label>
+              <label>
+                <span className="field-label">CSV 内容</span>
+                <textarea
+                  className="input library-doc-textarea"
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  placeholder={"category,monthly_sales,price,rating\nlighting,1200,199,4.6\ntripod,860,89,4.4"}
+                />
+              </label>
+            </>
           )}
           {message && <div className={`library-doc-message ${status === "error" ? "error" : ""}`}>{message}</div>}
         </div>
@@ -516,18 +575,21 @@ function LibraryScreen({ data, api, reloadKey = 0, onNavigate, onOpenDocumentMod
 
   return (
     <div className="viewport">
-      <div className="page page-fluid">
-        <div className="screen-header screen-header-compact">
-          <div className="screen-header-left">
-            <div className="screen-icon-box"><Icon name="file-text" size={18} /></div>
-            <div className="muted text-sm">导入飞书文档、PRD / MRD 文本，自动标准化入库</div>
+      <div className="page page-fluid page-narrow">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name="file-text" size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>资料库</h1>
+              <div className="muted text-sm">导入飞书文档、PRD / MRD 文本，自动标准化入库。</div>
+            </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="page-head-actions">
             <Btn size="sm" variant="ghost" icon="sync" onClick={loadDocuments} disabled={status === "loading"}>刷新</Btn>
             <Btn size="sm" variant="ghost" icon="upload" onClick={() => onNavigate("library-import")}>导入文档</Btn>
             <Btn size="sm" variant="primary" icon="plus" onClick={() => onOpenDocumentModal("create")}>新建资料</Btn>
           </div>
-        </div>
+        </header>
         <div className="screen-tabs" role="tablist" aria-label="资料类型">
           {LIBRARY_TABS.map((tab) => (
             <button
@@ -632,14 +694,19 @@ function LibraryScreen({ data, api, reloadKey = 0, onNavigate, onOpenDocumentMod
 function LibraryImportScreen({ onOpenDocumentModal }) {
   return (
     <div className="viewport">
-      <div className="page page-fluid">
-        <div className="screen-header screen-header-compact">
-          <div className="screen-header-left">
-            <div className="screen-icon-box"><Icon name="upload" size={18} /></div>
-            <div className="muted text-sm">把飞书文档、PRD / MRD 文本和网页证据沉淀进 Library</div>
+      <div className="page page-fluid page-narrow">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name="upload" size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>导入资料</h1>
+              <div className="muted text-sm">把飞书文档、PRD / MRD 文本和网页证据沉淀进资料库。</div>
+            </div>
           </div>
-          <Btn size="sm" variant="primary" icon="plus" onClick={() => onOpenDocumentModal("create")}>新建资料</Btn>
-        </div>
+          <div className="page-head-actions">
+            <Btn size="sm" variant="primary" icon="plus" onClick={() => onOpenDocumentModal("create")}>新建资料</Btn>
+          </div>
+        </header>
         <div className="screen-empty-hero screen-import-hero">
           <Icon name="file-text" size={32} style={{ color: "var(--accent)", marginBottom: 12 }} />
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>选择导入方式</div>
@@ -664,6 +731,161 @@ function LibraryImportScreen({ onOpenDocumentModal }) {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function FeishuProjectsScreen({ sampleWorkspace = false }) {
+  // 真实数据接入飞书 MCP 后从后端拉取；当前没接入时给 visitor 看几个 mock 项目
+  const SAMPLE_PROJECTS = sampleWorkspace ? [
+    {
+      id: "fp-1",
+      name: "Pocket 3 量产爬坡",
+      status: "active",
+      owner: "张三",
+      progress: 62,
+      updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
+      tags: ["量产", "Pocket 3"],
+      linkedPrd: "Pocket 3 产品定义示例",
+      url: "https://example.feishu.cn/project/sample-1",
+    },
+    {
+      id: "fp-2",
+      name: "下一代云台 PRD 立项",
+      status: "planning",
+      owner: "李四",
+      progress: 18,
+      updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 26).toISOString(),
+      tags: ["立项", "云台"],
+      linkedPrd: null,
+      url: "https://example.feishu.cn/project/sample-2",
+    },
+    {
+      id: "fp-3",
+      name: "Insta360 GO 系列竞品研究",
+      status: "active",
+      owner: "王五",
+      progress: 45,
+      updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 72).toISOString(),
+      tags: ["竞品", "调研"],
+      linkedPrd: null,
+      url: "https://example.feishu.cn/project/sample-3",
+    },
+  ] : [];
+
+  const [statusFilter, setStatusFilter] = useState("all");
+  const projects = SAMPLE_PROJECTS.filter((p) => statusFilter === "all" || p.status === statusFilter);
+
+  const statusMeta = {
+    planning: { label: "立项", tone: "outline" },
+    active: { label: "进行中", tone: "accent" },
+    done: { label: "已完成", tone: "success" },
+    paused: { label: "暂停", tone: "outline" },
+  };
+
+  const fmtAgo = (iso) => {
+    if (!iso) return "";
+    const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 60) return `${s} 秒前`;
+    if (s < 3600) return `${Math.round(s / 60)} 分钟前`;
+    if (s < 86400) return `${Math.round(s / 3600)} 小时前`;
+    return `${Math.round(s / 86400)} 天前`;
+  };
+
+  return (
+    <div className="viewport">
+      <div className="page page-fluid page-narrow">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name="folder-open" size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>飞书项目</h1>
+              <div className="muted text-sm">
+                自动同步飞书项目的开发任务、需求池与文档；与 PRD / MRD / 需求雷达双向关联。
+                <span style={{ marginLeft: 6 }}>
+                  接入方式见 <a href="?screen=settings" style={{ color: 'var(--accent)' }}>设置 → 飞书项目 MCP</a>。
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="page-head-actions">
+            <Tag tone="outline">{SAMPLE_PROJECTS.length} 个项目</Tag>
+            <Btn size="sm" variant="ghost" icon="sync">手动同步</Btn>
+          </div>
+        </header>
+
+        {SAMPLE_PROJECTS.length > 0 ? (
+          <div className="filter-bar">
+            <div className="filter-bar-cluster">
+              <div className="demand-filter-group">
+                <div className="demand-filter-label"><Icon name="filter" size={13} /><span>筛选</span></div>
+                <select className="demand-filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                  <option value="all">全部状态</option>
+                  <option value="planning">立项</option>
+                  <option value="active">进行中</option>
+                  <option value="done">已完成</option>
+                  <option value="paused">暂停</option>
+                </select>
+              </div>
+            </div>
+            <div className="filter-bar-meta">
+              <span className="demand-match-count">匹配 {projects.length} / {SAMPLE_PROJECTS.length}</span>
+            </div>
+          </div>
+        ) : null}
+
+        {SAMPLE_PROJECTS.length === 0 ? (
+          <div className="empty-hero">
+            <Icon name="folder-open" size={48} />
+            <h2>还没有飞书项目</h2>
+            <p className="muted">
+              在「设置 → 飞书项目 MCP」配置 token 后，会自动拉取项目列表、任务、需求池。
+              <br />接入前可继续在竞品库 / 需求雷达 / PRD 里手动录入。
+            </p>
+            <Btn variant="primary" icon="settings" onClick={() => { window.location.search = "?screen=settings"; }}>
+              去配置 MCP
+            </Btn>
+          </div>
+        ) : (
+          <section className="card-section">
+            <div className="card-section-head">
+              <h2>项目</h2>
+              <Tag tone="outline">{projects.length}</Tag>
+            </div>
+            <div className="card-grid">
+              {projects.map((p) => {
+                const status = statusMeta[p.status] || statusMeta.planning;
+                return (
+                  <div key={p.id} className="doc-card">
+                    <a className="doc-card-main" href={p.url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                      <div className="doc-card-head">
+                        <Icon name="folder-open" size={15} />
+                        <span className="doc-card-meta-top">
+                          <Tag tone={status.tone}>{status.label}</Tag>
+                        </span>
+                      </div>
+                      <h3 className="doc-card-title">{p.name}</h3>
+                      <div className="doc-card-badges">
+                        {p.tags.map((t) => <Tag key={t} tone="outline">{t}</Tag>)}
+                      </div>
+                      <div className="doc-card-meta-bottom">
+                        <div className="doc-card-progress">
+                          <div className="doc-card-progress-bar"><span style={{ width: `${p.progress}%` }} /></div>
+                          <span className="muted text-sm">{p.progress}%</span>
+                        </div>
+                      </div>
+                      <div className="doc-card-footer">
+                        <span className="muted text-sm">{p.owner} · 更新 {fmtAgo(p.updatedAt)}</span>
+                        {p.linkedPrd ? <div className="muted text-sm" style={{ marginTop: 4 }}>关联 PRD：{p.linkedPrd}</div> : null}
+                      </div>
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );
@@ -918,13 +1140,12 @@ function App() {
   const initialScreen = (() => {
     const params = new URLSearchParams(window.location.search);
     const legacyScreens = {
-      knowledge: "library",
-      "knowledge-import": "library-import",
+      "knowledge-import": "knowledge",
       "knowledge-query": "ask",
       "knowledge-draft": "mrd",
     };
     const screen = legacyScreens[params.get("screen")] || params.get("screen");
-    return ["news", "products", "demands", "research", "library", "library-import", "ask", "mrd", "prd", "feishu_space", "settings"].includes(screen) ? screen : "news";
+    return ["news", "products", "demands", "research", "library", "library-import", "knowledge", "ask", "mrd", "prd", "standards", "feishu_space", "settings"].includes(screen) ? screen : "news";
   })();
   const [active, setActive] = useState(initialScreen);
   const [me, setMe] = useState(null);
@@ -1145,26 +1366,30 @@ function App() {
     );
   }
 
-  const screenProps = { data, api, refreshData, navTarget };
+  const screenProps = { data, api, refreshData, navTarget, onNavigate: setActive, onOpenDocumentModal: setDocumentModalMode };
   const isAdmin = Boolean(me?.is_admin || data?.user?.is_admin || data?.user?.is_owner);
   const sampleWorkspace = Boolean(data.onboarding?.sampleWorkspace);
   const canExitSample = Boolean(data.onboarding?.canExitSample);
   const liveNewsReady = Boolean(data.onboarding?.liveNewsReady);
   const latestNewsAt = data.onboarding?.latestNewsAt || data.onboarding?.latestFetchedAt || "";
-  const screen = {
-    news: <NewsScreen {...screenProps} />,
-    products: <ProductsScreen {...screenProps} detailCollapsed={detailCollapsed} setDetailCollapsed={setDetailCollapsed} />,
-    demands: <DemandsScreen {...screenProps} />,
-    research: <ResearchScreen {...screenProps} />,
-    library: <LibraryScreen {...screenProps} reloadKey={libraryReloadKey} onNavigate={setActive} onOpenDocumentModal={setDocumentModalMode} />,
-    "library-import": <LibraryImportScreen onOpenDocumentModal={setDocumentModalMode} />,
-    ask: (
+    const screen = {
+      news: <NewsScreen {...screenProps} />,
+      products: <ProductsScreen {...screenProps} detailCollapsed={detailCollapsed} setDetailCollapsed={setDetailCollapsed} />,
+      demands: <DemandsScreen {...screenProps} />,
+      research: <ResearchScreen {...screenProps} />,
+      library: <LibraryScreen {...screenProps} reloadKey={libraryReloadKey} onNavigate={setActive} onOpenDocumentModal={setDocumentModalMode} />,
+      "library-import": <LibraryImportScreen onOpenDocumentModal={setDocumentModalMode} />,
+      knowledge: <KnowledgeScreen {...screenProps} onNavigate={setActive} initialAction="ask" initialDocType="prd" />,
+      ask: (
       <div className="viewport">
-        <div className="page page-fluid">
-          <div className="screen-header screen-header-compact">
+        <div className="page page-fluid page-narrow">
+          <div className="screen-header">
             <div className="screen-header-left">
-              <div className="screen-icon-box"><Icon name="bot" size={18} /></div>
-              <div className="muted text-sm">基于公司知识库的智能问答，每个回答都带来源引用</div>
+              <div className="screen-icon-box"><Icon name="bot" size={20} /></div>
+              <div>
+                <h1 className="h1" style={{ marginBottom: 2 }}>Ask</h1>
+                <div className="muted text-sm">基于公司知识库的智能问答，每个回答都带来源引用</div>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <Tag tone="outline">0 个知识片段</Tag>
@@ -1173,7 +1398,7 @@ function App() {
           <div className="ask-container">
             <div className="ask-empty">
               <div className="ask-empty-icon"><Icon name="bot" size={36} /></div>
-              <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Ask LOOM</div>
+              <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Ask Loom</div>
               <div style={{ fontSize: 13.5, color: "var(--text-3)", lineHeight: 1.7, maxWidth: 400 }}>
                 向知识库提问，获得带证据引用的答案。问答会自动识别权限边界——对内答全量，对客户只答可对外口径。
               </div>
@@ -1187,81 +1412,21 @@ function App() {
             <div className="ask-input-bar">
               <Icon name="bot" size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
               <input className="ask-input" placeholder="输入问题，按 Enter 发送…" disabled />
+              <div className="ask-audience-toggle">
+                <button className="ask-audience active">内部</button>
+                <button className="ask-audience">供应商</button>
+                <button className="ask-audience">销售</button>
+              </div>
             </div>
           </div>
         </div>
       </div>
     ),
-    mrd: (
-      <div className="viewport">
-        <div className="page page-fluid">
-          <div className="screen-header screen-header-compact">
-            <div className="screen-header-left">
-              <div className="screen-icon-box"><Icon name="bar-chart" size={18} /></div>
-              <div className="muted text-sm">结构化市场分析文档，每个判断都可追溯到证据</div>
-            </div>
-            <Btn size="sm" variant="primary" icon="plus">新建 MRD</Btn>
-          </div>
-          <DocStudioPreview
-            type="MRD"
-            sections={MRD_SECTIONS}
-            icon="bar-chart"
-            title="从知识库生成 MRD"
-            desc="先在 Library 导入资料并构建知识包，再一键生成结构化 MRD。"
-            tags={["竞品库", "需求雷达", "资讯流信号"]}
-          />
-        </div>
-      </div>
-    ),
-    prd: (
-      <div className="viewport">
-        <div className="page page-fluid">
-          <div className="screen-header screen-header-compact">
-            <div className="screen-header-left">
-              <div className="screen-icon-box"><Icon name="clipboard" size={18} /></div>
-              <div className="muted text-sm">硬件产品定义文档，从 MRD 和需求直接生成</div>
-            </div>
-            <Btn size="sm" variant="primary" icon="plus">新建 PRD</Btn>
-          </div>
-          <DocStudioPreview
-            type="PRD"
-            sections={PRD_SECTIONS}
-            icon="clipboard"
-            title="从 MRD 生成 PRD"
-            desc="选择关联的 MRD 和产品类型模板，AI 会根据知识库生成硬件 PRD 草稿。"
-            tags={["功能规格表", "参数表", "供应商版导出", "飞书文档"]}
-          />
-        </div>
-      </div>
-    ),
+    mrd: <DocumentStudio screenType="mrd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={setActive} />,
+    prd: <DocumentStudio screenType="prd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={setActive} />,
+    standards: <StandardsScreen data={data} api={api} />,
     settings: <SettingsScreen {...screenProps} />,
-    feishu_space: (
-      <div className="viewport">
-        <div className="page" style={{ maxWidth: 640 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-            <div style={{ width: 40, height: 40, borderRadius: "var(--radius)", background: "var(--accent-soft)", display: "grid", placeItems: "center" }}>
-              <Icon name="folder-open" size={20} style={{ color: "var(--accent-text)" }} />
-            </div>
-            <div>
-              <h1 className="h1" style={{ marginBottom: 2 }}>飞书联动</h1>
-              <div className="muted text-sm">将飞书空间、文档与项目接入 LOOM 工作流</div>
-            </div>
-          </div>
-          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "32px 28px", textAlign: "center" }}>
-            <Icon name="folder-open" size={28} style={{ color: "var(--accent)", marginBottom: 12 }} />
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>飞书集成即将上线</div>
-            <div style={{ fontSize: 12.5, color: "var(--text-3)", lineHeight: 1.7, maxWidth: 320, margin: "0 auto" }}>
-              接入后可同步飞书多维表格、文档和项目，与竞品库、需求雷达、调研工坊双向联动，告别手动复制粘贴。
-            </div>
-            <div style={{ marginTop: 20, display: "flex", gap: 8, justifyContent: "center" }}>
-              <span style={{ fontSize: 11.5, color: "var(--text-4)", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 10px" }}>多维表格</span>
-              <span style={{ fontSize: 11.5, color: "var(--text-4)", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 10px" }}>飞书文档</span>
-              <span style={{ fontSize: 11.5, color: "var(--text-4)", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 10px" }}>项目管理</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    ),
+    feishu_space: <FeishuProjectsScreen sampleWorkspace={sampleWorkspace} />,
   }[active];
   const notifications = [
     { id: "n1", label: "系统", text: "全局搜索已经接通，可用 ⌘K 快速打开。", tone: "outline" },
@@ -1385,10 +1550,18 @@ function App() {
         <DocumentModal
           mode={documentModalMode}
           onClose={() => setDocumentModalMode("")}
-          onDone={async () => {
+          onDone={async (result) => {
             await loadBootstrap({ background: true });
             setLibraryReloadKey((value) => value + 1);
-            setActive("library");
+            const createdDocument = result?.document || result;
+            const nextType = createdDocument?.doc_type === "mrd" ? "mrd" : createdDocument?.doc_type === "prd" ? "prd" : "library";
+            if (createdDocument?.id && (nextType === "mrd" || nextType === "prd")) {
+              const params = new URLSearchParams(window.location.search);
+              params.set("screen", nextType);
+              params.set("docId", createdDocument.id);
+              window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+            }
+            setActive(nextType);
           }}
         />
       )}

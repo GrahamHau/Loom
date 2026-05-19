@@ -106,6 +106,10 @@ function normalizeApiBase(value) {
   }
 }
 
+function isNetworkAuthError(error) {
+  return Boolean(globalThis.LoomAuthErrors?.isNetworkAuthError?.(error));
+}
+
 function loginWebUrl(path = "/app") {
   return `${LOGIN_WEB_BASE}${path}`;
 }
@@ -344,13 +348,27 @@ async function refreshConnectionState(stored = null) {
     }
   }
   try {
-    const res = await fetch(`${apiBase}/api/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    let res;
+    try {
+      res = await fetch(`${apiBase}/api/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (error) {
+      error.status = 0;
+      throw error;
+    }
     const payload = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    if (!res.ok) {
+      const error = new Error(payload.error || `HTTP ${res.status}`);
+      error.status = res.status;
+      throw error;
+    }
     setConnection(`已登录 · ${payload.user?.name || payload.user?.email || "当前账号"}`);
   } catch (error) {
+    if (isNetworkAuthError(error)) {
+      setConnection("连接失败，已保留本地登录态");
+      return;
+    }
     setConnection(`登录态已失效：${error.message}`);
   }
 }

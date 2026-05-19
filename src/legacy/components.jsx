@@ -106,3 +106,193 @@ const DemandThumb = ({ hue, label }) => (
 window.DemandThumb = DemandThumb;
 
 Object.assign(window, { Tag, Btn, Switch, Placeholder });
+
+// =========== Navigation helper ===========
+// 统一 URL 更新 + 触发 popstate + loom:navigate，调用方式：
+//   navigateTo("prd", { docId: "abc", section: "open_questions" })
+//   navigateTo("knowledge")  // 清空除 screen 之外的参数
+const navigateTo = (screen, params = {}, { keep = false } = {}) => {
+  if (typeof window === "undefined") return;
+  const search = new URLSearchParams(keep ? window.location.search : "");
+  if (screen) search.set("screen", screen);
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === undefined || value === null || value === "") search.delete(key);
+    else search.set(key, String(value));
+  }
+  const nextUrl = `${window.location.pathname}?${search.toString()}`;
+  if (nextUrl !== `${window.location.pathname}${window.location.search}`) {
+    window.history.replaceState({}, "", nextUrl);
+  }
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  window.dispatchEvent(new Event("loom:navigate"));
+};
+window.navigateTo = navigateTo;
+
+// =========== SaveIndicator: Notion-style "Saved" badge ===========
+const SaveIndicator = ({ state = "idle", updatedAt }) => {
+  const [ago, setAgo] = useState("");
+  useEffect(() => {
+    if (!updatedAt) { setAgo(""); return; }
+    const fmt = () => {
+      const seconds = Math.max(0, Math.round((Date.now() - new Date(updatedAt).getTime()) / 1000));
+      if (seconds < 5) return "刚刚";
+      if (seconds < 60) return `${seconds} 秒前`;
+      if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟前`;
+      return `${Math.round(seconds / 3600)} 小时前`;
+    };
+    setAgo(fmt());
+    const id = window.setInterval(() => setAgo(fmt()), 15000);
+    return () => window.clearInterval(id);
+  }, [updatedAt]);
+  if (state === "saving") return <span className="save-indicator saving"><span className="save-dot" />正在保存…</span>;
+  if (state === "error") return <span className="save-indicator error"><span className="save-dot" />保存失败</span>;
+  if (state === "saved" || updatedAt) return <span className="save-indicator saved"><span className="save-dot" />已保存{ago ? ` · ${ago}` : ""}</span>;
+  return <span className="save-indicator idle"><span className="save-dot" />未编辑</span>;
+};
+window.SaveIndicator = SaveIndicator;
+
+// =========== ConfirmModal: 简洁的确认弹窗 ===========
+const ConfirmModal = ({ open, title, description, confirmText = "确认", cancelText = "取消", tone = "primary", onConfirm, onClose, busy = false }) => {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal modal-sm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="modal-head"><h3>{title}</h3><Btn variant="ghost" icon="x" onClick={onClose} /></div>
+        <div className="modal-body">{description}</div>
+        <div className="modal-foot">
+          <Btn variant="ghost" onClick={onClose} disabled={busy}>{cancelText}</Btn>
+          <Btn variant={tone === "danger" ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>{busy ? "处理中…" : confirmText}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+};
+window.ConfirmModal = ConfirmModal;
+
+// =========== Drawer: 右侧滑入式抽屉 (与 Modal 区分语义) ===========
+const Drawer = ({ open, title, icon, onClose, children, footer, width = 440 }) => {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div className="drawer-backdrop" onClick={onClose}>
+      <aside className="drawer-panel" style={{ width: `min(${width}px, 92vw)` }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <header className="drawer-head">
+          {icon ? <Icon name={icon} size={15} /> : null}
+          <h3>{title}</h3>
+          <Btn variant="ghost" icon="x" onClick={onClose} />
+        </header>
+        <div className="drawer-scroll">{children}</div>
+        {footer ? <footer className="drawer-foot">{footer}</footer> : null}
+      </aside>
+    </div>
+  );
+};
+window.Drawer = Drawer;
+
+// =========== OverflowMenu: ⋯ 操作菜单 ===========
+const OverflowMenu = ({ items = [], align = "right" }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    window.addEventListener("click", onClick);
+    return () => window.removeEventListener("click", onClick);
+  }, [open]);
+  return (
+    <span className="overflow-menu" ref={ref}>
+      <button type="button" className="overflow-trigger" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} aria-label="更多操作">
+        <Icon name="more" size={14} />
+      </button>
+      {open ? (
+        <div className={`overflow-menu-popover ${align === "right" ? "right" : "left"}`}>
+          {items.filter(Boolean).map((item, idx) => (
+            <button
+              key={item.key || idx}
+              type="button"
+              className={`overflow-menu-item ${item.tone === "danger" ? "danger" : ""}`}
+              onClick={(e) => { e.stopPropagation(); setOpen(false); item.onClick?.(); }}
+              disabled={item.disabled}
+            >
+              {item.icon ? <Icon name={item.icon} size={13} /> : null}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </span>
+  );
+};
+window.OverflowMenu = OverflowMenu;
+
+// =========== SectionDot: 章节状态点 (替代 Tag) ===========
+const SectionDot = ({ status = "empty", title }) => (
+  <span className={`section-dot ${status}`} title={title} aria-label={title} />
+);
+window.SectionDot = SectionDot;
+
+// =========== CitationChip: 可点击引用 ===========
+const CitationChip = ({ label, onClick, tone = "outline" }) => (
+  <button type="button" className={`citation-chip ${tone}`} onClick={onClick}>
+    <Icon name="link" size={11} />
+    <span>{label}</span>
+  </button>
+);
+window.CitationChip = CitationChip;
+
+// =========== Breadcrumb: 返回 + 当前层级 ===========
+const Breadcrumb = ({ trail = [], onBack, backLabel = "返回" }) => (
+  <nav className="breadcrumb" aria-label="导航位置">
+    {onBack ? (
+      <button type="button" className="breadcrumb-back" onClick={onBack}>
+        <Icon name="arrow-left" size={14} />
+        <span>{backLabel}</span>
+      </button>
+    ) : null}
+    {trail.length ? (
+      <ol className="breadcrumb-trail">
+        {trail.map((item, idx) => (
+          <li key={idx}>
+            {item.onClick && idx < trail.length - 1 ? (
+              <button type="button" className="breadcrumb-link" onClick={item.onClick}>{item.label}</button>
+            ) : (
+              <span className={idx === trail.length - 1 ? "breadcrumb-current" : "breadcrumb-label"}>{item.label}</span>
+            )}
+            {idx < trail.length - 1 ? <Icon name="chevron-right" size={11} /> : null}
+          </li>
+        ))}
+      </ol>
+    ) : null}
+  </nav>
+);
+window.Breadcrumb = Breadcrumb;
+
+// =========== DocCard: 文档卡片（索引页用） ===========
+// 行业实践：卡片明确触发区是整张卡，overflow menu 单独占位，避免误触
+const DocCard = ({ title, icon, badges = [], metaTop, metaBottom, footer, onClick, overflowItems, isActive = false, isSample = false }) => (
+  <div className={`doc-card ${isActive ? "active" : ""} ${isSample ? "is-sample" : ""}`}>
+    <button type="button" className="doc-card-main" onClick={onClick}>
+      <div className="doc-card-head">
+        {icon ? <Icon name={icon} size={15} /> : null}
+        {metaTop ? <span className="doc-card-meta-top">{metaTop}</span> : null}
+      </div>
+      <h3 className="doc-card-title">{title}</h3>
+      {badges?.length ? (
+        <div className="doc-card-badges">{badges.map((b, i) => <Tag key={i} tone={b.tone || "outline"}>{b.label}</Tag>)}</div>
+      ) : null}
+      {metaBottom ? <div className="doc-card-meta-bottom">{metaBottom}</div> : null}
+      {footer ? <div className="doc-card-footer">{footer}</div> : null}
+    </button>
+    {overflowItems?.length ? (
+      <div className="doc-card-actions">
+        <OverflowMenu items={overflowItems} />
+      </div>
+    ) : null}
+  </div>
+);
+window.DocCard = DocCard;

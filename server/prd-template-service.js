@@ -12,7 +12,6 @@ export const PRD_MODULES = [
   { key: "packaging", title: "包装需求", required: false },
   { key: "supplier_delivery", title: "供应商交付", required: false },
   { key: "quality_acceptance", title: "质量验收", required: false },
-  { key: "internal_risks", title: "内部风险", required: false },
   { key: "open_questions", title: "待确认问题", required: true },
 ];
 
@@ -33,7 +32,7 @@ export function resolvePrdModules(input = {}) {
     ...input,
     product_type_template: productTypeTemplate,
   }));
-  const keys = enabled.length ? enabled : ["sku_spu", "product_definition", "functional_attributes", "structure", "materials_process", "id_cmf", "packaging", "testing", "supplier_delivery", "open_questions"];
+  const keys = enabled.length ? enabled : ["product_definition", "functional_attributes", "structure", "materials_process", "id_cmf", "electronics_firmware_certification", "testing", "packaging", "supplier_delivery", "quality_acceptance", "open_questions"];
 
   return keys.map((key) => MODULE_BY_KEY.get(key) || { key, title: key.replace(/_/g, " "), required: false });
 }

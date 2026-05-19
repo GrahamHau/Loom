@@ -33,11 +33,7 @@
         "*://*.kickstarter.com/projects/*"
       ],
       "js": [
-        "content/detector.js",
-        "content/amazon.js",
-        "content/taobao.js",
-        "content/xiaohongshu.js",
-        "content/kickstarter.js"
+        "content/detector.js"
       ],
       "run_at": "document_idle"
     }

@@ -231,6 +231,10 @@ function isVisitorUser(user) {
   return Boolean(user?.is_visitor || id === "visitor" || name === "visitor");
 }
 
+function isNetworkAuthError(error) {
+  return Boolean(globalThis.LoomAuthErrors?.isNetworkAuthError?.(error));
+}
+
 function isEditingForm() {
   return Boolean(document.activeElement?.matches?.("[data-tag-query], .ghost-input, .metric-input, .platform-card-link, textarea, input"));
 }
@@ -462,21 +466,32 @@ async function readPageData(tab) {
   }
   try {
     if (platform) {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ["content/detector.js", EXTRACTOR_FILES[platform]],
-      });
+      await ensureContentScriptsInjected(tab.id, platform);
     }
     return await readInjectedPageData(tab, platform);
   } catch (error) {
-    if (!String(error.message || "").includes("Receiving end does not exist")) throw error;
+    if (!isMissingContentScriptError(error)) throw error;
     if (!platform) throw new Error("当前页面不在插件支持范围内");
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["content/detector.js", EXTRACTOR_FILES[platform]],
-    });
+    await ensureContentScriptsInjected(tab.id, platform, { force: true });
     return readInjectedPageData(tab, platform);
   }
+}
+
+const injectedPlatformTabs = new Map();
+
+function isMissingContentScriptError(error) {
+  const text = String(error?.message || error || "");
+  return text.includes("Receiving end does not exist") || text.includes("extractor_missing");
+}
+
+async function ensureContentScriptsInjected(tabId, platform, { force = false } = {}) {
+  const cacheKey = `${tabId}:${platform}`;
+  if (!force && injectedPlatformTabs.get(cacheKey)) return;
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content/detector.js", EXTRACTOR_FILES[platform]],
+  });
+  injectedPlatformTabs.set(cacheKey, Date.now());
 }
 
 function wait(ms) {
@@ -970,14 +985,20 @@ async function syncIfUrlChanged(options = {}) {
 
 async function api(path, options = {}) {
   const method = options.method || "GET";
-  const res = await fetch(`${state.apiBase}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${state.token}`,
-      ...(options.headers || {}),
-    },
-  });
+  let res;
+  try {
+    res = await fetch(`${state.apiBase}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${state.token}`,
+        ...(options.headers || {}),
+      },
+    });
+  } catch (error) {
+    error.status = 0;
+    throw error;
+  }
   const data = await res.json().catch(() => ({}));
   if (path !== "/api/me") {
     debugEvent("api:response", { method, path, status: res.status, ok: res.ok });
@@ -985,6 +1006,7 @@ async function api(path, options = {}) {
   if (!res.ok) {
     const error = new Error(data.message || data.error || `请求失败 ${res.status}`);
     error.code = data.error || "";
+    error.status = res.status;
     throw error;
   }
   return data;
@@ -1170,6 +1192,11 @@ async function verifyStoredToken(options = {}) {
     }
     return true;
   } catch (error) {
+    if (isNetworkAuthError(error)) {
+      debugEvent("auth:verify-network-error", { error: error.message || "network_unavailable" });
+      if (!options.silent) renderLoginWait("连接 LOOM 失败，已保留本地登录态；网络恢复后会自动重试。");
+      return false;
+    }
     await clearAuthState();
     renderLoginWait(options.loggedOutMessage || "Web 端登录已退出，请重新登录 LOOM");
     return false;
@@ -1194,7 +1221,7 @@ async function syncAuthFromWebSession(options = {}) {
       const cookieValue = await getSessionCookieValue();
       state.sessionCookie = cookieValue;
 
-      if (!cookieValue && !options.force) {
+      if (!cookieValue) {
         if (await trySyncAuthFromLoomTab()) return true;
         debugEvent("auth:no-session-cookie", { hasToken: Boolean(state.token), hasUser: Boolean(state.user) });
         if (state.token) {
@@ -1215,18 +1242,33 @@ async function syncAuthFromWebSession(options = {}) {
         });
       }
 
-      const res = await fetch(`${state.apiBase}/api/auth/extension/session-token`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_cookie: cookieValue }),
-      });
+      let res;
+      try {
+        res = await fetch(`${state.apiBase}/api/auth/extension/session-token`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_cookie: cookieValue }),
+        });
+      } catch (error) {
+        error.status = 0;
+        throw error;
+      }
       const data = await res.json().catch(() => ({}));
       debugEvent("auth:session-token-response", { status: res.status, ok: res.ok });
-      if (!res.ok) throw new Error(data.message || data.error || `请求失败 ${res.status}`);
+      if (!res.ok) {
+        const error = new Error(data.message || data.error || `请求失败 ${res.status}`);
+        error.status = res.status;
+        throw error;
+      }
       return applyExtensionSession(data, cookieValue);
     } catch (error) {
       if (await trySyncAuthFromLoomTab()) return true;
+      if (isNetworkAuthError(error)) {
+        debugEvent("auth:network-error", { error: error.message || "network_unavailable" });
+        if (!options.silent) renderLoginWait("连接 LOOM 失败，已保留本地登录态；网络恢复后会自动重试。");
+        return false;
+      }
       if (state.token || state.user) await clearAuthState();
       debugEvent("auth:error", { error: error.message || "登录同步失败" });
       if (!options.silent) renderLoginWait(error.message || "登录同步失败，请重新打开 Web 端");

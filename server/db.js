@@ -763,7 +763,9 @@ export function ensureSampleUserState(user, { force = false } = {}) {
   }
   if (current && force) {
     for (const key of ["products", "demands", "research"]) {
-      const preserved = (current[key] || []).map((item) => ({ ...item, sample: true }));
+      // 保留用户已有数据，**不要** 强行打上 sample 标签；
+      // sample 字段只由 sample seed 本身赋值（true），用户手动创建的保持 false。
+      const preserved = current[key] || [];
       const preservedIds = new Set(preserved.map((item) => item.id));
       next[key] = [
         ...preserved,

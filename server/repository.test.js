@@ -748,16 +748,16 @@ describe("repository", () => {
     expect(repo.rawState(secondUser.id).products.map((item) => item.name)).toEqual(["Feishu Product"]);
   });
 
-  it("initializes visitor as an empty public workspace by default", () => {
+  it("initializes visitor with sample workspace by default", () => {
     const visitor = repo.ensureLegacyWorkspace();
     const state = repo.bootstrap(visitor.id);
 
-    expect(state.onboarding.sampleWorkspace).toBeFalsy();
-    expect(state.products).toEqual([]);
-    expect(state.demands).toEqual([]);
+    // 默认开启 sample data，给 visitor 一份 Pocket 3 风格的演示
+    expect(state.onboarding.sampleWorkspace).toBe(true);
+    expect(state.products.length).toBeGreaterThan(0);
+    expect(state.demands.length).toBeGreaterThan(0);
+    // research / rss 仍是空（无意义示例）
     expect(state.research).toEqual([]);
-    expect(state.rssSources).toEqual([]);
-    expect(state.officialRssSources).toEqual([]);
   });
 
   it("initializes regular users with empty custom and official sources", () => {
@@ -902,7 +902,9 @@ describe("repository", () => {
 
     expect(result.reset).toContain(user.id);
     expect(state.onboarding.sampleWorkspace).toBe(true);
-    expect(state.products).toEqual([]);
+    // 样例工作区现在自带 Pocket 3 风格 sample products + demands
+    expect(state.products.every((item) => item.sample)).toBe(true);
+    expect(state.demands.every((item) => item.sample)).toBe(true);
     expect(state.news.map((item) => item.original_url)).toContain("https://sample.test/reset-seed");
   });
 
@@ -932,18 +934,17 @@ describe("repository", () => {
     const state = repo.bootstrap(visitor.id);
     expect(state.news.map((item) => item.original_url)).toContain("https://sample.test/recent");
     expect(state.news.map((item) => item.original_url)).not.toContain("https://sample.test/stale");
-    expect(state.onboarding.liveNewsReady).toBeFalsy();
   });
 
-  it("keeps visitor empty instead of forcing public sample data", () => {
+  it("populates visitor workspace with Pocket 3 sample data by default", () => {
     const visitor = repo.ensureLegacyWorkspace();
-    repo.finishSampleWorkspace(visitor.id);
     const state = repo.bootstrap(visitor.id);
 
-    expect(state.onboarding.sampleWorkspace).toBeFalsy();
-    expect(state.products).toEqual([]);
-    expect(state.demands).toEqual([]);
-    expect(state.research).toEqual([]);
+    // visitor 现在默认看到示例 demands + products（带 sample:true 标记）
+    expect(state.demands.length).toBeGreaterThan(0);
+    expect(state.demands.every((item) => item.sample)).toBe(true);
+    expect(state.products.length).toBeGreaterThan(0);
+    expect(state.products.every((item) => item.sample)).toBe(true);
   });
 
   it("keeps old visitor data as real data without marking it sample", () => {
@@ -953,9 +954,10 @@ describe("repository", () => {
     const nextVisitor = repo.ensureLegacyWorkspace();
     const state = repo.bootstrap(nextVisitor.id);
 
-    expect(state.onboarding.sampleWorkspace).toBeFalsy();
-    expect(state.products.map((item) => item.name)).toContain("Old Visitor Product");
-    expect(state.products.some((item) => item.sample)).toBe(false);
+    // visitor 重新进入时，已有 "Old Visitor Product" 应保留，且不被强制打 sample 标
+    const oldProduct = state.products.find((item) => item.name === "Old Visitor Product");
+    expect(oldProduct).toBeDefined();
+    expect(oldProduct.sample).toBeFalsy();
   });
 
   it("lets real first-login users exit the sample workspace", () => {

@@ -6,10 +6,27 @@ const Btn = globalThis.Btn;
 const Switch = globalThis.Switch;
 const Placeholder = globalThis.Placeholder;
 const DemandThumb = globalThis.DemandThumb;
+const SaveIndicator = globalThis.SaveIndicator;
+const ConfirmModal = globalThis.ConfirmModal;
+const Drawer = globalThis.Drawer;
+const OverflowMenu = globalThis.OverflowMenu;
+const SectionDot = globalThis.SectionDot;
+const CitationChip = globalThis.CitationChip;
+const Breadcrumb = globalThis.Breadcrumb;
+const DocCard = globalThis.DocCard;
+const navigateTo = globalThis.navigateTo;
 const PLATFORM_LABEL = globalThis.PLATFORM_LABEL;
 const PLATFORM_ICON = globalThis.PLATFORM_ICON;
 const PLATFORM_KEY = globalThis.PLATFORM_KEY;
 const { useState, useEffect, useMemo, useRef } = React;
+const fieldEntityGroups = {
+  competitor: "竞品",
+  inspiration: "灵感",
+  product: "产品",
+  sku: "SKU",
+  demand: "需求",
+  category: "品类",
+};
 
 const NEWS_SOURCE_TYPE_LABEL = {
   rss: "RSS",
@@ -1364,7 +1381,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           </div>
 
           <div className="viewport">
-            <div className="page page-fluid news-feed-page" style={{ paddingTop: 8 }}>
+            <div className="page page-fluid page-narrow news-feed-page" style={{ paddingTop: 8 }}>
               {notice && <div className="ai-block" style={{ marginBottom: 12 }}>{notice}</div>}
               {sampleWorkspace && tab !== "starred" && (
                 <div className="live-sample-note">
@@ -1839,28 +1856,46 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   };
 
   return (
-    <div className={`products-layout ${selected && !detailCollapsed ? "" : "no-detail"}`}>
-      <div className="products-main">
-        <div className={`products-toolbar ${selected && !detailCollapsed ? "with-detail" : ""}`}>
-          <div className="products-toolbar-search">
-            <Icon name="search" size={14} style={{ position: "absolute", left: 9, top: 8, color: "var(--text-3)" }} />
-            <input className="input" placeholder="搜索竞品..." value={query} onChange={(e) => setQuery(e.target.value)}
-            style={{ paddingLeft: 30, width: "100%" }} />
+    <div className="viewport">
+      <div className="page page-fluid page-wide">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name="boxes" size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>竞品库</h1>
+              <div className="muted text-sm">汇总主流品类竞品 SKU + 价格/月销/评分指标，AI 自动归类、关联到需求和 PRD。</div>
+            </div>
           </div>
-          <select className="input sm products-toolbar-filter" style={{ height: 30, paddingRight: 24 }}
-          value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-            {categories.map((c) =>
-            <option key={c} value={c}>{c === "全部" ? "全部品类" : c}</option>
-            )}
-          </select>
-          <div className="products-toolbar-actions page-actions">
-            <Tag tone="outline" className="products-toolbar-count">{filtered.length} 条</Tag>
-            {filtered.length > 0 && !selectMode && (
-              <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
-            )}
+          <div className="page-head-actions">
+            <Tag tone="outline">{products.length} 条</Tag>
             <Btn size="sm" variant="ghost" icon="sync" onClick={syncProducts}>同步飞书</Btn>
+            <Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>新建竞品</Btn>
           </div>
-        </div>
+        </header>
+
+        <div className="products-layout no-detail">
+          <div className="products-main">
+            <div className="filter-bar">
+              <div className="filter-bar-cluster">
+                <div className="products-toolbar-search">
+                  <Icon name="search" size={14} style={{ position: "absolute", left: 9, top: 8, color: "var(--text-3)" }} />
+                  <input className="input" placeholder="搜索竞品..." value={query} onChange={(e) => setQuery(e.target.value)}
+                  style={{ paddingLeft: 30, width: "100%" }} />
+                </div>
+                <select className="input sm products-toolbar-filter" style={{ height: 30, paddingRight: 24 }}
+                value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                  {categories.map((c) =>
+                  <option key={c} value={c}>{c === "全部" ? "全部品类" : c}</option>
+                  )}
+                </select>
+              </div>
+              <div className="filter-bar-meta">
+                <span className="demand-match-count">匹配 {filtered.length} / {products.length}</span>
+                {filtered.length > 0 && !selectMode && (
+                  <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+                )}
+              </div>
+            </div>
         {notice && <div className="ai-block" style={{ margin: "0 12px 10px" }}>{notice}</div>}
         {filtered.length > 0 &&
           <div className={`bulk-toolbar products-selection-bar ${selectMode ? "" : "idle"}`} style={{ margin: "0 12px 10px" }}>
@@ -1965,122 +2000,133 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
         </div>
       </div>
 
-      {selected && !detailCollapsed &&
-      <div className="detail">
-          <div className="detail-head">
-            <ProductImageSlot product={selected} onChange={(img) => updateSelected({ image: img })} />
-            <h3>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{selected.name}</div>
-                <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 400, marginTop: 1 }}>
-                  录入 {selected.synced_at ? "· 已同步 " + selected.synced_at : "· 未同步"}
-                </div>
-              </div>
-            </h3>
-            <Btn variant="ghost" icon="trash" onClick={() => setDeleteTarget(selected)} title="删除竞品" />
-            <Btn
-              variant="ghost"
-              icon="external"
-              title="打开主平台链接"
-              disabled={!safeArray(selected.platforms)[0]?.url}
-              onClick={() => {
-                const url = safeArray(selected.platforms)[0]?.url;
-                if (url) window.open(externalHref(url), "_blank", "noopener,noreferrer");
-              }}
-            />
-          </div>
-
-          <div className="detail-body">
-            <div className="detail-section">
-              <div className="detail-section-label">
-                <Icon name="boxes" size={11} /> 平台信息 · {safeArray(selected.platforms).length} 个
-              </div>
-              {safeArray(selected.platforms).map((pl, i) =>
-                <ProductPlatformCard
-                  key={pl.id || `${pl.platform}-${i}`}
-                  platform={pl}
-                  index={i}
-                  onUpdate={updateSelectedPlatform}
-                  onRemove={removeSelectedPlatform}
-                />
-              )}
-              <AddPlatformControl existingPlatforms={selected.platforms} onAdd={addSelectedPlatform} />
-            </div>
-
-            {(() => {
-              const fields = normalizeFields(data.settings?.fields, data.settings?.tag_groups, { includeDefaults: true });
-              const competitorFields = fields.filter((f) => f.entities.includes("competitor") && entityUsesField(selected, f));
-              const attachField = async (field) => {
-                await updateSelected(buildFieldPatch(field.key, []));
-              };
-              return (
-                <>
-                  <div className="detail-inline-grid">
-                    {competitorFields.map((field) => (
-                      <FieldRow
-                        key={field.key}
-                        field={field}
-                        entity={selected}
-                        onSave={updateSelected}
-                        onCreateOption={createTagOption}
-                      />
-                    ))}
-                  </div>
-                  <div className="detail-section detail-add-field-wrap">
-                    <button className="add-field-trigger" onClick={() => setAddFieldOpen((v) => !v)}>
-                      <Icon name="plus" size={12} /> 添加字段
-                    </button>
-                    {addFieldOpen && (
-                      <AddFieldPopover
-                        fields={fields}
-                        entityType="competitor"
-                        entity={selected}
-                        onAttach={attachField}
-                        onGoSettings={() => { setAddFieldOpen(false); setNotice("请前往「设置 → 标签与字段」新建字段。"); }}
-                        onClose={() => setAddFieldOpen(false)}
-                      />
-                    )}
-                  </div>
-                </>
-              );
-            })()}
-
-            <div className="detail-section">
-              <div className="detail-section-label"><Icon name="sparkles" size={11} /> 核心卖点 · AI 总结 + 用户补充</div>
-              <DetailFieldCard>
-                <BulletListEditor
-                items={safeArray(selected.selling_points)}
-                onChange={(next) => updateSelected({ selling_points: next })}
-                tone="success"
-                placeholder="输入卖点，回车添加" />
-              </DetailFieldCard>
-            </div>
-
-            <div className="detail-section">
-              <div className="detail-section-label"><Icon name="tag" size={11} /> 差评关键词</div>
-              <DetailFieldCard>
-                <BulletListEditor
-                items={safeArray(selected.negative_keywords)}
-                onChange={(next) => updateSelected({ negative_keywords: next })}
-                tone="danger"
-                placeholder="输入差评关键词，回车添加" />
-              </DetailFieldCard>
-            </div>
-
-            <div className="detail-section">
-              <div className="detail-section-label"><Icon name="sparkles" size={11} /> AI 摘要</div>
-              <div className="ai-block">{selected.ai_summary || "暂无 AI 摘要，添加真实链接解析后会自动生成。"}</div>
-            </div>
-
-            <div className="detail-section">
-              <Btn variant="default" icon="sync" onClick={syncProducts} style={{ width: "100%", justifyContent: "center" }}>同步至飞书多维表格</Btn>
-            </div>
-          </div>
         </div>
-      }
 
-      {deleteTarget && <DeleteItemsConfirmModal entityLabel="竞品" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
-      {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="竞品" items={selectedProducts} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}
+        <Drawer
+          open={Boolean(selected) && !detailCollapsed}
+          title={selected?.name || "竞品详情"}
+          icon="boxes"
+          onClose={() => { setDetailCollapsed?.(true); setSelectedId(null); }}
+          width={560}
+          footer={
+            <>
+              <Btn
+                variant="ghost"
+                icon="external"
+                disabled={!safeArray(selected?.platforms)[0]?.url}
+                onClick={() => {
+                  const url = safeArray(selected?.platforms)[0]?.url;
+                  if (url) window.open(externalHref(url), "_blank", "noopener,noreferrer");
+                }}
+              >打开主平台</Btn>
+              <Btn variant="primary" icon="sync" onClick={syncProducts}>同步至飞书</Btn>
+            </>
+          }
+        >
+          {selected ? (
+            <>
+              <div className="drawer-product-head">
+                <ProductImageSlot product={selected} onChange={(img) => updateSelected({ image: img })} />
+                <div className="drawer-product-meta">
+                  <div className="drawer-product-status">
+                    <span className={`status-dot ${selected.synced_at ? 'published' : 'draft'}`} />
+                    {selected.synced_at ? `已同步 ${selected.synced_at}` : "未同步"}
+                  </div>
+                  <Tag tone="outline">{selected.category || "未分类"}</Tag>
+                </div>
+                <Btn variant="ghost" icon="trash" onClick={() => setDeleteTarget(selected)} title="删除竞品" />
+              </div>
+
+              <div className="drawer-section">
+                <div className="drawer-section-label">
+                  <Icon name="boxes" size={11} /> 平台信息 · {safeArray(selected.platforms).length} 个
+                </div>
+                {safeArray(selected.platforms).map((pl, i) =>
+                  <ProductPlatformCard
+                    key={pl.id || `${pl.platform}-${i}`}
+                    platform={pl}
+                    index={i}
+                    onUpdate={updateSelectedPlatform}
+                    onRemove={removeSelectedPlatform}
+                  />
+                )}
+                <AddPlatformControl existingPlatforms={selected.platforms} onAdd={addSelectedPlatform} />
+              </div>
+
+              {(() => {
+                const fields = normalizeFields(data.settings?.fields, data.settings?.tag_groups, { includeDefaults: true });
+                const competitorFields = fields.filter((f) => f.entities.includes("competitor") && entityUsesField(selected, f));
+                const attachField = async (field) => {
+                  await updateSelected(buildFieldPatch(field.key, []));
+                };
+                return (
+                  <div className="drawer-section">
+                    <div className="drawer-section-label"><Icon name="tag" size={11} /> 标签字段</div>
+                    <div className="detail-inline-grid">
+                      {competitorFields.map((field) => (
+                        <FieldRow
+                          key={field.key}
+                          field={field}
+                          entity={selected}
+                          onSave={updateSelected}
+                          onCreateOption={createTagOption}
+                        />
+                      ))}
+                    </div>
+                    <div className="detail-add-field-wrap">
+                      <button className="add-field-trigger" onClick={() => setAddFieldOpen((v) => !v)}>
+                        <Icon name="plus" size={12} /> 添加字段
+                      </button>
+                      {addFieldOpen && (
+                        <AddFieldPopover
+                          fields={fields}
+                          entityType="competitor"
+                          entity={selected}
+                          onAttach={attachField}
+                          onGoSettings={() => { setAddFieldOpen(false); setNotice("请前往「设置 → 标签与字段」新建字段。"); }}
+                          onClose={() => setAddFieldOpen(false)}
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="drawer-section">
+                <div className="drawer-section-label"><Icon name="sparkles" size={11} /> 核心卖点 · AI 总结 + 用户补充</div>
+                <DetailFieldCard>
+                  <BulletListEditor
+                    items={safeArray(selected.selling_points)}
+                    onChange={(next) => updateSelected({ selling_points: next })}
+                    tone="success"
+                    placeholder="输入卖点，回车添加"
+                  />
+                </DetailFieldCard>
+              </div>
+
+              <div className="drawer-section">
+                <div className="drawer-section-label"><Icon name="tag" size={11} /> 差评关键词</div>
+                <DetailFieldCard>
+                  <BulletListEditor
+                    items={safeArray(selected.negative_keywords)}
+                    onChange={(next) => updateSelected({ negative_keywords: next })}
+                    tone="danger"
+                    placeholder="输入差评关键词，回车添加"
+                  />
+                </DetailFieldCard>
+              </div>
+
+              <div className="drawer-section">
+                <div className="drawer-section-label"><Icon name="sparkles" size={11} /> AI 摘要</div>
+                <div className="ai-block">{selected.ai_summary || "暂无 AI 摘要，添加真实链接解析后会自动生成。"}</div>
+              </div>
+            </>
+          ) : null}
+        </Drawer>
+
+        {deleteTarget && <DeleteItemsConfirmModal entityLabel="竞品" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
+        {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="竞品" items={selectedProducts} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}
+      </div>
     </div>);
 
 }
@@ -2345,9 +2391,28 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
     }
   };
 
+  const hasAnyDemands = demands.length > 0;
+
   return (
     <div className="viewport">
-      <div className="page page-fluid">
+      <div className="page page-fluid page-wide">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name="lightbulb" size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>需求雷达</h1>
+              <div className="muted text-sm">
+                收集用户痛点和需求线索，AI 自动打标、聚类、关联到 PRD / MRD。
+              </div>
+            </div>
+          </div>
+          <div className="page-head-actions">
+            <Tag tone="outline">{demands.length} 条</Tag>
+            <Btn size="sm" variant="ghost" icon="sync" onClick={syncDemands}>同步飞书</Btn>
+            <Btn size="sm" variant="primary" icon="plus" onClick={() => setShowAdd(true)}>新建需求</Btn>
+          </div>
+        </header>
+
         {notice && (
           <div className="ai-block" style={{
             position: "fixed",
@@ -2362,34 +2427,36 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           }}>{notice}</div>
         )}
 
-        <div className="demand-toolbar">
-          <div className="demand-toolbar-cluster">
-            <div className="demand-filter-group" role="group" aria-label="需求筛选">
-              <div className="demand-filter-label">
-                <Icon name="filter" size={13} />
-                <span>筛选</span>
+        {hasAnyDemands ? (
+          <div className="filter-bar">
+            <div className="filter-bar-cluster">
+              <div className="demand-filter-group" role="group" aria-label="需求筛选">
+                <div className="demand-filter-label">
+                  <Icon name="filter" size={13} />
+                  <span>筛选</span>
+                </div>
+                <select className="demand-filter-select" value={filterScenario} onChange={(e) => setFilterScenario(e.target.value)}>
+                  <option value="">全部场景</option>
+                  {allScenarios.filter(Boolean).map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <select className="demand-filter-select" value={filterInnov} onChange={(e) => setFilterInnov(e.target.value)}>
+                  <option value="">全部创新类型</option>
+                  {allInnov.filter(Boolean).map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
-              <select className="demand-filter-select" value={filterScenario} onChange={(e) => setFilterScenario(e.target.value)}>
-                <option value="">全部场景</option>
-                {allScenarios.filter(Boolean).map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <select className="demand-filter-select" value={filterInnov} onChange={(e) => setFilterInnov(e.target.value)}>
-                <option value="">全部创新类型</option>
-                {allInnov.filter(Boolean).map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <div className="demand-view-switch" role="tablist" aria-label="需求视图">
+                <button type="button" className={viewMode === "card" ? "active" : ""} onClick={() => setViewMode("card")}>卡片</button>
+                <button type="button" className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>列表</button>
+              </div>
             </div>
-            <div className="demand-view-switch" role="tablist" aria-label="需求视图">
-              <button type="button" className={viewMode === "card" ? "active" : ""} onClick={() => setViewMode("card")}>卡片</button>
-              <button type="button" className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>列表</button>
+            <div className="filter-bar-meta">
+              <span className="demand-match-count">匹配 {filtered.length} / {demands.length}</span>
+              {filtered.length > 0 && !selectMode && (
+                <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+              )}
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="demand-match-count">匹配 {filtered.length} 条</span>
-            {filtered.length > 0 && !selectMode && (
-              <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
-            )}
-          </div>
-        </div>
+        ) : null}
 
         {filtered.length > 0 && selectMode &&
           <div className="bulk-toolbar" style={{
@@ -2462,15 +2529,29 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
               </div>
             </div>
           )}
-          {filtered.length === 0 &&
+          {filtered.length === 0 && demands.length === 0 ? (
             <div style={{ gridColumn: "1 / -1" }}>
-              <EmptyState
-                icon="lightbulb"
-                title={demands.length ? "没有匹配的需求" : "还没有真实需求"}>
-                请使用 Chrome 插件采集。
+              <div className="empty-hero">
+                <Icon name="lightbulb" size={48} />
+                <h2>需求雷达还没有数据</h2>
+                <p className="muted">
+                  在小红书 / Amazon / Kickstarter 等平台用 Chrome 插件采集，AI 会自动打标并归类到这里。
+                  也可以手动新建一条需求。
+                </p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Btn variant="primary" icon="plus" onClick={() => setShowAdd(true)}>手动新建</Btn>
+                  <Btn variant="ghost" icon="chrome" onClick={() => window.open('/?screen=settings', '_self')}>安装 Chrome 插件</Btn>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {filtered.length === 0 && demands.length > 0 ? (
+            <div style={{ gridColumn: "1 / -1" }}>
+              <EmptyState icon="lightbulb" title="没有匹配的需求">
+                尝试清除筛选条件，或换一组场景/创新类型组合。
               </EmptyState>
             </div>
-          }
+          ) : null}
         </div> :
         <div className="products-table-wrap demand-list-wrap">
           <table className="products-table demand-list-table">
@@ -2946,17 +3027,20 @@ function ResearchScreen({ data, api, refreshData }) {
 
   return (
     <div className="viewport">
-      <div className="page page-fluid">
-        <div className="screen-header screen-header-compact" style={{ marginBottom: 18 }}>
-          <div className="screen-header-left">
-            <div className="screen-icon-box"><Icon name="compass" size={18} /></div>
-            <div className="muted text-sm">从竞品库与需求雷达中匹配数据，AI 生成结构化分析报告</div>
+      <div className="page page-fluid page-narrow">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name="compass" size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>调研工坊</h1>
+              <div className="muted text-sm">从竞品库与需求雷达中匹配数据，AI 生成结构化分析报告。</div>
+            </div>
           </div>
-          <div className="page-actions">
+          <div className="page-head-actions">
             {items.length > 0 && !selectMode && <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>}
             <Btn className="weave-create-btn" variant="primary" icon="plus" onClick={() => setShowCreate(true)}>新建调研项目</Btn>
           </div>
-        </div>
+        </header>
 
         {selectMode && items.length > 0 &&
           <div className="bulk-toolbar research-selection-bar">
@@ -3022,466 +3106,1441 @@ function ResearchScreen({ data, api, refreshData }) {
 window.ResearchScreen = ResearchScreen;
 
 // ============ KNOWLEDGE ============
-function KnowledgeScreen({ data, api, initialPane = "import" }) {
-  const workspaceId = data.workspace?.id || "";
-  const [projectId, setProjectId] = useState("demo-project");
-  const [docType, setDocType] = useState("prd");
-  const [pasteText, setPasteText] = useState("功能需求\n产品需支持单手快拆。\n\n包装需求\n需要包含说明书与保护内托。\n\n待确认问题\n认证范围是否覆盖海外销售？");
-  const [lastImport, setLastImport] = useState(null);
-  const [lastPack, setLastPack] = useState(null);
-  const [question, setQuestion] = useState("这份 PRD 定义了哪些功能？");
-  const [answer, setAnswer] = useState(null);
-  const [draft, setDraft] = useState(null);
-  const [graph, setGraph] = useState(null);
-  const [fusionCandidates, setFusionCandidates] = useState([]);
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState("");
-  const [activeDocSection, setActiveDocSection] = useState("");
-  const [selectedEntityId, setSelectedEntityId] = useState("");
-  const [activePane, setActivePane] = useState(initialPane);
-  const [audience, setAudience] = useState("internal");
-  const [publishPolicy, setPublishPolicy] = useState({
-    rag_enabled: true,
-    bot_enabled: true,
-    supplier_visible: false,
-    sales_visible: false,
-  });
-  const projectOptions = useMemo(() => {
-    const fromProducts = safeArray(data.products).map((item) => item.project_id).filter(Boolean);
-    const fromResearch = safeArray(data.research).map((item) => item.project_id || item.id).filter(Boolean);
-    return Array.from(new Set(["demo-project", ...fromProducts, ...fromResearch])).slice(0, 8);
-  }, [data.products, data.research]);
-  const importedSections = safeArray(lastImport?.document?.content?.normalized_sections);
-  const draftSections = safeArray(draft?.sections);
-  const selectedDraftSection = draftSections.find((section) => section.key === activeDocSection) || draftSections[0] || null;
-  const workspaceReady = Boolean(workspaceId);
-  const workflow = [
-    { key: "import", title: "导入", desc: lastImport ? `${importedSections.length} 个标准章节` : "粘贴飞书/PRD/MRD 文本", done: Boolean(lastImport), icon: "file-text" },
-    { key: "publish", title: "发布", desc: lastImport?.document?.status === "published" ? "已进入 RAG 索引" : "权限过滤后再入库", done: lastImport?.document?.status === "published", icon: "shield" },
-    { key: "graph", title: "图谱", desc: graph ? `${safeArray(graph.nodes).length} nodes / ${safeArray(graph.edges).length} edges` : "只读查看关联", done: Boolean(graph), icon: "network" },
-    { key: "pack", title: "资料包", desc: lastPack ? `${lastPack.sources?.length || 0} sources / ${lastPack.chunks?.length || 0} chunks` : "汇总项目证据", done: Boolean(lastPack), icon: "layers" },
-    { key: "answer", title: "问答", desc: answer ? `${safeArray(answer.citations).length} 条引用` : "只回答授权资料", done: Boolean(answer), icon: "bot" },
-    { key: "draft", title: "草稿", desc: draft ? `${draft.document?.doc_type?.toUpperCase()} · ${draftSections.length} 节` : "生成 MRD / PRD", done: Boolean(draft), icon: "edit" },
-  ];
-  const panes = [
-    {
-      key: "import",
-      icon: "file-text",
-      title: "导入资料",
-      desc: lastImport ? `${importedSections.length} 个章节已标准化` : "先把飞书/PRD/MRD 文本放进来",
-    },
-    {
-      key: "query",
-      icon: "bot",
-      title: "知识问答",
-      desc: lastPack ? `${lastPack.chunks?.length || 0} 个片段可检索` : "发布资料后再构建资料包",
-    },
-    {
-      key: "graph",
-      icon: "network",
-      title: "图谱治理",
-      desc: graph ? `${safeArray(graph.nodes).length} 个节点` : "查看实体、关系和待确认合并",
-    },
-    {
-      key: "draft",
-      icon: "edit",
-      title: "文档生成",
-      desc: draft ? `${draft.document?.doc_type?.toUpperCase()} 草稿已生成` : "从资料包生成 MRD / PRD",
-    },
-  ];
-  const activePaneMeta = panes.find((pane) => pane.key === activePane) || panes[0];
-  useEffect(() => {
-    setActivePane(initialPane);
-  }, [initialPane]);
-  const coverage = lastPack ? Math.round((lastPack.coverage_score || 0) * 100) : 0;
-  const modelLabel = answer?.model_status || draft?.model_status?.reason || "deterministic / ready";
+function parseSearchState() {
+  try {
+    return new URLSearchParams(window.location.search);
+  } catch {
+    return new URLSearchParams();
+  }
+}
 
-  const run = async (label, task) => {
-    setBusy(label);
-    setNotice("");
-    try {
-      const result = await task();
-      setNotice(`${label}完成`);
-      return result;
-    } catch (error) {
-      setNotice(error.message || `${label}失败`);
-      return null;
-    } finally {
-      setBusy("");
+function useRouteTick() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const sync = () => setTick((value) => value + 1);
+    window.addEventListener("popstate", sync);
+    window.addEventListener("loom:navigate", sync);
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("loom:navigate", sync);
+    };
+  }, []);
+  return tick;
+}
+
+function sectionStatus(section) {
+  const content = String(section?.body_markdown || section?.content || '').trim();
+  const refs = safeArray(section?.source_refs);
+  const evidenceCount = safeArray(section?.evidence_ids).length + refs.reduce((sum, ref) => sum + safeArray(ref?.evidence_ids).length, 0);
+  if (section?.status === 'published') return 'published';
+  if (!content) return 'empty';
+  if (evidenceCount === 0) return 'missing-evidence';
+  return 'has-content';
+}
+
+function sectionStatusLabel(status) {
+  switch (status) {
+    case 'published': return '已发布';
+    case 'missing-evidence': return '缺证据';
+    case 'has-content': return '有内容';
+    default: return '空';
+  }
+}
+
+function sectionStatusTone(status) {
+  switch (status) {
+    case 'published': return 'success';
+    case 'missing-evidence': return 'warn';
+    case 'has-content': return 'accent';
+    default: return 'outline';
+  }
+}
+
+// 章节级 placeholder 指南，提示 PM 该写什么
+const SECTION_PLACEHOLDERS = {
+  // PRD
+  product_definition: "用一段话回答：这是什么产品、给谁用、解决什么核心问题。例如：Pocket 3 风格的随身相机，给 vlogger / 旅行用户，解决手机拍 vlog 不稳不专业的问题。",
+  functional_attributes: "罗列核心功能列表，每条 1 行。建议覆盖：开机/拍摄/收音/防抖/导出 等关键链路。",
+  structure: "描述机身结构、按键布局、连接方式、抗摔/防水等结构要求。",
+  materials_process: "外壳材料、表面处理、关键部件工艺要求。涉及供应商时点名记录。",
+  id_cmf: "外观设计语言、颜色、材质、纹理 (Color/Material/Finish)。",
+  electronics_firmware_certification: "电池容量、芯片选型、固件能力、必要认证 (FCC/CE/3C 等)。",
+  testing: "重点测试项：高低温、跌落、按键寿命、续航、信号、画质等。给出验收阈值。",
+  packaging: "包装清单 + 包装结构 + 物流抗压要求。",
+  supplier_delivery: "供应商分工、打样节奏、量产排期、BOM 备料。",
+  quality_acceptance: "量产验收标准：外观一致性、功能完整性、稳定性。",
+  // MRD
+  market_background: "目标市场规模、增长趋势、关键驱动因素。引用数据时记得加 [ev:ev_xxx] 或证据。",
+  target_users_scenarios: "目标用户画像 + 典型使用场景 (3-5 个)。",
+  demands_painpoints: "用户主要需求 + 当前未满足的痛点。",
+  competitor_landscape: "主要竞品列表 + 各自定位 + 我们的差异化点。",
+  cost_estimation: "目标成本带 + 关键 BOM + 期望毛利。",
+  opportunity_judgement: "我们认为这个机会值得做的理由，最好量化。",
+  risks_uncertainties: "市场、技术、供应链、政策风险。每条标注影响等级。",
+  recommended_direction: "建议的产品方向、节奏和资源投入。",
+  open_questions: "暂时无法回答、需要他人输入的问题。每条一行。",
+};
+
+function StructuredDocumentEditor({ api, documentId, docType, sectionKey, onNavigate }) {
+  const [document, setDocument] = useState(null);
+  const [sections, setSections] = useState([]);
+  const [activeKey, setActiveKey] = useState(sectionKey || '');
+  const [body, setBody] = useState('');
+  const [docTitle, setDocTitle] = useState('');
+  const [notice, setNotice] = useState(null); // { tone, text }
+  const [busy, setBusy] = useState('');
+  const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
+  const [savedAt, setSavedAt] = useState(null);
+  const [drawerSection, setDrawerSection] = useState(null);
+  const [highlightKey, setHighlightKey] = useState('');
+  const [confirmPublish, setConfirmPublish] = useState(false);
+  const [lintErrors, setLintErrors] = useState([]);
+  const [aiDegraded, setAiDegraded] = useState(false);
+  const textareaRef = useRef(null);
+  const editorRef = useRef(null);
+  const routeTick = useRouteTick();
+  const search = useMemo(() => parseSearchState(), [routeTick]);
+  const urlSectionKey = search.get("section") || "";
+
+  const load = async () => {
+    if (!api || !documentId) return;
+    const result = await api(`/api/${docType}-documents/${documentId}`);
+    const sectionList = await api(`/api/documents/${documentId}/sections`);
+    setDocument(result);
+    setSections(safeArray(sectionList));
+    setDocTitle(result.title || '');
+    const targetKey = sectionKey || activeKey;
+    const selected = safeArray(sectionList).find((item) => item.id.split(':').pop() === targetKey) || safeArray(sectionList)[0] || null;
+    if (selected) {
+      setActiveKey(selected.id.split(':').pop());
+      setBody(selected.body_markdown || '');
+    } else {
+      setActiveKey('');
+      setBody('');
     }
   };
 
-  const importDocument = async () => run("导入", async () => {
-    if (!workspaceId) throw new Error("当前账号还没有分配工作区");
-    const result = await api("/api/document-imports/paste", {
-      method: "POST",
-      body: JSON.stringify({ project_id: projectId, doc_type: docType, text: pasteText }),
+  useEffect(() => {
+    load().catch((error) => setNotice({ tone: 'error', text: error.message || '加载失败' }));
+  }, [api, documentId, docType]);
+
+  // URL ?section= 跳转 + 高亮
+  useEffect(() => {
+    if (!sections.length || !urlSectionKey) return;
+    const found = sections.find((item) => item.id.split(':').pop() === urlSectionKey);
+    if (!found) return;
+    setActiveKey(urlSectionKey);
+    requestAnimationFrame(() => {
+      const target = editorRef.current?.querySelector?.(`[data-section-key="${urlSectionKey}"]`);
+      target?.scrollIntoView?.({ block: 'nearest' });
+      setHighlightKey(urlSectionKey);
+      window.setTimeout(() => setHighlightKey(''), 1500);
     });
-    setLastImport(result);
-    setGraph(null);
-    setFusionCandidates([]);
-    setSelectedEntityId(result.knowledge?.entities?.[0]?.id || "");
-    setActiveDocSection(result.document?.content?.normalized_sections?.[0]?.key || "");
-    setActivePane("import");
+  }, [sections, urlSectionKey]);
+
+  // 切换章节时载入对应正文
+  useEffect(() => {
+    if (!activeKey || !sections.length) return;
+    const section = sections.find((item) => item.id.split(':').pop() === activeKey);
+    if (section) {
+      setBody(section.body_markdown || '');
+      setSaveState('idle');
+    }
+  }, [activeKey]);
+
+  // textarea 自动高度
+  useEffect(() => {
+    if (!textareaRef.current) return;
+    textareaRef.current.style.height = '0px';
+    textareaRef.current.style.height = `${Math.max(textareaRef.current.scrollHeight, 320)}px`;
+  }, [body, activeKey]);
+
+  const activeSection = sections.find((item) => item.id.split(':').pop() === activeKey) || sections[0] || null;
+  const activeKeyFinal = activeSection?.id.split(':').pop() || '';
+  const patchSection = async (patch) => {
+    if (!activeSection) return;
+    const endpoint = docType === 'mrd' ? `/api/mrd-sections/${activeSection.id}` : `/api/prd-sections/${activeSection.id}`;
+    const result = await api(endpoint, { method: 'PATCH', body: JSON.stringify(patch) });
+    setSections((current) => current.map((item) => item.id === activeSection.id ? { ...item, ...result } : item));
     return result;
-  });
-  const publishImported = async () => {
-    const documentId = lastImport?.document?.id;
-    if (!documentId) return setNotice("请先导入文档");
-    return run("发布索引", async () => {
-      const result = await api(`/api/documents/${documentId}/publish`, {
-        method: "POST",
-        body: JSON.stringify(publishPolicy),
+  };
+
+  const saveContent = async (nextBody) => {
+    if (!activeSection) return;
+    setSaveState('saving');
+    try {
+      await patchSection({
+        document_id: documentId,
+        section_key: activeKeyFinal,
+        body_markdown: nextBody,
+        content: nextBody,
+        evidence_ids: activeSection.evidence_ids || [],
+        source_refs: activeSection.source_refs || [],
       });
-      setLastImport({ ...lastImport, document: result.document, indexed: result.indexed });
-      setActivePane("graph");
-      return result;
-    });
+      setSavedAt(new Date().toISOString());
+      setSaveState('saved');
+    } catch (error) {
+      setSaveState('error');
+      setNotice({ tone: 'error', text: error.message || '保存失败' });
+    }
   };
-  const loadGraph = async () => {
-    if (!lastImport?.document?.id) return setNotice("请先导入并发布文档");
-    return run("加载图谱", async () => {
-      const entities = await api(`/api/knowledge/entities?project_id=${encodeURIComponent(projectId)}`);
-      const documentEntities = safeArray(entities).filter((entity) => safeArray(entity.source_refs).some((ref) => ref.document_id === lastImport.document.id));
-      const root = documentEntities.find((entity) => entity.id === selectedEntityId) || documentEntities[0];
-      const graphResult = root ? await api(`/api/knowledge/entities/${root.id}/graph?depth=2`) : { nodes: [], edges: [] };
-      const candidates = await api(`/api/knowledge/fusion-candidates?project_id=${encodeURIComponent(projectId)}`);
-      setSelectedEntityId(root?.id || "");
-      setGraph(graphResult);
-      setFusionCandidates(candidates);
-      setActivePane("graph");
-      return graphResult;
-    });
-  };
-  const patchFusion = async (candidateId, status) => run(status === "approved" ? "确认合并" : "拒绝合并", async () => {
-    const result = await api(`/api/knowledge/fusion-candidates/${candidateId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ project_id: projectId, status }),
-    });
-    setFusionCandidates((items) => safeArray(items).map((item) => item.id === candidateId ? result : item));
-    return result;
-  });
-  const buildPack = async () => run("构建资料包", async () => {
-    if (!workspaceId) throw new Error("当前账号还没有分配工作区");
-    const result = await api("/api/knowledge/packs/build", {
-      method: "POST",
-      body: JSON.stringify({ project_id: projectId, title: "Demo Knowledge Pack" }),
-    });
-    setLastPack(result);
-    setActivePane("query");
-    return result;
-  });
-  const askQuestion = async () => {
-    if (!lastPack?.id) return setNotice("请先构建 Knowledge Pack");
-    return run("问答", async () => {
-      const result = await api("/api/knowledge/query", {
-        method: "POST",
-        body: JSON.stringify({ project_id: projectId, pack_id: lastPack.id, question, audience }),
+
+  // 500ms debounced autosave，对比当前 body 与 section 已存内容
+  useEffect(() => {
+    if (!activeSection) return;
+    if ((activeSection.body_markdown || '') === body) return;
+    const handle = window.setTimeout(() => saveContent(body), 500);
+    return () => window.clearTimeout(handle);
+  }, [body, activeSection?.id]);
+
+  const activeStatus = sectionStatus(activeSection);
+  const sourceRefs = safeArray(activeSection?.source_refs);
+  const openQuestions = safeArray(activeSection?.open_questions);
+  const citations = sourceRefs.length
+    ? sourceRefs
+    : safeArray(activeSection?.evidence_ids).map((id) => ({ chunk_id: id, title: id }));
+  const placeholder = SECTION_PLACEHOLDERS[activeKeyFinal] || '在这里编辑章节内容。可使用 Markdown。';
+  const isPublished = document?.status === 'published';
+
+  const askRegenerate = async () => {
+    if (!activeSection || aiDegraded) return;
+    setBusy('regenerating');
+    try {
+      const result = await api(`/api/documents/${documentId}/sections/${activeKeyFinal}/regenerate`, {
+        method: 'POST',
+        body: JSON.stringify({ document_id: documentId, section_key: activeKeyFinal }),
       });
-      setAnswer(result);
-      setActivePane("query");
-      return result;
-    });
+      const isPlaceholder = result?.status === 'no_llm' || result?.status === 'placeholder' || /待重新生成|P0\s*暂未/.test(result?.section?.content || result?.section?.body_markdown || '');
+      if (isPlaceholder) {
+        setAiDegraded(true);
+        setNotice({ tone: 'warn', text: 'AI 起草未接入。先手动写一版，或在设置里配置 AI 服务。' });
+      } else if (result?.section) {
+        setBody(result.section.body_markdown || result.section.content || '');
+        setNotice({ tone: 'success', text: 'AI 已起草本节，请确认/微调后保存。' });
+        await load();
+      }
+    } catch (error) {
+      setNotice({ tone: 'error', text: error.message || 'AI 起草失败' });
+    } finally {
+      setBusy('');
+    }
   };
-  const generateDraft = async (type) => {
-    if (!lastPack?.id) return setNotice("请先构建 Knowledge Pack");
-    return run(type === "mrd" ? "生成 MRD" : "生成 PRD", async () => {
-      const result = await api(`/api/documents/${type}/draft`, {
-        method: "POST",
-        body: JSON.stringify({ project_id: projectId, pack_id: lastPack.id }),
+
+  const saveTitle = async () => {
+    if (!document || docTitle === document.title) return;
+    setBusy('title');
+    try {
+      const result = await api(`/api/documents/${documentId}`, { method: 'PATCH', body: JSON.stringify({ title: docTitle }) });
+      setDocument(result);
+    } catch (error) {
+      setNotice({ tone: 'error', text: error.message || '标题保存失败' });
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const confirmAndPublish = async () => {
+    if (!document) return;
+    setBusy('publish');
+    try {
+      const result = await api(`/api/${docType}-documents/${documentId}/publish`, { method: 'POST' });
+      setDocument(result.document || document);
+      setNotice({ tone: 'success', text: '已发布并加入 RAG 索引。' });
+      setConfirmPublish(false);
+      await load();
+    } catch (error) {
+      if (error?.status === 409 || /lint/.test(error?.message || '')) {
+        setNotice({ tone: 'error', text: '存在 lint 错误，请先修复再发布。' });
+        runLint();
+      } else {
+        setNotice({ tone: 'error', text: error.message || '发布失败' });
+      }
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const runLint = async () => {
+    if (!document) return;
+    setBusy('lint');
+    try {
+      const result = await api(`/api/${docType}-documents/${documentId}/lint`);
+      const errs = safeArray(result?.errors);
+      setLintErrors(errs);
+      setNotice({
+        tone: errs.length ? 'warn' : 'success',
+        text: errs.length ? `Lint 找到 ${errs.length} 处需要证据的判断。` : 'Lint 通过 · 可以发布。',
       });
-      setDraft(result);
-      setActiveDocSection(result.sections?.[0]?.key || "");
-      setActivePane("draft");
-      return result;
-    });
+    } catch (error) {
+      setNotice({ tone: 'error', text: error.message || 'Lint 失败' });
+    } finally {
+      setBusy('');
+    }
   };
-  const exportSupplier = async () => {
-    const documentId = draft?.document?.id;
-    if (!documentId) return setNotice("请先生成 PRD/MRD 草稿");
-    return run("供应商版导出", async () => api(`/api/documents/${documentId}/export/supplier`, { method: "POST" }));
+
+  const jumpToSource = async (citation) => {
+    if (!citation?.chunk_id) return;
+    try {
+      const source = await api(`/api/knowledge/chunks/${citation.chunk_id}/source`);
+      if (!source?.document_id) return;
+      const targetType = source.doc_type || docType;
+      navigateTo(targetType, {
+        docId: source.document_id,
+        section: source.section_key || '',
+      });
+      if (targetType !== docType) onNavigate?.(targetType);
+    } catch (error) {
+      setNotice({ tone: 'error', text: error.message || '跳转失败' });
+    }
+  };
+
+  if (!documentId) {
+    return (
+      <div className="doc-studio-empty">
+        <EmptyState icon="file-text" title="请选择一个文档">从左侧列表打开一份 MRD / PRD，或新建一个开始。</EmptyState>
+      </div>
+    );
+  }
+
+  const sectionsForLint = (sectionKeyFilter) => lintErrors.filter((err) => err.section_id === sectionKeyFilter);
+
+  return (
+    <div className="doc-studio-shell" ref={editorRef}>
+      <header className="doc-studio-head">
+        <div className="doc-studio-title-row">
+          <input
+            className="doc-studio-title-input"
+            value={docTitle}
+            onChange={(e) => setDocTitle(e.target.value)}
+            onBlur={saveTitle}
+            placeholder={docType === 'mrd' ? 'MRD 标题' : 'PRD 标题'}
+          />
+          <Tag tone={isPublished ? 'success' : 'outline'}>{isPublished ? '已发布' : '草稿'}</Tag>
+          <SaveIndicator state={saveState} updatedAt={savedAt} />
+        </div>
+        <div className="doc-studio-toolbar">
+          <Btn size="sm" variant="ghost" icon="shield" onClick={runLint} disabled={busy === 'lint'}>Lint</Btn>
+          <Btn
+            size="sm"
+            variant={isPublished ? 'ghost' : 'primary'}
+            icon="check"
+            onClick={() => setConfirmPublish(true)}
+            disabled={busy === 'publish' || isPublished}
+          >
+            {isPublished ? '已发布' : '发布'}
+          </Btn>
+        </div>
+      </header>
+
+      {notice ? (
+        <div className={`doc-studio-banner tone-${notice.tone || 'info'}`}>
+          <span>{notice.text}</span>
+          <button type="button" className="doc-studio-banner-close" onClick={() => setNotice(null)} aria-label="关闭">
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      ) : null}
+
+      <div className="doc-studio-layout">
+        <aside className="doc-studio-sidebar">
+          <div className="doc-studio-sidebar-head">章节</div>
+          {sections.map((item) => {
+            const key = item.id.split(':').pop();
+            const status = sectionStatus(item);
+            const refCount = safeArray(item.source_refs).length || safeArray(item.evidence_ids).length || 0;
+            const hasLintErrors = sectionsForLint(key).length;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`doc-studio-section-row ${activeKey === key ? 'active' : ''} ${highlightKey === key ? 'is-highlighted' : ''}`}
+                onClick={() => setActiveKey(key)}
+                data-section-key={key}
+              >
+                <SectionDot status={status} title={sectionStatusLabel(status)} />
+                <span className="doc-studio-section-name">{item.heading}</span>
+                <span className="doc-studio-section-meta">
+                  {hasLintErrors ? <Tag tone="danger">⚠ {hasLintErrors}</Tag> : null}
+                  {refCount ? <span className="muted">{refCount} ref</span> : null}
+                </span>
+              </button>
+            );
+          })}
+        </aside>
+
+        <section className="doc-studio-main">
+          {activeSection ? (
+            <article className="doc-studio-article">
+              <div className="doc-studio-section-head">
+                <div>
+                  <h2 className="doc-studio-section-title">{activeSection.heading}</h2>
+                  <div className="muted text-sm">{sectionStatusLabel(activeStatus)} · {safeArray(activeSection.source_refs).length || 0} 条来源</div>
+                </div>
+                <div className="doc-studio-section-actions">
+                  <Btn
+                    size="sm"
+                    variant="ghost"
+                    icon="sparkles"
+                    onClick={askRegenerate}
+                    disabled={busy === 'regenerating' || aiDegraded}
+                    title={aiDegraded ? 'AI 服务未接入' : 'AI 起草本节'}
+                  >
+                    AI 起草 <Tag tone={aiDegraded ? 'outline' : 'accent'}>{aiDegraded ? '未接入' : 'Beta'}</Tag>
+                  </Btn>
+                  <Btn size="sm" variant="ghost" icon="link" onClick={() => setDrawerSection(activeSection)}>看证据</Btn>
+                </div>
+              </div>
+
+              <textarea
+                ref={textareaRef}
+                className="doc-studio-textarea"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                placeholder={placeholder}
+                spellCheck={false}
+              />
+
+              {sectionsForLint(activeKeyFinal).length ? (
+                <div className="doc-studio-lint">
+                  <div className="doc-studio-lint-title">Lint 待修复</div>
+                  {sectionsForLint(activeKeyFinal).map((err, idx) => (
+                    <div key={`${err.rule}-${idx}`} className="doc-studio-lint-row">
+                      <Tag tone="danger">{err.rule}</Tag>
+                      <code>{err.claim_text}</code>
+                      <span className="muted text-sm">{err.suggested_fix}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {openQuestions.length ? (
+                <div className="doc-studio-aside-block">
+                  <div className="doc-studio-aside-title">开放问题</div>
+                  <ul className="doc-studio-question-list">
+                    {openQuestions.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+
+              {citations.length ? (
+                <div className="doc-studio-aside-block">
+                  <div className="doc-studio-aside-title">来源引用 · 点击跳到原文</div>
+                  <div className="doc-studio-chip-row">
+                    {citations.map((item) => (
+                      <CitationChip
+                        key={item.chunk_id || item.title}
+                        label={item.title || item.chunk_id}
+                        onClick={() => jumpToSource(item)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </article>
+          ) : (
+            <EmptyState icon="file-text" title="没有章节可编辑">该文档暂时没有章节。</EmptyState>
+          )}
+        </section>
+      </div>
+
+      <Drawer
+        open={Boolean(drawerSection)}
+        title="证据原文"
+        icon="link"
+        onClose={() => setDrawerSection(null)}
+      >
+        {safeArray(drawerSection?.source_refs).length ? drawerSection.source_refs.map((ref, index) => (
+          <div key={ref.chunk_id || index} className="drawer-evidence-block">
+            <div className="drawer-evidence-title">{ref.title || ref.chunk_id || `引用 ${index + 1}`}</div>
+            <div className="drawer-evidence-body">{ref.text || ref.snippet || ref.chunk_id || '暂无原文预览。'}</div>
+          </div>
+        )) : <div className="knowledge-empty-note">该章节暂无来源引用。可在 Q&A 命中相关内容后回填。</div>}
+      </Drawer>
+
+      <ConfirmModal
+        open={confirmPublish}
+        title={`确认发布 ${docType.toUpperCase()}？`}
+        description={
+          <div>
+            <p>发布后会：</p>
+            <ul style={{ margin: '8px 0 0 18px', lineHeight: 1.8 }}>
+              <li>把当前内容快照写入 RAG / Bot 知识索引</li>
+              <li>状态从 <strong>草稿</strong> 改为 <strong>已发布</strong></li>
+              <li>授权范围扩到 <code>project_team</code></li>
+            </ul>
+            <p style={{ marginTop: 10 }}>发布后再编辑会生成新版本，旧版本保留 90 天可查。</p>
+          </div>
+        }
+        confirmText="确认发布"
+        onConfirm={confirmAndPublish}
+        onClose={() => setConfirmPublish(false)}
+        busy={busy === 'publish'}
+      />
+    </div>
+  );
+}
+
+// 相对时间格式
+function timeAgo(iso) {
+  if (!iso) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds} 秒前`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} 小时前`;
+  const days = Math.round(seconds / 86400);
+  if (days < 30) return `${days} 天前`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function DocumentStudio({ screenType, data, api, onOpenDocumentModal, onNavigate }) {
+  const routeTick = useRouteTick();
+  const search = useMemo(() => parseSearchState(), [routeTick]);
+  const docIdFromUrl = search.get('docId') || '';
+  const sectionFromUrl = search.get('section') || '';
+  const [documents, setDocuments] = useState([]);
+  const [message, setMessage] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [busy, setBusy] = useState('');
+  const workspaceId = data.workspace?.id || '';
+  const isDetail = Boolean(docIdFromUrl);
+  const newMode = screenType === 'mrd' ? 'structured-mrd' : 'structured-prd';
+  const screenLabel = screenType === 'mrd' ? 'MRD' : 'PRD';
+  const screenTitle = screenType === 'mrd' ? 'MRD Studio' : 'PRD Builder';
+
+  const loadDocuments = async () => {
+    if (!api || !workspaceId) return;
+    const query = new URLSearchParams({ workspace_id: workspaceId, doc_type: screenType });
+    try {
+      const result = await api(`/api/documents?${query.toString()}`);
+      setDocuments(safeArray(result));
+      setMessage('');
+    } catch (error) {
+      setMessage(error.message || '文档列表加载失败');
+    }
+  };
+
+  useEffect(() => { loadDocuments(); }, [api, workspaceId, screenType]);
+
+  const selected = documents.find((item) => item.id === docIdFromUrl) || null;
+
+  const goToList = () => navigateTo(screenType, { docId: '', section: '' });
+  const openDoc = (doc) => navigateTo(screenType, { docId: doc.id });
+
+  const handleDelete = async (doc) => {
+    if (!doc) return;
+    setBusy('delete');
+    try {
+      await api(`/api/documents/${doc.id}`, { method: 'DELETE' });
+      setDocuments((list) => list.filter((item) => item.id !== doc.id));
+      setConfirmDelete(null);
+      if (docIdFromUrl === doc.id) goToList();
+    } catch (error) {
+      setMessage(error.message || '删除失败');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const handleCopyLink = async (doc) => {
+    try {
+      const url = `${window.location.origin}${window.location.pathname}?screen=${screenType}&docId=${doc.id}`;
+      await navigator.clipboard?.writeText(url);
+      setMessage('链接已复制');
+      window.setTimeout(() => setMessage(''), 1500);
+    } catch {
+      setMessage('复制失败，请手动选中地址栏。');
+    }
+  };
+
+  // 详情视图: 全宽编辑器 + 顶部 breadcrumb
+  if (isDetail) {
+    return (
+      <div className="viewport">
+        <div className="page page-fluid page-narrow">
+          <Breadcrumb
+            onBack={goToList}
+            backLabel={`返回 ${screenLabel} 列表`}
+            trail={[
+              { label: screenTitle, onClick: goToList },
+              { label: selected?.title || '加载中…' },
+            ]}
+          />
+          {message ? <div className="doc-studio-banner tone-info">{message}</div> : null}
+          <div className="doc-studio-detail-shell">
+            <StructuredDocumentEditor
+              api={api}
+              documentId={docIdFromUrl}
+              docType={screenType}
+              sectionKey={sectionFromUrl}
+              onNavigate={onNavigate}
+            />
+          </div>
+          <ConfirmModal
+            open={Boolean(confirmDelete)}
+            title="删除这份文档？"
+            description={<div>将删除 <strong>{confirmDelete?.title}</strong>。该操作不可撤销。</div>}
+            confirmText="删除"
+            tone="danger"
+            onConfirm={() => handleDelete(confirmDelete)}
+            onClose={() => setConfirmDelete(null)}
+            busy={busy === 'delete'}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // 索引视图: 卡片网格
+  const samples = documents.filter((d) => d.metadata?.is_sample);
+  const userDocs = documents.filter((d) => !d.metadata?.is_sample);
+
+  const renderCard = (doc) => {
+    const sectionCount = safeArray(doc.content?.normalized_sections).length || 0;
+    const filledCount = safeArray(doc.content?.normalized_sections).filter((s) => String(s.content || '').trim()).length;
+    const progress = sectionCount ? Math.round((filledCount / sectionCount) * 100) : 0;
+    const isPublished = doc.status === 'published';
+    return (
+      <DocCard
+        key={doc.id}
+        title={doc.title}
+        icon={screenType === 'mrd' ? 'bar-chart' : 'clipboard'}
+        metaTop={<><span className={`status-dot ${isPublished ? 'published' : 'draft'}`} />{isPublished ? '已发布' : '草稿'}</>}
+        badges={doc.metadata?.is_sample ? [{ label: '示例', tone: 'outline' }] : []}
+        metaBottom={
+          <div className="doc-card-progress">
+            <div className="doc-card-progress-bar">
+              <span style={{ width: `${progress}%` }} />
+            </div>
+            <span className="muted text-sm">{filledCount} / {sectionCount} 节 · {progress}%</span>
+          </div>
+        }
+        footer={<span className="muted text-sm">更新于 {timeAgo(doc.updated_at || doc.created_at)}</span>}
+        onClick={() => openDoc(doc)}
+        isSample={Boolean(doc.metadata?.is_sample)}
+        overflowItems={[
+          { key: 'open', label: '打开', icon: 'external', onClick: () => openDoc(doc) },
+          { key: 'copy', label: '复制链接', icon: 'link', onClick: () => handleCopyLink(doc) },
+          { key: 'delete', label: '删除', icon: 'trash', tone: 'danger', onClick: () => setConfirmDelete(doc) },
+        ]}
+      />
+    );
   };
 
   return (
     <div className="viewport">
-      <div className="page page-fluid">
-        <div className="knowledge-studio">
-          <div className="knowledge-hero compact">
-            <div className="knowledge-hero-copy">
-              <div className="knowledge-eyebrow">RAG · MRD · PRD 工作台</div>
-              <h1 className="h1">{activePaneMeta.title}</h1>
-              <div className="muted text-sm">{activePaneMeta.desc}</div>
-            </div>
-            <div className="knowledge-hero-actions">
-              <Tag tone={busy ? "accent" : "outline"}>{busy || "Ready"}</Tag>
-              {notice && <Tag tone={notice.includes("失败") ? "danger" : "success"}>{notice}</Tag>}
-            </div>
-          </div>
-
-          <div className="knowledge-command">
-            <div className="knowledge-command-main">
-              <span>当前项目</span>
-              <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-                {projectOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-              <span>文档类型</span>
-              <select className="input" value={docType} onChange={(e) => setDocType(e.target.value)}>
-                <option value="prd">PRD</option>
-                <option value="mrd">MRD</option>
-                <option value="report">Report</option>
-              </select>
-            </div>
-            <div className="knowledge-command-meta">
-              <Tag tone={workspaceReady ? "outline" : "danger"}>{data.workspace?.name || data.workspace?.slug || "未分配工作区"}</Tag>
-              <Tag tone="outline">{modelLabel}</Tag>
+      <div className="page page-fluid page-narrow">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name={screenType === 'mrd' ? 'bar-chart' : 'clipboard'} size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>{screenTitle}</h1>
+              <div className="muted text-sm">
+                {screenType === 'mrd'
+                  ? '结构化市场分析。每个判断绑证据，发布后进入 RAG / Bot 索引。'
+                  : '硬件产品定义。11 节标准 + 章节级 lint + 一键发布到 RAG。'}
+              </div>
             </div>
           </div>
-
-          {!workspaceReady && (
-            <div className="knowledge-workspace-warning">
-              <Icon name="lock" size={14} />
-              <span>当前演示 visitor 没有绑定真实工作区，所以只能预览界面；登录正式账号后可以导入、索引、问答和生成文档。</span>
-            </div>
-          )}
-
-          <div className="knowledge-overview">
-            <div className="knowledge-section-intro">
-              {panes.filter((pane) => pane.key === activePane).map((pane) => (
-                <div key={pane.key}>
-                  <Icon name={pane.icon} size={16} />
-                  <span>
-                    <strong>{pane.title}</strong>
-                    <small>{pane.desc}</small>
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="knowledge-workflow compact">
-              {workflow.map((step, index) => (
-                <div key={step.key} className={`knowledge-step ${step.done ? "done" : ""}`}>
-                  <div className="knowledge-step-index">{step.done ? <Icon name="check" size={13} /> : index + 1}</div>
-                  <div className="knowledge-step-body">
-                    <div><Icon name={step.icon} size={13} />{step.title}</div>
-                    <span>{step.desc}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="page-head-actions">
+            <Btn size="sm" variant="ghost" icon="sync" onClick={loadDocuments}>刷新</Btn>
+            <Btn size="sm" variant="primary" icon="plus" onClick={() => onOpenDocumentModal(newMode)}>新建 {screenLabel}</Btn>
           </div>
+        </header>
 
-          <div className={`knowledge-pane-layout ${activePane}`}>
-            {activePane === "import" && <section className="knowledge-panel knowledge-panel-flow">
-              <div className="knowledge-panel-head">
-                <Icon name="file-text" size={15} />
-                <div><h3>资料入口</h3><p>复制飞书文档文本即可导入；图片暂不落盘，只保留结构和占位信息。</p></div>
-              </div>
-              <textarea className="input knowledge-textarea" value={pasteText} onChange={(e) => setPasteText(e.target.value)} />
-              <div className="knowledge-actions">
-                <Btn variant="primary" icon="plus" onClick={importDocument} disabled={!workspaceReady || Boolean(busy)}>导入并标准化</Btn>
-                <Btn icon="check" onClick={publishImported} disabled={!workspaceReady || !lastImport || Boolean(busy)}>发布到 RAG</Btn>
-                <Btn icon="network" onClick={loadGraph} disabled={!workspaceReady || !lastImport || Boolean(busy)}>查看图谱</Btn>
-              </div>
-              <div className="knowledge-policy-strip">
-                {[
-                  ["rag_enabled", "RAG 可引用"],
-                  ["bot_enabled", "飞书 Bot"],
-                  ["supplier_visible", "供应商版"],
-                  ["sales_visible", "销售版"],
-                ].map(([key, label]) => (
-                  <button
-                    key={key}
-                    className={`knowledge-toggle ${publishPolicy[key] ? "on" : ""}`}
-                    onClick={() => setPublishPolicy((current) => ({ ...current, [key]: !current[key] }))}
-                    type="button"
-                  >
-                    <span>{label}</span>
-                    <i>{publishPolicy[key] ? "开" : "关"}</i>
-                  </button>
-                ))}
-              </div>
-              {lastImport && <div className="knowledge-result">
-                <div>
-                  <strong>{lastImport.document?.title}</strong>
-                  <span>{lastImport.import?.status} · {importedSections.length} sections · {lastImport.document?.status || "draft"}</span>
-                </div>
-                <Tag tone="outline">{lastImport.indexed?.chunks?.length || 0} chunks</Tag>
-              </div>}
-            </section>}
+        {message ? <div className="doc-studio-banner tone-info">{message}</div> : null}
 
-            {activePane === "graph" && <section className="knowledge-panel knowledge-panel-main">
-              <div className="knowledge-panel-head">
-                <Icon name="network" size={15} />
-                <div><h3>图谱治理</h3><p>只读查看实体与关系；候选合并必须由有权限的人确认。</p></div>
-              </div>
-              <div className="knowledge-pack-bar">
-                <Btn variant="primary" icon="sync" onClick={loadGraph} disabled={!workspaceReady || !lastImport || Boolean(busy)}>刷新图谱</Btn>
-                <div className="knowledge-metrics">
-                  <div><strong>{safeArray(graph?.nodes).length}</strong><span>nodes</span></div>
-                  <div><strong>{safeArray(graph?.edges).length}</strong><span>edges</span></div>
-                  <div><strong>{safeArray(fusionCandidates).length}</strong><span>fusion</span></div>
+        {!documents.length ? (
+          <div className="empty-hero">
+            <Icon name="file-text" size={48} />
+            <h2>还没有 {screenLabel} 文档</h2>
+            <p className="muted">新建一份开始，或 sample 文档会在 workspace 初始化后自动出现。</p>
+            <Btn variant="primary" icon="plus" onClick={() => onOpenDocumentModal(newMode)}>新建 {screenLabel}</Btn>
+          </div>
+        ) : (
+          <>
+            {userDocs.length ? (
+              <section className="card-section">
+                <div className="card-section-head">
+                  <h2>我的 {screenLabel}</h2>
+                  <Tag tone="outline">{userDocs.length}</Tag>
                 </div>
-              </div>
-              {graph ? (
-                <div className="knowledge-graph-grid">
-                  <div className="knowledge-graph-card">
-                    <div className="knowledge-evidence-title">实体节点</div>
-                    <div className="knowledge-section-list">
-                      {safeArray(graph.nodes).map((node) => (
-                        <button
-                          key={node.id}
-                          type="button"
-                          className={`knowledge-section-row ${selectedEntityId === node.id ? "active" : ""}`}
-                          onClick={() => setSelectedEntityId(node.id)}
-                        >
-                          <span>{node.canonical_name}</span>
-                          <Tag tone="outline">{node.entity_type}</Tag>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="knowledge-graph-card">
-                    <div className="knowledge-evidence-title">关系边</div>
-                    <div className="knowledge-citations graph-list">
-                      {safeArray(graph.edges).map((edge) => <Tag key={edge.id} tone="outline">{edge.relation_type}</Tag>)}
-                      {!safeArray(graph.edges).length ? <Tag tone="outline">暂无关系</Tag> : null}
-                    </div>
-                  </div>
-                  <div className="knowledge-graph-card">
-                    <div className="knowledge-evidence-title">待确认 Fusion</div>
-                    <div className="knowledge-fusion-list">
-                      {safeArray(fusionCandidates).map((candidate) => (
-                        <div key={candidate.id} className="knowledge-fusion-row">
-                          <div>
-                            <strong>{candidate.action}</strong>
-                            <span>{candidate.reason || candidate.candidate_type}</span>
-                          </div>
-                          <Tag tone={candidate.status === "pending" ? "accent" : "outline"}>{candidate.status}</Tag>
-                          {candidate.status === "pending" ? (
-                            <div className="knowledge-fusion-actions">
-                              <Btn size="sm" icon="check" onClick={() => patchFusion(candidate.id, "approved")} disabled={Boolean(busy)}>通过</Btn>
-                              <Btn size="sm" variant="ghost" icon="x" onClick={() => patchFusion(candidate.id, "rejected")} disabled={Boolean(busy)}>拒绝</Btn>
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                      {!safeArray(fusionCandidates).length ? <div className="knowledge-empty-note">暂无待确认候选。</div> : null}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="knowledge-empty-note">导入并发布文档后，可以在这里查看 Product Ontology 的节点、关系和待确认合并。</div>
-              )}
-            </section>}
-
-            {activePane === "query" && <section className="knowledge-panel knowledge-panel-main">
-              <div className="knowledge-panel-head">
-                <Icon name="database" size={15} />
-                <div><h3>资料包与问答</h3><p>把已发布文档、竞品、需求、资讯流汇入同一个项目资料包。</p></div>
-              </div>
-              <div className="knowledge-pack-bar">
-                <Btn variant="primary" icon="sync" onClick={buildPack} disabled={!workspaceReady || Boolean(busy)}>构建资料包</Btn>
-                {lastPack && <div className="knowledge-metrics">
-                  <div><strong>{lastPack.sources?.length || 0}</strong><span>sources</span></div>
-                  <div><strong>{lastPack.chunks?.length || 0}</strong><span>chunks</span></div>
-                  <div><strong>{coverage}%</strong><span>coverage</span></div>
-                </div>}
-              </div>
-              <div className="knowledge-question">
-                <div className="knowledge-question-head">
-                  <span>知识库问题</span>
-                  <select className="input" value={audience} onChange={(e) => setAudience(e.target.value)}>
-                    <option value="internal">内部</option>
-                    <option value="supplier">供应商</option>
-                    <option value="sales_external">销售外部</option>
-                  </select>
-                </div>
-                <textarea className="input" value={question} onChange={(e) => setQuestion(e.target.value)} />
-                <Btn icon="sparkles" onClick={askQuestion} disabled={!workspaceReady || !lastPack || Boolean(busy)}>问知识库</Btn>
-              </div>
-              {answer ? (
-                <div className={`knowledge-answer ${answer.mode === "refused" ? "is-refused" : ""}`}>
-                  <div className="knowledge-answer-top">
-                    <Tag tone={answer.mode === "refused" ? "danger" : "success"}>{answer.mode}</Tag>
-                    <span>{Math.round((answer.confidence || 0) * 100)}% confidence</span>
-                    {answer.needs_review ? <Tag tone="accent">needs review</Tag> : null}
-                  </div>
-                  <div className="knowledge-answer-text">{answer.answer}</div>
-                  <div className="knowledge-citations">
-                    {safeArray(answer.citations).map((item) => <Tag key={item.chunk_id || item.title} tone="outline">{item.title || item.chunk_id}</Tag>)}
-                    {!safeArray(answer.citations).length && <Tag tone="danger">无可引用资料</Tag>}
-                  </div>
-                </div>
-              ) : (
-                <div className="knowledge-empty-note">构建资料包后，问答会显示答案、可信度和引用来源。</div>
-              )}
-            </section>}
-
-            {activePane === "draft" && <aside className="knowledge-side">
-              <section className="knowledge-panel">
-                <div className="knowledge-panel-head">
-                  <Icon name="edit" size={15} />
-                  <div><h3>MRD / PRD 草稿</h3><p>生成后在这里快速审阅章节、引用和开放问题。</p></div>
-                </div>
-                <div className="knowledge-actions">
-                  <Btn icon="sparkles" onClick={() => generateDraft("mrd")} disabled={!workspaceReady || !lastPack || Boolean(busy)}>生成 MRD</Btn>
-                  <Btn icon="sparkles" onClick={() => generateDraft("prd")} disabled={!workspaceReady || !lastPack || Boolean(busy)}>生成 PRD</Btn>
-                </div>
-                {draft ? (
-                  <div className="knowledge-draft">
-                    <div className="knowledge-draft-title">{draft.document?.title}</div>
-                    <div className="muted text-sm">{draft.document?.doc_type?.toUpperCase()} · {draftSections.length} sections · {draft.needs_review ? "needs review" : "reviewed"}</div>
-                    <div className="knowledge-section-list">
-                      {draftSections.map((section) => (
-                        <button
-                          key={section.key}
-                          type="button"
-                          className={`knowledge-section-row ${selectedDraftSection?.key === section.key ? "active" : ""}`}
-                          onClick={() => setActiveDocSection(section.key)}
-                        >
-                          <span>{section.title}</span>
-                          <Tag tone="outline">{section.source_chunk_ids?.length || 0} refs</Tag>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="knowledge-empty-note">PRD 会突出功能属性、结构、工艺、认证、测试、供应链和包装需求，不使用 MVP 语言。</div>
-                )}
+                <div className="card-grid">{userDocs.map(renderCard)}</div>
               </section>
-
-              <section className="knowledge-panel">
-                <div className="knowledge-panel-head">
-                  <Icon name="shield" size={15} />
-                  <div><h3>证据与权限</h3><p>文档导出前确认对外可见范围。</p></div>
+            ) : null}
+            {samples.length ? (
+              <section className="card-section">
+                <div className="card-section-head">
+                  <h2>示例</h2>
+                  <span className="muted text-sm">可参考也可改也可删</span>
                 </div>
-                {selectedDraftSection ? (
-                  <div className="knowledge-evidence">
-                    <div className="knowledge-evidence-title">{selectedDraftSection.title}</div>
-                    <p>{selectedDraftSection.content || "暂无内容。"}</p>
-                    <div className="knowledge-citations">
-                      {safeArray(selectedDraftSection.source_refs).map((item) => <Tag key={item.chunk_id || item.title} tone="outline">{item.title || item.chunk_id}</Tag>)}
-                      {safeArray(selectedDraftSection.open_questions).map((item) => <Tag key={item} tone="accent">{item}</Tag>)}
-                      {!safeArray(selectedDraftSection.source_refs).length && !safeArray(selectedDraftSection.open_questions).length ? <Tag tone="outline">待补证据</Tag> : null}
+                <div className="card-grid">{samples.map(renderCard)}</div>
+              </section>
+            ) : null}
+          </>
+        )}
+
+        <ConfirmModal
+          open={Boolean(confirmDelete)}
+          title="删除这份文档？"
+          description={<div>将删除 <strong>{confirmDelete?.title}</strong>。该操作不可撤销。</div>}
+          confirmText="删除"
+          tone="danger"
+          onConfirm={() => handleDelete(confirmDelete)}
+          onClose={() => setConfirmDelete(null)}
+          busy={busy === 'delete'}
+        />
+      </div>
+    </div>
+  );
+}
+
+const ENTITY_LEVEL_LABEL = {
+  competitor: '竞品 / 品牌',
+  product: '产品 / SKU',
+  inspiration: '灵感',
+  demand: '需求',
+  category: '品类',
+};
+
+function StandardsScreen({ api, data }) {
+  const workspaceId = data.workspace?.id || '';
+  const routeTick = useRouteTick();
+  const search = useMemo(() => parseSearchState(), [routeTick]);
+  const kind = search.get('kind') || ''; // '' | 'prd' | 'mrd' | 'fields'
+  const [templates, setTemplates] = useState({ prd: null, mrd: null });
+  const [fields, setFields] = useState([]);
+  const [busy, setBusy] = useState('');
+
+  const load = async () => {
+    if (!api || !workspaceId) return;
+    setBusy('load');
+    try {
+      const [prdList, mrdList, fieldConfig] = await Promise.all([
+        api(`/api/document-templates?workspace_id=${encodeURIComponent(workspaceId)}&doc_type=prd`),
+        api(`/api/document-templates?workspace_id=${encodeURIComponent(workspaceId)}&doc_type=mrd`),
+        api(`/api/field-config?workspace_id=${encodeURIComponent(workspaceId)}`),
+      ]);
+      setTemplates({ prd: safeArray(prdList)[0] || null, mrd: safeArray(mrdList)[0] || null });
+      setFields(safeArray(fieldConfig?.fields || fieldConfig));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  useEffect(() => { load().catch(() => {}); }, [api, workspaceId]);
+
+  const groupedFields = fields.reduce((acc, field) => {
+    const level = field.entity_level || 'competitor';
+    (acc[level] = acc[level] || []).push(field);
+    return acc;
+  }, {});
+
+  const goOverview = () => navigateTo('standards', { kind: '' });
+  const goDetail = (k) => navigateTo('standards', { kind: k });
+
+  // —— 详情视图 ——
+  if (kind === 'prd' || kind === 'mrd') {
+    const template = templates[kind];
+    const sections = safeArray(template?.sections);
+    return (
+      <div className="viewport">
+        <div className="page page-fluid page-narrow">
+          <Breadcrumb
+            onBack={goOverview}
+            backLabel="返回标准库"
+            trail={[
+              { label: '标准库', onClick: goOverview },
+              { label: kind === 'prd' ? 'PRD 标准章节' : 'MRD 标准章节' },
+            ]}
+          />
+          <header className="page-head">
+            <div className="page-head-left">
+              <div className="screen-icon-box"><Icon name={kind === 'prd' ? 'clipboard' : 'bar-chart'} size={20} /></div>
+              <div>
+                <h1 className="h1" style={{ marginBottom: 2 }}>{kind === 'prd' ? 'PRD 标准' : 'MRD 标准'}</h1>
+                <div className="muted text-sm">
+                  共 {sections.length} 节。导入文档时按章节标题/别名自动匹配；填章节时左侧也按这个顺序展示。
+                </div>
+              </div>
+            </div>
+            <div className="page-head-actions">
+              <Btn size="sm" variant="ghost" icon="sync" onClick={load} disabled={Boolean(busy)}>刷新</Btn>
+            </div>
+          </header>
+          <div className="standards-detail-shell">
+            <ol className="standards-detail-list">
+              {sections.map((item, idx) => (
+                <li key={item.key} className="standards-detail-item">
+                  <div className="standards-index">{idx + 1}</div>
+                  <div className="standards-detail-body">
+                    <div className="standards-detail-title">
+                      <h3>{item.title}</h3>
+                      {item.required ? <Tag tone="accent">必填</Tag> : <Tag tone="outline">可选</Tag>}
+                    </div>
+                    <div className="standards-detail-meta">
+                      <code>{item.key}</code>
+                      {safeArray(item.aliases).length ? (
+                        <span className="muted">别名 · {item.aliases.join(' / ')}</span>
+                      ) : null}
                     </div>
                   </div>
-                ) : (
-                  <div className="knowledge-empty-note">选择一个草稿章节后，会显示对应内容、引用和待确认问题。</div>
-                )}
-                <div className="knowledge-actions knowledge-export-actions">
-                  <Btn icon="external" onClick={exportSupplier} disabled={!workspaceReady || !draft || Boolean(busy)}>供应商版导出</Btn>
-                  <Btn icon="lock" disabled={!workspaceReady || !draft || Boolean(busy)}>销售版待接入</Btn>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (kind === 'fields') {
+    return (
+      <div className="viewport">
+        <div className="page page-fluid page-narrow">
+          <Breadcrumb
+            onBack={goOverview}
+            backLabel="返回标准库"
+            trail={[{ label: '标准库', onClick: goOverview }, { label: '字段词典' }]}
+          />
+          <header className="page-head">
+            <div className="page-head-left">
+              <div className="screen-icon-box"><Icon name="tag" size={20} /></div>
+              <div>
+                <h1 className="h1" style={{ marginBottom: 2 }}>字段词典</h1>
+                <div className="muted text-sm">
+                  按实体层级分组 · 共 {fields.length} 个字段。CSV 导入和实体属性编辑都用这套 schema。
+                </div>
+              </div>
+            </div>
+            <div className="page-head-actions">
+              <Btn size="sm" variant="ghost" icon="sync" onClick={load} disabled={Boolean(busy)}>刷新</Btn>
+              <Btn size="sm" variant="ghost" icon="plus" disabled title="P2 即将开放">+ 自定义字段</Btn>
+            </div>
+          </header>
+          <div className="standards-detail-shell">
+            {Object.entries(groupedFields).map(([level, items]) => (
+              <section key={level} className="standards-level-group">
+                <header className="standards-level-head">
+                  <h3>{ENTITY_LEVEL_LABEL[level] || level}</h3>
+                  <Tag tone="outline">{items.length}</Tag>
+                </header>
+                <div className="standards-field-grid">
+                  {items.map((item) => (
+                    <div key={item.key} className="standards-field-card">
+                      <div className="standards-field-card-head">
+                        <strong>{item.name}</strong>
+                        <Tag tone={item.official ? 'outline' : 'accent'}>{item.official ? '内置' : '自定义'}</Tag>
+                      </div>
+                      <div className="standards-item-meta">
+                        <code>{item.key}</code>
+                        <span className="muted">{item.multi ? '多选' : '单值'}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </section>
-            </aside>}
+            ))}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // —— 概览视图：3 张大卡片 ——
+  const summaryCards = [
+    {
+      key: 'prd',
+      title: 'PRD 标准',
+      icon: 'clipboard',
+      count: safeArray(templates.prd?.sections).length,
+      countUnit: '节',
+      preview: safeArray(templates.prd?.sections).slice(0, 4).map((s) => s.title),
+      desc: '硬件产品定义文档的标准章节结构。',
+    },
+    {
+      key: 'mrd',
+      title: 'MRD 标准',
+      icon: 'bar-chart',
+      count: safeArray(templates.mrd?.sections).length,
+      countUnit: '节',
+      preview: safeArray(templates.mrd?.sections).slice(0, 4).map((s) => s.title),
+      desc: '市场分析文档的标准章节结构。',
+    },
+    {
+      key: 'fields',
+      title: '字段词典',
+      icon: 'tag',
+      count: fields.length,
+      countUnit: '字段',
+      preview: fields.slice(0, 4).map((f) => f.name),
+      desc: '所有实体（产品/竞品/需求/灵感）共用的字段定义。',
+    },
+  ];
+
+  return (
+    <div className="viewport">
+      <div className="page page-fluid page-narrow">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name="shield" size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>标准库</h1>
+              <div className="muted text-sm">
+                这是 LOOM 的"合同"——导入资料、生成文档、字段抽取都按这里的 schema 对齐。
+              </div>
+            </div>
+          </div>
+          <div className="page-head-actions">
+            <Btn size="sm" variant="ghost" icon="sync" onClick={load} disabled={Boolean(busy)}>刷新</Btn>
+          </div>
+        </header>
+
+        <div className="card-grid card-grid-3">
+          {summaryCards.map((card) => (
+            <DocCard
+              key={card.key}
+              title={card.title}
+              icon={card.icon}
+              metaTop={<span className="muted text-sm">{card.desc}</span>}
+              metaBottom={
+                <div className="standards-card-preview">
+                  {card.preview.map((label) => <Tag key={label} tone="outline">{label}</Tag>)}
+                  {card.count > card.preview.length ? <Tag tone="outline">+{card.count - card.preview.length}</Tag> : null}
+                </div>
+              }
+              footer={<><strong className="standards-card-count">{card.count}</strong> <span className="muted text-sm">{card.countUnit}</span> · 点击查看完整列表 →</>}
+              onClick={() => goDetail(card.key)}
+            />
+          ))}
         </div>
       </div>
     </div>
   );
 }
 
-window.KnowledgeScreen = KnowledgeScreen;
+function KnowledgeScreen({ data, api, onNavigate, onOpenDocumentModal, initialPane = 'ask', initialDocType = 'prd' }) {
+  const workspaceId = data.workspace?.id || '';
+  const defaultProjectId = data.products?.[0]?.project_id || data.demands?.[0]?.project_id || data.research?.[0]?.id || '';
 
+  // 问答
+  const [question, setQuestion] = useState('这份 PRD 定义了哪些功能？');
+  const [answer, setAnswer] = useState(null);
+  const [audience, setAudience] = useState('internal');
+  const [packId, setPackId] = useState('');
+
+  // 起草
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftType, setDraftType] = useState(initialDocType);
+
+  // 最近文档（MRD + PRD 合并）
+  const [recentDocs, setRecentDocs] = useState([]);
+
+  // 抽屉
+  const [importOpen, setImportOpen] = useState(false);
+  const [mgmtOpen, setMgmtOpen] = useState(false);
+  const [mgmtTab, setMgmtTab] = useState('graph'); // graph | policy | gaps
+  const [graph, setGraph] = useState(null);
+  const [fusionCandidates, setFusionCandidates] = useState([]);
+  const [policies, setPolicies] = useState([]);
+  const [gaps, setGaps] = useState([]);
+
+  const [notice, setNotice] = useState(null);
+  const [busy, setBusy] = useState('');
+
+  const setNote = (tone, text) => setNotice(text ? { tone, text } : null);
+
+  const loadRecent = async () => {
+    if (!api || !workspaceId) return;
+    try {
+      const [prdDocs, mrdDocs] = await Promise.all([
+        api(`/api/documents?workspace_id=${encodeURIComponent(workspaceId)}&doc_type=prd`),
+        api(`/api/documents?workspace_id=${encodeURIComponent(workspaceId)}&doc_type=mrd`),
+      ]);
+      const merged = [...safeArray(prdDocs), ...safeArray(mrdDocs)]
+        .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
+        .slice(0, 8);
+      setRecentDocs(merged);
+    } catch {
+      setRecentDocs([]);
+    }
+  };
+
+  useEffect(() => { loadRecent(); }, [api, workspaceId]);
+
+  const ensurePack = async () => {
+    if (packId) return packId;
+    const pack = await api('/api/knowledge/packs/build', {
+      method: 'POST',
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        project_id: defaultProjectId,
+        title: 'Auto Pack',
+      }),
+    });
+    if (pack?.id) setPackId(pack.id);
+    return pack?.id;
+  };
+
+  const ask = async (e) => {
+    e?.preventDefault();
+    if (!question.trim()) return;
+    setBusy('ask');
+    setAnswer(null);
+    try {
+      const nextPackId = await ensurePack();
+      if (!nextPackId) {
+        setNote('error', '资料包构建失败，请检查 workspace / project。');
+        return;
+      }
+      const result = await api('/api/knowledge/query', {
+        method: 'POST',
+        body: JSON.stringify({
+          workspace_id: workspaceId,
+          project_id: defaultProjectId,
+          pack_id: nextPackId,
+          question,
+          audience,
+        }),
+      });
+      setAnswer(result);
+      setNote(safeArray(result?.citations).length ? 'success' : 'warn',
+        safeArray(result?.citations).length ? '答案已生成，下面附引用。' : '已回答，但没有引用 — 试试加资料或换问法。');
+    } catch (error) {
+      setNote('error', error.message || '问答失败');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const draftDocument = async (e) => {
+    e?.preventDefault();
+    setBusy('draft');
+    try {
+      const result = await api(`/api/${draftType}-documents`, {
+        method: 'POST',
+        body: JSON.stringify({
+          workspace_id: workspaceId,
+          project_id: defaultProjectId,
+          title: draftTitle.trim() || `${draftType.toUpperCase()} 草稿 ${new Date().toLocaleDateString()}`,
+        }),
+      });
+      const newId = result?.id || result?.document?.id;
+      if (!newId) throw new Error('创建后未返回 ID');
+      navigateTo(draftType, { docId: newId });
+      onNavigate?.(draftType);
+    } catch (error) {
+      setNote('error', error.message || '创建失败');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const jumpToCitation = async (citation) => {
+    if (!citation?.chunk_id) return;
+    try {
+      const source = await api(`/api/knowledge/chunks/${citation.chunk_id}/source`);
+      if (!source?.document_id) {
+        setNote('warn', '该引用未能定位到原文档。');
+        return;
+      }
+      navigateTo(source.doc_type || 'prd', {
+        docId: source.document_id,
+        section: source.section_key || '',
+      });
+      onNavigate?.(source.doc_type || 'prd');
+    } catch (error) {
+      setNote('error', error.message || '跳转失败');
+    }
+  };
+
+  const openImport = () => setImportOpen(true);
+  const triggerImportMode = (mode) => {
+    setImportOpen(false);
+    onOpenDocumentModal?.(mode);
+  };
+
+  // 管理抽屉数据加载
+  const loadManagement = async (tab = mgmtTab) => {
+    setBusy('mgmt');
+    try {
+      if (tab === 'graph') {
+        const [entities, candidates] = await Promise.all([
+          api(`/api/knowledge/entities?workspace_id=${encodeURIComponent(workspaceId)}${defaultProjectId ? `&project_id=${encodeURIComponent(defaultProjectId)}` : ''}`).catch(() => []),
+          api(`/api/knowledge/fusion-candidates?workspace_id=${encodeURIComponent(workspaceId)}${defaultProjectId ? `&project_id=${encodeURIComponent(defaultProjectId)}` : ''}`).catch(() => []),
+        ]);
+        const root = safeArray(entities)[0];
+        if (root) {
+          const g = await api(`/api/knowledge/entities/${root.id}/graph?depth=2&workspace_id=${encodeURIComponent(workspaceId)}`).catch(() => ({ nodes: [], edges: [] }));
+          setGraph(g);
+        } else {
+          setGraph({ nodes: [], edges: [] });
+        }
+        setFusionCandidates(safeArray(candidates));
+      } else if (tab === 'policy') {
+        const list = await api(`/api/knowledge/source-policies?workspace_id=${encodeURIComponent(workspaceId)}`).catch(() => []);
+        setPolicies(safeArray(list));
+      } else if (tab === 'gaps') {
+        const list = await api(`/api/knowledge-gaps?workspace_id=${encodeURIComponent(workspaceId)}&status=open`).catch(() => []);
+        setGaps(safeArray(list));
+      }
+    } catch (error) {
+      setNote('error', error.message || '加载失败');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  useEffect(() => {
+    if (!mgmtOpen) return;
+    loadManagement(mgmtTab);
+  }, [mgmtOpen, mgmtTab]);
+
+  const patchFusion = async (id, status) => {
+    try {
+      const updated = await api(`/api/knowledge/fusion-candidates/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ workspace_id: workspaceId, status }),
+      });
+      setFusionCandidates((items) => items.map((item) => item.id === id ? updated : item));
+    } catch (error) {
+      setNote('error', error.message || '操作失败');
+    }
+  };
+
+  const togglePolicy = async (policy, key) => {
+    try {
+      const updated = await api(`/api/knowledge/source-policies/${policy.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ workspace_id: workspaceId, [key]: !policy[key] }),
+      });
+      setPolicies((items) => items.map((item) => item.id === policy.id ? updated : item));
+    } catch (error) {
+      setNote('error', error.message || '更新策略失败');
+    }
+  };
+
+  const dismissGap = async (gap) => {
+    try {
+      await api(`/api/knowledge-gaps/${gap.id}/dismiss`, {
+        method: 'POST',
+        body: JSON.stringify({ workspace_id: workspaceId, reason: 'dismissed_from_drawer' }),
+      });
+      setGaps((items) => items.filter((item) => item.id !== gap.id));
+    } catch (error) {
+      setNote('error', error.message || '忽略失败');
+    }
+  };
+
+  const sampleQuestions = [
+    'Pocket 3 的核心痛点是什么？',
+    '功能属性都定义了哪些？',
+    '包装结构有什么要求？',
+  ];
+
+  return (
+    <div className="viewport">
+      <div className="page page-fluid page-narrow">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name="bot" size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>知识工作台</h1>
+              <div className="muted text-sm">
+                两件事：<strong style={{ color: 'var(--text)' }}>问知识库</strong> 或 <strong style={{ color: 'var(--text)' }}>起草文档</strong>。
+                导入资料与治理在右侧抽屉。
+              </div>
+            </div>
+          </div>
+          <div className="page-head-actions">
+            <Btn size="sm" variant="ghost" icon="plus" onClick={openImport}>加资料</Btn>
+            <Btn size="sm" variant="ghost" icon="settings" onClick={() => { setMgmtTab('graph'); setMgmtOpen(true); }}>管理</Btn>
+          </div>
+        </header>
+
+        {notice ? (
+          <div className={`doc-studio-banner tone-${notice.tone}`}>
+            <span>{notice.text}</span>
+            <button type="button" className="doc-studio-banner-close" onClick={() => setNotice(null)} aria-label="关闭"><Icon name="x" size={12} /></button>
+          </div>
+        ) : null}
+
+        <div className="knowledge-lite-grid">
+          {/* 问 */}
+          <section className="knowledge-lite-panel ask-panel">
+            <header className="knowledge-panel-head">
+              <Icon name="bot" size={16} />
+              <div>
+                <h3>问问知识库</h3>
+                <p>提交后系统会自动构建/复用资料包，答案附引用。</p>
+              </div>
+            </header>
+            <form onSubmit={ask}>
+              <textarea
+                className="knowledge-ask-input"
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                placeholder="例如：Pocket 3 的核心痛点 / 包装结构怎么定的？"
+                rows={3}
+              />
+              <div className="knowledge-ask-row">
+                <select className="input" value={audience} onChange={(e) => setAudience(e.target.value)}>
+                  <option value="internal">内部视角</option>
+                  <option value="supplier">供应商视角</option>
+                  <option value="sales_external">销售/对外</option>
+                </select>
+                <Btn variant="primary" icon="sparkles" type="submit" disabled={busy === 'ask' || !question.trim()}>
+                  {busy === 'ask' ? '问中…' : '问'}
+                </Btn>
+              </div>
+            </form>
+
+            {answer ? (
+              <div className={`knowledge-answer ${answer.mode === 'refused' ? 'is-refused' : ''}`}>
+                <div className="knowledge-answer-top">
+                  <Tag tone={answer.mode === 'refused' ? 'danger' : 'success'}>{answer.mode || 'answered'}</Tag>
+                  <span className="muted text-sm">{Math.round((answer.confidence || 0) * 100)}% confidence</span>
+                  {answer.needs_review ? <Tag tone="accent">待复核</Tag> : null}
+                </div>
+                <div className="knowledge-answer-text">{answer.answer}</div>
+                {safeArray(answer.citations).length ? (
+                  <div className="doc-studio-chip-row">
+                    {answer.citations.map((item) => (
+                      <CitationChip
+                        key={item.chunk_id || item.title}
+                        label={item.title || item.chunk_id}
+                        onClick={() => jumpToCitation(item)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="muted text-sm">没有引用 — 可能是空 pack 或问题与已有资料无关。</div>
+                )}
+              </div>
+            ) : (
+              <div className="ask-suggestions">
+                <div className="muted text-sm" style={{ marginBottom: 8 }}>试试这些问题：</div>
+                <div className="ask-suggestions-list">
+                  {sampleQuestions.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      className="ask-suggestion-chip"
+                      onClick={() => setQuestion(q)}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* 写 */}
+          <section className="knowledge-lite-panel write-panel">
+            <header className="knowledge-panel-head">
+              <Icon name="clipboard" size={16} />
+              <div>
+                <h3>起草文档</h3>
+                <p>先建一个空白 PRD / MRD，再进编辑器细改。</p>
+              </div>
+            </header>
+            <form onSubmit={draftDocument} className="knowledge-write-form">
+              <div className="knowledge-write-row">
+                <select className="input" value={draftType} onChange={(e) => setDraftType(e.target.value)}>
+                  <option value="prd">PRD · 产品定义</option>
+                  <option value="mrd">MRD · 市场分析</option>
+                </select>
+                <input
+                  className="input"
+                  value={draftTitle}
+                  onChange={(e) => setDraftTitle(e.target.value)}
+                  placeholder="文档标题（可留空）"
+                />
+              </div>
+              <Btn variant="primary" icon="plus" type="submit" disabled={busy === 'draft'}>
+                {busy === 'draft' ? '创建中…' : '新建并进入编辑器'}
+              </Btn>
+            </form>
+          </section>
+        </div>
+
+        {/* 最近草稿 — 独立一行，full width */}
+        {recentDocs.length ? (
+          <section className="card-section" style={{ marginTop: 24 }}>
+            <div className="card-section-head">
+              <h2>最近草稿</h2>
+              <Tag tone="outline">{recentDocs.length}</Tag>
+              {recentDocs.length > 4 ? (
+                <button
+                  type="button"
+                  className="link-btn"
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() => { navigateTo(draftType); onNavigate?.(draftType); }}
+                >
+                  查看全部 →
+                </button>
+              ) : null}
+            </div>
+            <div className="card-grid">
+              {recentDocs.slice(0, 4).map((item) => {
+                const sectionCount = safeArray(item.content?.normalized_sections).length || 0;
+                const filledCount = safeArray(item.content?.normalized_sections).filter((s) => String(s.content || '').trim()).length;
+                const progress = sectionCount ? Math.round((filledCount / sectionCount) * 100) : 0;
+                const isPublished = item.status === 'published';
+                return (
+                  <DocCard
+                    key={item.id}
+                    title={item.title}
+                    icon={item.doc_type === 'mrd' ? 'bar-chart' : 'clipboard'}
+                    metaTop={
+                      <>
+                        <Tag tone={item.doc_type === 'mrd' ? 'accent' : 'outline'}>{item.doc_type?.toUpperCase()}</Tag>
+                        <span className={`status-dot ${isPublished ? 'published' : 'draft'}`} />
+                        <span>{isPublished ? '已发布' : '草稿'}</span>
+                      </>
+                    }
+                    metaBottom={
+                      <div className="doc-card-progress">
+                        <div className="doc-card-progress-bar"><span style={{ width: `${progress}%` }} /></div>
+                        <span className="muted text-sm">{filledCount}/{sectionCount}</span>
+                      </div>
+                    }
+                    footer={<span className="muted text-sm">更新于 {timeAgo(item.updated_at || item.created_at)}</span>}
+                    onClick={() => {
+                      navigateTo(item.doc_type, { docId: item.id });
+                      onNavigate?.(item.doc_type);
+                    }}
+                    isSample={Boolean(item.metadata?.is_sample)}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+      </div>
+
+      {/* 加资料抽屉 */}
+      <Drawer open={importOpen} title="加资料" icon="plus" onClose={() => setImportOpen(false)} width={420}>
+        <div className="knowledge-empty-note" style={{ marginBottom: 4 }}>
+          选择来源。资料会先标准化、再走权限和索引；默认不进 RAG，PM 复核后再开。
+        </div>
+        <button type="button" className="knowledge-import-card" onClick={() => triggerImportMode('paste')}>
+          <Icon name="clipboard" size={18} />
+          <div>
+            <strong>粘贴文本</strong>
+            <span>从飞书、会议纪要、PRD 片段复制后粘贴。</span>
+          </div>
+          <Icon name="chevron-right" size={14} />
+        </button>
+        <button type="button" className="knowledge-import-card" onClick={() => triggerImportMode('feishu')}>
+          <Icon name="link" size={18} />
+          <div>
+            <strong>飞书文档链接</strong>
+            <span>粘贴飞书云文档链接，自动读取并按标准结构拆节。</span>
+          </div>
+          <Icon name="chevron-right" size={14} />
+        </button>
+        <button type="button" className="knowledge-import-card" onClick={() => triggerImportMode('csv')}>
+          <Icon name="database" size={18} />
+          <div>
+            <strong>CSV 数据集</strong>
+            <span>价格、月销、评分等数值字段；进入产品/SKU 层。</span>
+          </div>
+          <Icon name="chevron-right" size={14} />
+        </button>
+        <div className="knowledge-empty-note" style={{ marginTop: 10 }}>
+          需要 Chrome 插件采集？切到 Library → 导入文档。
+        </div>
+      </Drawer>
+
+      {/* 管理抽屉 */}
+      <Drawer open={mgmtOpen} title="知识管理" icon="settings" onClose={() => setMgmtOpen(false)} width={520}>
+        <div className="mgmt-tabs">
+          {[
+            { key: 'graph', label: '图谱' },
+            { key: 'policy', label: '权限策略' },
+            { key: 'gaps', label: 'Gap Inbox' },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={`mgmt-tab ${mgmtTab === tab.key ? 'active' : ''}`}
+              onClick={() => setMgmtTab(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {mgmtTab === 'graph' ? (
+          <div>
+            <div className="mgmt-metrics">
+              <div><strong>{safeArray(graph?.nodes).length}</strong><span>节点</span></div>
+              <div><strong>{safeArray(graph?.edges).length}</strong><span>关系</span></div>
+              <div><strong>{safeArray(fusionCandidates).length}</strong><span>待合并</span></div>
+            </div>
+            <div className="mgmt-section-title">待确认合并候选</div>
+            {safeArray(fusionCandidates).length ? fusionCandidates.map((c) => (
+              <div key={c.id} className="mgmt-row">
+                <div>
+                  <strong>{c.action || c.candidate_type}</strong>
+                  <div className="muted text-sm">{c.reason || ''}</div>
+                </div>
+                {c.status === 'pending' ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <Btn size="sm" icon="check" onClick={() => patchFusion(c.id, 'approved')}>通过</Btn>
+                    <Btn size="sm" variant="ghost" icon="x" onClick={() => patchFusion(c.id, 'rejected')}>拒绝</Btn>
+                  </div>
+                ) : <Tag tone="outline">{c.status}</Tag>}
+              </div>
+            )) : <div className="knowledge-empty-note">暂无待合并候选。</div>}
+          </div>
+        ) : null}
+
+        {mgmtTab === 'policy' ? (
+          <div>
+            <div className="mgmt-section-title">资料 → RAG / Bot 开关</div>
+            {safeArray(policies).length ? policies.map((p) => (
+              <div key={p.id} className="mgmt-row">
+                <div>
+                  <strong>{p.source_type}:{p.source_id}</strong>
+                  <div className="muted text-sm">{p.default_audience} · {p.review_status}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {[['rag_enabled', 'RAG'], ['bot_enabled', 'Bot']].map(([k, label]) => (
+                    <button key={k} type="button" className={`knowledge-toggle ${p[k] ? 'on' : ''}`} onClick={() => togglePolicy(p, k)}>
+                      <span>{label}</span>
+                      <span className="knowledge-toggle-state">{p[k] ? '开' : '关'}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )) : <div className="knowledge-empty-note">还没有策略记录。导入资料后会自动出现。</div>}
+          </div>
+        ) : null}
+
+        {mgmtTab === 'gaps' ? (
+          <div>
+            <div className="mgmt-section-title">未回答 / 低置信问题</div>
+            {safeArray(gaps).length ? gaps.map((gap) => (
+              <div key={gap.id} className="mgmt-row gap-row">
+                <div>
+                  <strong>{gap.question_text || gap.question}</strong>
+                  <div className="muted text-sm">{gap.reason} · 出现 {gap.seen_count || 1} 次</div>
+                </div>
+                <Btn size="sm" variant="ghost" icon="x" onClick={() => dismissGap(gap)}>忽略</Btn>
+              </div>
+            )) : <div className="knowledge-empty-note">暂无待补问题。低置信问答会自动汇集到这里。</div>}
+          </div>
+        ) : null}
+      </Drawer>
+    </div>
+  );
+}
+
+window.DocumentStudio = DocumentStudio;
+window.StandardsScreen = StandardsScreen;
+window.KnowledgeScreen = KnowledgeScreen;
 function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const [productIds, setProductIds] = useState(safeArray(research.products));
   const [demandIds, setDemandIds] = useState(safeArray(research.demands));
@@ -3833,7 +4892,11 @@ function PickerModal({ title, items, excludeIds = [], onClose, onPick, renderIte
 function SettingsScreen({ data, api, refreshData }) {
   const initialSettingsTab = (() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("tab") === "tags" ? "tags" : "general";
+    const t = params.get("tab");
+    const valid = ["ai", "feishu", "sources", "tags", "account"];
+    if (valid.includes(t)) return t;
+    if (t === "general") return "ai"; // legacy redirect
+    return "ai";
   })();
   const [sources, setSources] = useState(data.rssSources);
   const [officialSources, setOfficialSources] = useState(data.officialRssSources || []);
@@ -3939,16 +5002,37 @@ function SettingsScreen({ data, api, refreshData }) {
 
   return (
     <div className="viewport">
-      <div className="page" style={{ maxWidth: 760 }}>
-        <h1 className="h1">系统设置</h1>
-        <div className="muted text-sm" style={{ marginBottom: 24 }}>配置 AI 模型、飞书同步与数据源</div>
-        <div className="news-tabs" style={{ marginBottom: 16 }}>
-          <div className={`news-tab ${settingsTab === "general" ? "active" : ""}`} onClick={() => setSettingsTab("general")}>通用设置</div>
-          <div className={`news-tab ${settingsTab === "tags" ? "active" : ""}`} onClick={() => setSettingsTab("tags")}>标签与字段</div>
+      <div className="page page-form">
+        <header className="page-head">
+          <div className="page-head-left">
+            <div className="screen-icon-box"><Icon name="settings" size={20} /></div>
+            <div>
+              <h1 className="h1" style={{ marginBottom: 2 }}>系统设置</h1>
+              <div className="muted text-sm">配置 AI 模型、飞书同步、数据源和字段词典。</div>
+            </div>
+          </div>
+        </header>
+        <div className="screen-tabs" role="tablist" aria-label="设置分类">
+          {[
+            { key: "ai", label: "AI 模型" },
+            { key: "feishu", label: "飞书集成" },
+            { key: "sources", label: "数据源" },
+            { key: "tags", label: "标签与字段" },
+            { key: "account", label: "账号" },
+          ].map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              className={`screen-tab ${settingsTab === t.key ? "active" : ""}`}
+              onClick={() => setSettingsTab(t.key)}
+              role="tab"
+              aria-selected={settingsTab === t.key}
+            >{t.label}</button>
+          ))}
         </div>
         {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
 
-        {settingsTab === "general" && (
+        {settingsTab === "ai" && (
           <>
         <div className="settings-section">
           <div className="settings-section-head">
@@ -4105,7 +5189,11 @@ function SettingsScreen({ data, api, refreshData }) {
             </div>
           </div>
         </div>
+          </>
+        )}
 
+        {settingsTab === "feishu" && (
+          <>
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="sync" size={14} style={{ color: "var(--accent)" }} />
@@ -4143,6 +5231,53 @@ function SettingsScreen({ data, api, refreshData }) {
           </div>
         </div>
 
+        <div className="settings-section">
+          <div className="settings-section-head">
+            <Icon name="folder-open" size={14} style={{ color: "var(--accent)" }} />
+            <div>
+              <h3>飞书项目 MCP <Tag tone="accent">Beta</Tag></h3>
+              <div className="desc">通过飞书 MCP Server 自动同步项目、任务、需求池到 LOOM。配好后「飞书项目」页会出现真实数据。</div>
+            </div>
+          </div>
+          <div className="settings-section-body">
+            <div className="settings-row">
+              <div className="label">MCP Server URL</div>
+              <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_url || ""} onChange={(e) => setSettings({ ...settings, feishu_mcp_url: e.target.value })} placeholder="例如：https://mcp.example.com/feishu" />
+            </div>
+            <div className="settings-row">
+              <div className="label">Access Token</div>
+              <input className="input" style={{ width: "100%" }} type="password" value={settings.feishu_mcp_token || ""} onChange={(e) => setSettings({ ...settings, feishu_mcp_token: e.target.value })} placeholder="飞书项目 API token" />
+            </div>
+            <div className="settings-row">
+              <div className="label">项目空间 ID</div>
+              <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_key || ""} onChange={(e) => setSettings({ ...settings, feishu_mcp_project_key: e.target.value })} placeholder="项目空间 project_key" />
+            </div>
+            <div className="settings-row">
+              <div className="label">同步频率</div>
+              <select className="input" style={{ maxWidth: 200 }} value={settings.feishu_mcp_interval || "manual"} onChange={(e) => setSettings({ ...settings, feishu_mcp_interval: e.target.value })}>
+                <option value="manual">仅手动</option>
+                <option value="15m">每 15 分钟</option>
+                <option value="1h">每小时</option>
+                <option value="4h">每 4 小时</option>
+                <option value="1d">每天一次</option>
+              </select>
+            </div>
+            <div className="settings-row">
+              <div className="label">&nbsp;</div>
+              <div className="row">
+                <Btn icon="check" onClick={() => setNotice("飞书 MCP 接入即将上线，已保存配置。")}>测试连接</Btn>
+                <Btn variant="primary" icon="sync" onClick={() => setNotice("飞书 MCP 接入即将上线，已保存配置。")}>立即同步</Btn>
+                <span className="muted text-sm" style={{ marginLeft: 4 }}>当前 mock 数据，接入后自动替换</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+          </>
+        )}
+
+        {settingsTab === "sources" && (
+          <>
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="rss" size={14} style={{ color: "var(--accent)" }} />
@@ -4237,6 +5372,11 @@ function SettingsScreen({ data, api, refreshData }) {
           </div>
         </div>
 
+          </>
+        )}
+
+        {settingsTab === "account" && (
+          <>
         <div className="settings-section">
           <div className="settings-section-head">
             <Icon name="key" size={14} style={{ color: "var(--accent)" }} />
@@ -4486,20 +5626,20 @@ function NewFieldModal({ onClose, onCreate }) {
   const toggleEntity = (e) => setEntities((curr) => curr.includes(e) ? curr.filter((x) => x !== e) : [...curr, e]);
   const valid = name.trim().length > 0 && entities.length > 0;
 
+  const TONE_LABEL = { outline: "Outline", default: "默认", accent: "强调", success: "成功", warn: "警告", danger: "危险" };
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" style={{ width: 380 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-form" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <Icon name="sparkles" size={16} style={{ color: "var(--accent)" }} />
+          <Icon name="sparkles" size={15} style={{ color: "var(--accent)" }} />
           <h3>新建字段</h3>
           <Btn variant="ghost" icon="x" onClick={onClose} />
         </div>
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div className="settings-row">
-            <div className="label">字段名</div>
+        <div className="modal-body form-stack">
+          <div className="form-field">
+            <label className="form-label">字段名</label>
             <input
               className="input"
-              style={{ width: "100%" }}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如：目标人群"
@@ -4507,38 +5647,47 @@ function NewFieldModal({ onClose, onCreate }) {
               onKeyDown={(e) => { if (e.key === "Enter" && valid) onCreate({ name: name.trim(), multi, tone, entities }); }}
             />
           </div>
-          <div className="settings-row">
-            <div className="label">类型</div>
-            <div style={{ display: "flex", gap: 16 }}>
+
+          <div className="form-field">
+            <label className="form-label">类型</label>
+            <div className="segment-control">
               {[{ v: true, label: "多选" }, { v: false, label: "单选" }].map(({ v, label }) => (
-                <label key={label} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12.5 }}>
-                  <input type="radio" checked={multi === v} onChange={() => setMulti(v)} /> {label}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="settings-row">
-            <div className="label">颜色</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["outline", "default", "accent", "success", "warn", "danger"].map((t) => (
                 <button
-                  key={t}
-                  className={`tag ${t} ${tone === t ? "ring" : ""}`}
-                  style={{ cursor: "pointer", outline: tone === t ? "2px solid var(--accent)" : "none", outlineOffset: 2 }}
-                  onClick={() => setTone(t)}
+                  key={label}
+                  type="button"
+                  className={`segment-item ${multi === v ? "active" : ""}`}
+                  onClick={() => setMulti(v)}
                 >
-                  {t}
+                  {label}
                 </button>
               ))}
             </div>
           </div>
-          <div className="settings-row">
-            <div className="label">归属</div>
-            <div style={{ display: "flex", gap: 16 }}>
+
+          <div className="form-field">
+            <label className="form-label">颜色</label>
+            <div className="color-swatch-grid">
+              {["outline", "default", "accent", "success", "warn", "danger"].map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={`color-swatch ${tone === t ? "selected" : ""}`}
+                  onClick={() => setTone(t)}
+                  title={TONE_LABEL[t]}
+                >
+                  <span className={`tag ${t}`}>{TONE_LABEL[t]}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">归属</label>
+            <div className="checkbox-group">
               {[{ key: "competitor", label: "竞品库" }, { key: "inspiration", label: "灵感库" }].map((e) => (
-                <label key={e.key} className="field-entity-checkbox" style={{ cursor: "pointer" }}>
+                <label key={e.key} className="checkbox-chip">
                   <input type="checkbox" checked={entities.includes(e.key)} onChange={() => toggleEntity(e.key)} />
-                  {e.label}
+                  <span>{e.label}</span>
                 </label>
               ))}
             </div>
@@ -4597,10 +5746,10 @@ function FieldSystemEditor({ settings, setSettings, saveSettings }) {
 
   return (
     <>
-      <div className="news-tabs" style={{ marginBottom: 16 }}>
-        <div className={`news-tab ${fieldTab === "competitor" ? "active" : ""}`} onClick={() => setFieldTab("competitor")}>竞品库</div>
-        <div className={`news-tab ${fieldTab === "inspiration" ? "active" : ""}`} onClick={() => setFieldTab("inspiration")}>灵感库</div>
-        <div className={`news-tab ${fieldTab === "all" ? "active" : ""}`} onClick={() => setFieldTab("all")}>所有字段</div>
+      <div className="screen-tabs" role="tablist" aria-label="字段实体">
+        <button type="button" className={`screen-tab ${fieldTab === "competitor" ? "active" : ""}`} onClick={() => setFieldTab("competitor")} role="tab" aria-selected={fieldTab === "competitor"}>竞品库</button>
+        <button type="button" className={`screen-tab ${fieldTab === "inspiration" ? "active" : ""}`} onClick={() => setFieldTab("inspiration")} role="tab" aria-selected={fieldTab === "inspiration"}>灵感库</button>
+        <button type="button" className={`screen-tab ${fieldTab === "all" ? "active" : ""}`} onClick={() => setFieldTab("all")} role="tab" aria-selected={fieldTab === "all"}>所有字段</button>
       </div>
       {notice && <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 10 }}>{notice}</div>}
       <div className="field-card-list">

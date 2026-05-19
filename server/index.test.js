@@ -6,6 +6,7 @@ process.env.APP_USERNAME = "tester@example.com";
 process.env.APP_PASSWORD = "secret123";
 process.env.APP_PASSWORD_ACCOUNTS = "";
 process.env.LOOM_OWNER_EMAIL = "";
+process.env.LOOM_BOT_INGRESS_KEY = "test_ingress_key";
 process.env.REMOTE_MEDIA_CACHE_TIMEOUT_MS = "1000";
 
 const dbModule = await import("./db.js");
@@ -26,6 +27,25 @@ beforeEach(async () => {
   dbModule.migrate();
   dbModule.db.prepare("DELETE FROM news_items").run();
   dbModule.db.prepare("DELETE FROM news_sources").run();
+  dbModule.db.prepare("DELETE FROM demand_cluster_question_hits").run();
+  dbModule.db.prepare("DELETE FROM demand_cluster_members").run();
+  dbModule.db.prepare("DELETE FROM demand_clusters").run();
+  dbModule.db.prepare("DELETE FROM heat_weight_settings").run();
+  dbModule.db.prepare("DELETE FROM competitor_specs").run();
+  dbModule.db.prepare("DELETE FROM competitor_platforms").run();
+  dbModule.db.prepare("DELETE FROM competitors").run();
+  dbModule.db.prepare("DELETE FROM category_templates").run();
+  dbModule.db.prepare("DELETE FROM query_audit").run();
+  dbModule.db.prepare("DELETE FROM citations").run();
+  dbModule.db.prepare("DELETE FROM query_indexes").run();
+  dbModule.db.prepare("DELETE FROM knowledge_query_logs").run();
+  dbModule.db.prepare("DELETE FROM knowledge_gaps").run();
+  dbModule.db.prepare("DELETE FROM knowledge_chunks_fts").run();
+  dbModule.db.prepare("DELETE FROM knowledge_chunks").run();
+  dbModule.db.prepare("DELETE FROM knowledge_sources").run();
+  dbModule.db.prepare("DELETE FROM evidence_links").run();
+  dbModule.db.prepare("DELETE FROM evidences").run();
+  dbModule.db.prepare("DELETE FROM signals").run();
   dbModule.db.prepare("DELETE FROM users").run();
   dbModule.db.prepare("DELETE FROM app_data").run();
   dbModule.db.prepare("DELETE FROM api_tokens").run();
@@ -147,6 +167,649 @@ describe("document imports", () => {
     const readBody = await readResponse.json();
     expect(readResponse.status).toBe(200);
     expect(readBody.document.id).toBe(body.document.id);
+  });
+});
+
+describe("signal evidence APIs", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("deduplicates signals and links evidence back to a product", async () => {
+    const { cookie } = await login();
+    const productResponse = await fetch(`${baseUrl}/api/products`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "p_seed_signal",
+        name: "Godox SL60W II",
+        brand: "Godox",
+      }),
+    });
+    expect(productResponse.status).toBe(201);
+
+    const signalPayload = {
+      origin: "plugin",
+      type: "product",
+      source_url: "https://www.amazon.com/dp/B07K84YW86",
+      raw_payload: { title: "Godox SL60W", price: 89.99 },
+      workspace_id: "ws-company",
+    };
+    const firstSignalResponse = await fetch(`${baseUrl}/api/signals`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify(signalPayload),
+    });
+    const firstSignal = await firstSignalResponse.json();
+    expect(firstSignalResponse.status).toBe(200);
+    expect(firstSignal).toMatchObject({ deduplicated: false });
+    expect(firstSignal.signal_id).toMatch(/^sig_/);
+
+    const duplicateSignalResponse = await fetch(`${baseUrl}/api/signals`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify(signalPayload),
+    });
+    const duplicateSignal = await duplicateSignalResponse.json();
+    expect(duplicateSignalResponse.status).toBe(200);
+    expect(duplicateSignal).toMatchObject({
+      signal_id: firstSignal.signal_id,
+      deduplicated: true,
+    });
+
+    const signalReadResponse = await fetch(`${baseUrl}/api/signals/${firstSignal.signal_id}?workspace_id=ws-company`, {
+      headers: { Cookie: cookie },
+    });
+    const signalRead = await signalReadResponse.json();
+    expect(signalRead.seen_count).toBe(2);
+
+    const evidenceResponse = await fetch(`${baseUrl}/api/evidences`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "claim_numeric",
+        claim_text: "price = $89.99",
+        signal_ids: [firstSignal.signal_id],
+        extracted_by: "human",
+        workspace_id: "ws-company",
+        links: [{ entity_type: "product", entity_id: "p_seed_signal", field_path: "price" }],
+      }),
+    });
+    const evidence = await evidenceResponse.json();
+    expect(evidenceResponse.status).toBe(200);
+    expect(evidence.id).toMatch(/^ev_/);
+
+    const productWithEvidenceResponse = await fetch(`${baseUrl}/api/products/p_seed_signal?include=evidence&workspace_id=ws-company`, {
+      headers: { Cookie: cookie },
+    });
+    const productWithEvidence = await productWithEvidenceResponse.json();
+    expect(productWithEvidenceResponse.status).toBe(200);
+    expect(productWithEvidence.evidence_status).toBe("current");
+    expect(productWithEvidence.evidence_count).toBe(1);
+    expect(productWithEvidence.evidences[0]).toMatchObject({
+      id: evidence.id,
+      claim_text: "price = $89.99",
+      signal_ids: [firstSignal.signal_id],
+    });
+
+    const evidenceListResponse = await fetch(`${baseUrl}/api/evidences?entity_type=product&entity_id=p_seed_signal&workspace_id=ws-company`, {
+      headers: { Cookie: cookie },
+    });
+    const evidenceList = await evidenceListResponse.json();
+    expect(evidenceListResponse.status).toBe(200);
+    expect(evidenceList).toHaveLength(1);
+    expect(evidenceList[0].id).toBe(evidence.id);
+  });
+
+  it("rejects evidence without valid signal ids", async () => {
+    const { cookie } = await login();
+    const emptyResponse = await fetch(`${baseUrl}/api/evidences`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "claim_numeric",
+        claim_text: "price = $89.99",
+        signal_ids: [],
+        extracted_by: "human",
+        workspace_id: "ws-company",
+      }),
+    });
+    const emptyBody = await emptyResponse.json();
+    expect(emptyResponse.status).toBe(400);
+    expect(emptyBody.error).toContain("signal_ids");
+
+    const missingResponse = await fetch(`${baseUrl}/api/evidences`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "claim_numeric",
+        claim_text: "price = $89.99",
+        signal_ids: ["sig_missing"],
+        extracted_by: "human",
+        workspace_id: "ws-company",
+      }),
+    });
+    const missingBody = await missingResponse.json();
+    expect(missingResponse.status).toBe(400);
+    expect(missingBody.error).toContain("signal not found");
+  });
+});
+
+describe("M4 query API", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("upserts sources, answers through /api/query, and resolves stable citations", async () => {
+    const { cookie } = await login();
+    const upsertResponse = await fetch(`${baseUrl}/api/query/upsert`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        sources: [{
+          id: "mrd_seed_xyz",
+          type: "mrd_section",
+          title: "色温分析",
+          body: "色温范围 2700-6500K，适合直播补光。",
+          visibility: "internal_only",
+          evidence_ids: ["ev_color_temp"],
+          confidence: 0.9,
+        }],
+      }),
+    });
+    const upsert = await upsertResponse.json();
+    expect(upsertResponse.status).toBe(200);
+    expect(upsert.upserted_count).toBe(1);
+
+    const firstQueryResponse = await fetch(`${baseUrl}/api/query`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", q: "色温范围 2700K", chat_type: "web" }),
+    });
+    const firstQuery = await firstQueryResponse.json();
+    expect(firstQueryResponse.status).toBe(200);
+    expect(firstQuery).toMatchObject({
+      adapter: "local",
+      visibility_applied: "internal_only",
+    });
+    expect(firstQuery.trace_id).toMatch(/^trace_/);
+    expect(firstQuery.confidence).toBeGreaterThan(0.3);
+    expect(firstQuery.citations[0]).toMatchObject({
+      source_id: "mrd_seed_xyz",
+      source_type: "mrd_section",
+      evidence_id: "ev_color_temp",
+    });
+    expect(firstQuery.citations[0].id).toMatch(/^cit_/);
+
+    const secondQueryResponse = await fetch(`${baseUrl}/api/query`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", q: "直播补光色温是多少", chat_type: "web" }),
+    });
+    const secondQuery = await secondQueryResponse.json();
+    expect(secondQuery.citations[0].id).toBe(firstQuery.citations[0].id);
+
+    const citationResponse = await fetch(`${baseUrl}/api/citations/${firstQuery.citations[0].id}?workspace_id=ws-company`, {
+      headers: { Cookie: cookie },
+    });
+    const citation = await citationResponse.json();
+    expect(citationResponse.status).toBe(200);
+    expect(citation).toMatchObject({
+      id: firstQuery.citations[0].id,
+      source_id: "mrd_seed_xyz",
+      source_type: "mrd_section",
+    });
+    expect(citation.source_body_full).toContain("2700-6500K");
+  });
+
+  it("refuses no-match queries and filters group chat to external-safe sources", async () => {
+    const { cookie } = await login();
+    await fetch(`${baseUrl}/api/query/upsert`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        sources: [
+          {
+            id: "kc_internal_runtime",
+            type: "knowledge_answer",
+            title: "内部续航",
+            body: "Godox 续航内部判断 internal runtime secret。",
+            visibility: "internal_only",
+          },
+          {
+            id: "kc_external_runtime",
+            type: "knowledge_answer",
+            title: "外部续航",
+            body: "Godox 续航对外口径 external runtime answer。",
+            visibility: "external_safe",
+          },
+        ],
+      }),
+    });
+
+    const noMatchResponse = await fetch(`${baseUrl}/api/query`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", q: "xqz123 完全不存在的随机词组" }),
+    });
+    const noMatch = await noMatchResponse.json();
+    expect(noMatchResponse.status).toBe(200);
+    expect(noMatch.confidence).toBeLessThan(0.3);
+    expect(noMatch.citations).toHaveLength(0);
+    expect(noMatch.answer).toContain("暂无可靠来源");
+
+    const groupQueryResponse = await fetch(`${baseUrl}/api/query`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        q: "Godox 续航 runtime",
+        chat_type: "group",
+        visibility_ceiling: "external_safe",
+      }),
+    });
+    const groupQuery = await groupQueryResponse.json();
+    expect(groupQueryResponse.status).toBe(200);
+    expect(groupQuery.visibility_applied).toBe("external_safe");
+    expect(groupQuery.citations.map((citation) => citation.source_id)).toContain("kc_external_runtime");
+    expect(groupQuery.citations.map((citation) => citation.source_id)).not.toContain("kc_internal_runtime");
+  });
+
+  it("reports local query adapter health", async () => {
+    const { cookie } = await login();
+    const response = await fetch(`${baseUrl}/api/query/health?workspace_id=ws-company`, {
+      headers: { Cookie: cookie },
+    });
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ adapter: "local", ok: true });
+  });
+});
+
+describe("M2 competitor and M3 demand cluster APIs", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("deduplicates competitors by brand/model and filters by numeric specs", async () => {
+    const { cookie } = await login();
+    const createFirst = await fetch(`${baseUrl}/api/competitors`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        brand: "Godox",
+        model: "SL60W II",
+        category_id: "cat_lighting_continuous",
+        specs: { wattage: 60, cri: 95, color_temp: "5600K" },
+      }),
+    });
+    const first = await createFirst.json();
+    expect(createFirst.status).toBe(200);
+    expect(first.matched_existing).toBe(false);
+    expect(first.competitor.id).toMatch(/^cmp_/);
+
+    const createDuplicate = await fetch(`${baseUrl}/api/competitors`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        brand: "GODOX",
+        model: "sl60w 2",
+        category_id: "cat_lighting_continuous",
+      }),
+    });
+    const duplicate = await createDuplicate.json();
+    expect(createDuplicate.status).toBe(200);
+    expect(duplicate).toMatchObject({
+      matched_existing: true,
+      competitor: { id: first.competitor.id },
+    });
+
+    await fetch(`${baseUrl}/api/competitors/${first.competitor.id}/platforms`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        platform: "amazon",
+        url: "https://amazon.com/dp/AAA",
+        price_value: 89.99,
+        price_currency: "USD",
+        raw_image_url: "https://example.com/godox.jpg",
+      }),
+    });
+    await fetch(`${baseUrl}/api/competitors/${first.competitor.id}/platforms`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        platform: "taobao",
+        url: "https://item.taobao.com/item.htm?id=684931",
+        price_value: 598,
+        price_currency: "CNY",
+      }),
+    });
+
+    const listResponse = await fetch(`${baseUrl}/api/competitors?workspace_id=ws-company&category=cat_lighting_continuous&filter=${encodeURIComponent(JSON.stringify([{ key: "wattage", op: ">=", value: 60 }]))}`, {
+      headers: { Cookie: cookie },
+    });
+    const list = await listResponse.json();
+    expect(listResponse.status).toBe(200);
+    expect(list).toHaveLength(1);
+    expect(list[0].platforms).toHaveLength(2);
+    expect(list[0].specs.find((spec) => spec.key === "wattage").value_number).toBe(60);
+    expect(list[0].missing_required_specs).toEqual([]);
+
+    const templatesResponse = await fetch(`${baseUrl}/api/category-templates?workspace_id=ws-company`, {
+      headers: { Cookie: cookie },
+    });
+    const templates = await templatesResponse.json();
+    expect(templatesResponse.status).toBe(200);
+    expect(templates.some((template) => template.id === "cat_lighting_continuous")).toBe(true);
+  });
+
+  it("rejects attaching a platform URL to two competitors", async () => {
+    const { cookie } = await login();
+    const a = await (await fetch(`${baseUrl}/api/competitors`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", brand: "Aputure", model: "LS 60x", category_id: "cat_lighting_continuous" }),
+    })).json();
+    const b = await (await fetch(`${baseUrl}/api/competitors`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", brand: "SmallRig", model: "RC60B", category_id: "cat_lighting_continuous" }),
+    })).json();
+    await fetch(`${baseUrl}/api/competitors/${a.competitor.id}/platforms`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", platform: "amazon", url: "https://amazon.com/dp/DUP" }),
+    });
+
+    const duplicateUrl = await fetch(`${baseUrl}/api/competitors/${b.competitor.id}/platforms`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", platform: "amazon", url: "https://amazon.com/dp/DUP" }),
+    });
+    const body = await duplicateUrl.json();
+    expect(duplicateUrl.status).toBe(409);
+    expect(body.error).toContain("url already attached");
+  });
+
+  it("clusters demands, computes heat, records question hits, merges and splits clusters", async () => {
+    const { cookie } = await login();
+    const demandInputs = [
+      { id: "d_quick_1", title: "希望支持快装板", summary: "Arca 快装板兼容性不好", created_at: "2026-05-17T10:00:00.000Z" },
+      { id: "d_quick_2", title: "想要 Arca 兼容", summary: "快装板需要更兼容", created_at: "2026-05-16T10:00:00.000Z" },
+      { id: "d_quick_3", title: "快装结构更稳", summary: "希望加快装结构", created_at: "2026-04-30T10:00:00.000Z" },
+      { id: "d_battery_1", title: "希望续航更久", summary: "直播灯续航不够", created_at: "2026-05-17T11:00:00.000Z" },
+    ];
+    for (const demand of demandInputs) {
+      const response = await fetch(`${baseUrl}/api/demands`, {
+        method: "POST",
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
+        body: JSON.stringify(demand),
+      });
+      expect(response.status).toBe(201);
+    }
+
+    const recomputeResponse = await fetch(`${baseUrl}/api/demand-clusters/recompute`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", only_unclustered: true }),
+    });
+    const recompute = await recomputeResponse.json();
+    expect(recomputeResponse.status).toBe(200);
+    expect(recompute.estimated_demands).toBe(4);
+    expect(recompute.clusters_created).toBeGreaterThanOrEqual(2);
+
+    const listResponse = await fetch(`${baseUrl}/api/demand-clusters?workspace_id=ws-company&window=30d&order=heat`, {
+      headers: { Cookie: cookie },
+    });
+    const clusters = await listResponse.json();
+    expect(listResponse.status).toBe(200);
+    const quickCluster = clusters.find((cluster) => cluster.canonical_text.includes("快装") || cluster.canonical_text.toLowerCase().includes("arca"));
+    expect(quickCluster.member_count).toBe(3);
+    expect(quickCluster.mentions_7d).toBe(2);
+    expect(quickCluster.mentions_30d).toBe(3);
+    expect(quickCluster.heat).toBe((3 * 2) + 3);
+
+    const hitResponse = await fetch(`${baseUrl}/api/demand-clusters/${quickCluster.id}/question-hits`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        asker_id: "u_sales_01",
+        query_text: "客户问快装板兼容性怎么回答",
+      }),
+    });
+    expect(hitResponse.status).toBe(200);
+    const afterHit = await (await fetch(`${baseUrl}/api/demand-clusters/${quickCluster.id}?workspace_id=ws-company`, {
+      headers: { Cookie: cookie },
+    })).json();
+    expect(afterHit.internal_questions_30d).toBe(1);
+    expect(afterHit.heat).toBe((3 * 2) + 3 + 5);
+
+    const batteryCluster = clusters.find((cluster) => cluster.id !== quickCluster.id);
+    const mergeResponse = await fetch(`${baseUrl}/api/demand-clusters/${batteryCluster.id}/merge`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", target_id: quickCluster.id }),
+    });
+    const merge = await mergeResponse.json();
+    expect(mergeResponse.status).toBe(200);
+    expect(merge.moved_members).toBe(1);
+
+    const splitResponse = await fetch(`${baseUrl}/api/demand-clusters/${quickCluster.id}/split`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        split_demand_ids: ["d_battery_1"],
+        new_canonical_text: "续航更久",
+      }),
+    });
+    const split = await splitResponse.json();
+    expect(splitResponse.status).toBe(200);
+    expect(split.new_cluster_id).toMatch(/^dc_/);
+    expect(split.moved_members).toBe(1);
+  });
+});
+
+describe("M5 Feishu Bot MVP", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  async function seedBotSource(cookie) {
+    const upsert = await fetch(`${baseUrl}/api/query/upsert`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        sources: [
+          {
+            id: "bot_internal_runtime",
+            type: "knowledge_answer",
+            title: "内部续航口径",
+            body: "Godox SL60W 续航内部测试为 80 分钟。",
+            visibility: "internal_only",
+          },
+          {
+            id: "bot_external_runtime",
+            type: "knowledge_answer",
+            title: "外部续航口径",
+            body: "Godox SL60W 在持续输出场景下提供出色续航。",
+            visibility: "external_safe",
+          },
+        ],
+      }),
+    });
+    expect(upsert.status).toBe(200);
+  }
+
+  function botEvent({ open_id = "ou_pm_001", chat_id = "oc_p2p_pm", chat_type = "p2p", text = "Godox SL60W 续航多久?", message_id = `om_${chat_id}` } = {}) {
+    return {
+      workspace_id: "ws-company",
+      event_id: `evt_${message_id}`,
+      message_id,
+      chat_id,
+      chat_type,
+      sender_id: open_id,
+      message_type: "text",
+      content: JSON.stringify({ text }),
+      create_time: "1779120000000",
+    };
+  }
+
+  it("answers PM private chat with internal citations and records a conversation", async () => {
+    const { cookie, body } = await login();
+    await seedBotSource(cookie);
+    const bindResponse = await fetch(`${baseUrl}/api/bot/feishu/users`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        open_id: "ou_pm_001",
+        loom_user_id: body.user.id,
+        role: "pm",
+        display_name: "PM Alice",
+      }),
+    });
+    expect(bindResponse.status).toBe(200);
+
+    const eventResponse = await fetch(`${baseUrl}/api/bot/feishu/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Loom-Bot-Ingress-Key": "test_ingress_key" },
+      body: JSON.stringify(botEvent()),
+    });
+    const result = await eventResponse.json();
+    expect(eventResponse.status).toBe(200);
+    expect(result.ok).toBe(true);
+    expect(result.card.data.answer).toContain("80 分钟");
+    expect(result.card.data.visibility_applied).toBe("internal_only");
+    expect(result.card.data.citations[0].source_id).toBe("bot_internal_runtime");
+    expect(result.conversation.visibility_ceiling_used).toBe("internal_only");
+  });
+
+  it("filters group chat to external-safe content even for PM users", async () => {
+    const { cookie, body } = await login();
+    await seedBotSource(cookie);
+    await fetch(`${baseUrl}/api/bot/feishu/users`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        open_id: "ou_pm_001",
+        loom_user_id: body.user.id,
+        role: "pm",
+        display_name: "PM Alice",
+      }),
+    });
+
+    const eventResponse = await fetch(`${baseUrl}/api/bot/feishu/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Loom-Bot-Ingress-Key": "test_ingress_key" },
+      body: JSON.stringify(botEvent({ chat_id: "oc_group_team", chat_type: "group", message_id: "om_group_1" })),
+    });
+    const result = await eventResponse.json();
+    expect(eventResponse.status).toBe(200);
+    expect(result.card.data.answer).not.toContain("80 分钟");
+    expect(result.card.data.answer).toContain("持续输出场景下提供出色续航");
+    expect(result.card.data.visibility_applied).toBe("external_safe");
+    expect(result.card.data.citations.map((citation) => citation.source_id)).toEqual(["bot_external_runtime"]);
+  });
+
+  it("rejects missing ingress key and records card actions", async () => {
+    const { cookie, body } = await login();
+    await fetch(`${baseUrl}/api/bot/feishu/users`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        open_id: "ou_pm_001",
+        loom_user_id: body.user.id,
+        role: "pm",
+        display_name: "PM Alice",
+      }),
+    });
+
+    const unauthorizedResponse = await fetch(`${baseUrl}/api/bot/feishu/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Lark-Signature": "test" },
+      body: JSON.stringify(botEvent({ message_id: "om_bad" })),
+    });
+    expect(unauthorizedResponse.status).toBe(401);
+
+    const actionResponse = await fetch(`${baseUrl}/api/bot/feishu/card-actions`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json", "X-Loom-Bot-Ingress-Key": "test_ingress_key" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        action: "report_incorrect",
+        message_id: "om_group_1",
+        user_open_id: "ou_pm_001",
+        payload: { trace_id: "trace_action" },
+      }),
+    });
+    const action = await actionResponse.json();
+    expect(actionResponse.status).toBe(200);
+    expect(action).toMatchObject({ ok: true, feedback: "incorrect" });
+  });
+
+  it("does not enable bot ingress with a test fallback key in production", async () => {
+    const originalEnv = {
+      NODE_ENV: process.env.NODE_ENV,
+      LOOM_BOT_INGRESS_KEY: process.env.LOOM_BOT_INGRESS_KEY,
+    };
+    process.env.NODE_ENV = "production";
+    delete process.env.LOOM_BOT_INGRESS_KEY;
+    try {
+      const response = await fetch(`${baseUrl}/api/bot/feishu/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Loom-Bot-Ingress-Key": "test_ingress_key" },
+        body: JSON.stringify(botEvent({ message_id: "om_no_prod_key" })),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ error: "bot_ingress_not_configured" });
+    } finally {
+      process.env.NODE_ENV = originalEnv.NODE_ENV;
+      process.env.LOOM_BOT_INGRESS_KEY = originalEnv.LOOM_BOT_INGRESS_KEY;
+    }
   });
 });
 
@@ -478,6 +1141,40 @@ describe("knowledge project and document APIs", () => {
       entity_type: "feature",
       canonical_name: "Other secret feature",
     });
+    const otherPolicy = (await import("./governance-service.js")).upsertKnowledgeSourcePolicy({
+      id: "ksp-other-workspace",
+      workspace_id: "ws-other",
+      source_type: "document",
+      source_id: otherDoc.id,
+      rag_enabled: false,
+      bot_enabled: false,
+    });
+    const otherGraphView = (await import("./graph-service.js")).createGraphView({
+      id: "gv-other-workspace",
+      workspace_id: "ws-other",
+      root_entity_id: otherEntity.id,
+      owner_user_id: otherUser.id,
+      name: "Other Graph",
+    });
+    const otherFusion = (await import("./knowledge-repository.js")).createKnowledgeFusionCandidate({
+      id: "fusion-other-workspace",
+      workspace_id: "ws-other",
+      project_id: "other-project",
+      candidate_type: "entity",
+      action: "review",
+      source_entity_ids: [otherEntity.id],
+      proposed_entity: {
+        canonical_name: otherEntity.canonical_name,
+        entity_type: otherEntity.entity_type,
+      },
+      reason: "other workspace fusion",
+    });
+    const otherMrd = (await import("./mrd-prd-service.js")).createStructuredDocument("mrd", {
+      id: "mrd-other-workspace",
+      workspace_id: "ws-other",
+      title: "Other MRD",
+      created_by: otherUser.id,
+    });
 
     const readOther = await fetch(`${baseUrl}/api/documents/${otherDoc.id}`, {
       headers: { Cookie: cookie },
@@ -506,6 +1203,38 @@ describe("knowledge project and document APIs", () => {
     const graphOtherEntity = await fetch(`${baseUrl}/api/knowledge/entities/${otherEntity.id}/graph?workspace_id=ws-other`, {
       headers: { Cookie: cookie },
     });
+    const answerOtherGap = await fetch(`${baseUrl}/api/knowledge-gaps/${otherGap.id}/answer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        answer_text: "should not answer",
+        evidence_ids: ["ev_missing"],
+      }),
+    });
+    const dismissOtherGap = await fetch(`${baseUrl}/api/knowledge-gaps/${otherGap.id}/dismiss`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+    const patchOtherPolicy = await fetch(`${baseUrl}/api/knowledge/source-policies/${otherPolicy.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workspace_id: "ws-company", rag_enabled: true }),
+    });
+    const patchOtherGraphView = await fetch(`${baseUrl}/api/graph/views/${otherGraphView.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workspace_id: "ws-company", name: "Leaked Graph" }),
+    });
+    const acceptOtherFusion = await fetch(`${baseUrl}/api/ontology/fusion-candidates/${otherFusion.id}/accept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workspace_id: "ws-company" }),
+    });
+    const patchOtherMrdSection = await fetch(`${baseUrl}/api/mrd-sections/${otherMrd.document_id || otherMrd.id}:market_background`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ body_markdown: "should not patch" }),
+    });
 
     expect(readOther.status).toBe(404);
     expect(exportOther.status).toBe(404);
@@ -514,6 +1243,23 @@ describe("knowledge project and document APIs", () => {
     expect(draftOtherPack.status).toBe(404);
     expect(syncOtherGap.status).toBe(404);
     expect(graphOtherEntity.status).toBe(403);
+    expect(answerOtherGap.status).toBe(404);
+    expect(dismissOtherGap.status).toBe(404);
+    expect(patchOtherPolicy.status).toBe(404);
+    expect(patchOtherGraphView.status).toBe(404);
+    expect(acceptOtherFusion.status).toBe(404);
+    expect(patchOtherMrdSection.status).toBe(404);
+
+    const unchangedGap = (await import("./knowledge-repository.js")).getKnowledgeGap(otherGap.id);
+    const unchangedPolicy = (await import("./governance-service.js")).getKnowledgeSourcePolicyById(otherPolicy.id);
+    const unchangedGraphView = (await import("./graph-service.js")).getGraphView(otherGraphView.id);
+    const unchangedFusion = (await import("./knowledge-repository.js")).getKnowledgeFusionCandidate(otherFusion.id);
+    const unchangedMrd = (await import("./mrd-prd-service.js")).getStructuredDocument(otherMrd.id);
+    expect(unchangedGap.status).toBe("open");
+    expect(unchangedPolicy.rag_enabled).toBe(false);
+    expect(unchangedGraphView.name).toBe("Other Graph");
+    expect(unchangedFusion.status).toBe("pending");
+    expect(unchangedMrd.sections.find((section) => section.id.endsWith(":market_background")).body_markdown).toBe("");
   });
 
   it("does not trust client-supplied draft chunks without a server-loaded pack", async () => {
