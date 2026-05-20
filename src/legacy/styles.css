@@ -7577,6 +7577,41 @@ tr.is-selected {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* Price bars (replaces density curve for sparse data robustness) */
+.dossier-price-bar {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: dossierBarGrow 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.dossier-price-bar.is-dominant {
+  filter: drop-shadow(0 6px 20px color-mix(in srgb, var(--accent) 35%, transparent));
+}
+.dossier-price-bar.is-zero {
+  opacity: 0.6;
+}
+.dossier-price-bar-group:hover .dossier-price-bar:not(.is-zero) {
+  opacity: 0.88;
+}
+.dossier-price-bar-label {
+  font-size: 14px;
+  font-weight: 600;
+  fill: var(--text-2);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.dossier-price-bar-label.is-dominant {
+  fill: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+}
+.dossier-axis-text-sub {
+  font-size: 10px;
+  fill: var(--text-4);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
 .dossier-callout-line {
   stroke: var(--text-3);
   stroke-width: 1;

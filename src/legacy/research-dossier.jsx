@@ -279,56 +279,107 @@ function ScatterMap({ enriched, dominantBand, mode = "rating" }) {
 }
 
 function PriceCurve({ bands, dominantBand }) {
-  if (!bands || !bands.length || bands.every((b) => b.count === 0)) return null;
+  // Renamed conceptually to "price bars" — clean histogram with rounded tops,
+  // gradient fill, percent labels. Handles sparse data (1-3 products) without
+  // the ugly artifacts of a smooth curve fit through near-zeros.
+  if (!bands || !bands.length || bands.every((b) => b.count === 0)) {
+    return (
+      <div className="dossier-empty">
+        <Icon name="bar-chart" size={20} />
+        <div>没有可用的定价数据</div>
+      </div>
+    );
+  }
   const W = 760;
-  const H = 220;
-  const PAD = { l: 40, r: 24, t: 40, b: 36 };
+  const H = 260;
+  const PAD = { l: 24, r: 24, t: 56, b: 44 };
   const innerW = W - PAD.l - PAD.r;
   const innerH = H - PAD.t - PAD.b;
-  const maxPct = Math.max(...bands.map((b) => b.pct), 0.1);
-
-  const n = bands.length;
-  const xAt = (i) => PAD.l + ((i + 0.5) / n) * innerW;
-  const yAt = (pct) => PAD.t + (1 - pct / maxPct) * innerH;
-  const tops = bands.map((b, i) => [xAt(i), yAt(b.pct)]);
-
-  let fill = `M ${PAD.l} ${PAD.t + innerH} L ${tops[0][0]} ${tops[0][1]}`;
-  for (let i = 0; i < tops.length - 1; i++) {
-    const [x0, y0] = tops[i];
-    const [x1, y1] = tops[i + 1];
-    const mx = (x0 + x1) / 2;
-    fill += ` Q ${mx} ${y0} ${mx} ${(y0 + y1) / 2} T ${x1} ${y1}`;
-  }
-  fill += ` L ${W - PAD.r} ${PAD.t + innerH} Z`;
-
-  const strokeD = `M ${tops[0][0]} ${tops[0][1]} ` + tops.slice(1).map(([px, py], i) => {
-    const [x0, y0] = tops[i];
-    const mx = (x0 + px) / 2;
-    return `Q ${mx} ${y0} ${mx} ${(y0 + py) / 2} T ${px} ${py}`;
-  }).join(" ");
+  const maxPct = Math.max(...bands.map((b) => b.pct), 0.05);
+  const slotW = innerW / bands.length;
+  const barW = Math.min(slotW * 0.62, 110);
 
   return (
     <svg className="dossier-svg" viewBox={`0 0 ${W} ${H}`} role="img">
       <defs>
-        <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.02" />
+        <linearGradient id="priceBarGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.92" />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.55" />
+        </linearGradient>
+        <linearGradient id="priceBarGradMuted" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.08" />
         </linearGradient>
       </defs>
-      <path d={fill} fill="url(#priceGrad)" />
-      <path d={strokeD} className="dossier-curve" />
-      {bands.map((b, i) => (
-        <text key={i} x={xAt(i)} y={H - 10} className="dossier-axis-text" textAnchor="middle">
-          {fmtCNY(b.lo)}-{fmtCNY(b.hi)}
-        </text>
-      ))}
+      {/* baseline */}
+      <line
+        x1={PAD.l}
+        x2={W - PAD.r}
+        y1={PAD.t + innerH}
+        y2={PAD.t + innerH}
+        className="dossier-grid"
+      />
+      {bands.map((b, i) => {
+        const cx = PAD.l + (i + 0.5) * slotW;
+        const isDominant = dominantBand && b.lo === dominantBand.lo && b.count > 0;
+        // Minimum visible height for zero bars (visual rhythm)
+        const minH = 6;
+        const barH = b.count > 0 ? Math.max((b.pct / maxPct) * innerH, 18) : minH;
+        const y = PAD.t + innerH - barH;
+        const isZero = b.count === 0;
+        return (
+          <g key={i} className="dossier-price-bar-group">
+            <rect
+              x={cx - barW / 2}
+              y={y}
+              width={barW}
+              height={barH}
+              rx={Math.min(barW / 2, 14)}
+              ry={Math.min(barW / 2, 14)}
+              fill={isZero ? "var(--surface-3)" : (isDominant ? "url(#priceBarGrad)" : "url(#priceBarGradMuted)")}
+              className={`dossier-price-bar ${isDominant ? "is-dominant" : ""} ${isZero ? "is-zero" : ""}`}
+            />
+            {!isZero && (
+              <text
+                x={cx}
+                y={y - 10}
+                textAnchor="middle"
+                className={`dossier-price-bar-label ${isDominant ? "is-dominant" : ""}`}
+              >
+                {Math.round(b.pct * 100)}%
+              </text>
+            )}
+            <text
+              x={cx}
+              y={H - 14}
+              textAnchor="middle"
+              className="dossier-axis-text"
+            >
+              {fmtCNY(b.lo)}-{fmtCNY(b.hi)}
+            </text>
+            {!isZero && (
+              <text
+                x={cx}
+                y={H - 2}
+                textAnchor="middle"
+                className="dossier-axis-text-sub"
+              >
+                {b.count} 款
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {/* dominant callout */}
       {dominantBand && dominantBand.count > 0 && (() => {
         const idx = bands.findIndex((b) => b.lo === dominantBand.lo);
         if (idx < 0) return null;
+        const cx = PAD.l + (idx + 0.5) * slotW;
         return (
           <g>
-            <line x1={xAt(idx)} y1={yAt(dominantBand.pct) - 4} x2={xAt(idx)} y2={PAD.t + 6} className="dossier-callout-line" />
-            <text x={xAt(idx)} y={PAD.t} className="dossier-callout-text" textAnchor="middle">主流 · {Math.round(dominantBand.pct * 100)}%</text>
+            <text x={cx} y={26} textAnchor="middle" className="dossier-callout-text">
+              主流价格带
+            </text>
           </g>
         );
       })()}
@@ -717,7 +768,7 @@ function ResearchDossier({ research, products, demands, onClose }) {
                     : "价格分布"}
                 </h2>
                 <p className="dossier-section-sub">
-                  基于 {stats.enriched.filter((p) => p._price.has).length} 款有定价数据的竞品，平滑密度分布。
+                  基于 {stats.enriched.filter((p) => p._price.has).length} 款有定价数据的竞品，按价格区间分布。
                 </p>
               </div>
               <div className="dossier-section-body">
