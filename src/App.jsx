@@ -21,41 +21,26 @@ const TweakToggle = globalThis.TweakToggle;
 const { useEffect, useMemo, useRef, useState } = React;
 
 const NAV = [
-  { group: "采集", items: [
-    { key: "news", label: "资讯流", icon: "newspaper" },
-    { key: "products", label: "竞品库", icon: "boxes" },
-    { key: "demands", label: "需求雷达", icon: "lightbulb" },
-  ] },
-  { group: "调研", items: [
-    { key: "research", label: "调研工坊", icon: "compass" },
-  ] },
-  { group: "文档", items: [
-    { key: "mrd", label: "市场分析", icon: "bar-chart" },
-    { key: "prd", label: "产品定义", icon: "clipboard" },
-    { key: "feishu_space", label: "飞书项目", icon: "folder-open" },
-  ] },
-  { group: "知识", items: [
-    { key: "library", label: "资料库", icon: "file-text" },
-    { key: "standards", label: "标准库", icon: "shield" },
-    { key: "knowledge", label: "知识工作台", icon: "network" },
-    { key: "ask", label: "智能问答", icon: "bot" },
-  ] },
+  { key: "home", label: "工作台", icon: "home" },
+  { key: "news", label: "资讯流", icon: "newspaper" },
+  { key: "demands", label: "需求库", icon: "bar-chart" },
+  { key: "products", label: "竞品库", icon: "boxes" },
+  { key: "research", label: "调研工坊", icon: "compass" },
+  { key: "library", label: "知识库", icon: "file-text" },
 ];
 
 const TITLES = {
-  news: { label: "资讯流", subLabel: "官方源与行业动态" },
-  products: { label: "竞品库", subLabel: "产品与平台采集" },
-  demands: { label: "需求雷达", subLabel: "用户痛点与机会" },
-  library: { label: "资料库", subLabel: "知识中台" },
-  "library-import": { label: "资料库", subLabel: "导入资料" },
-  knowledge: { label: "知识工作台", subLabel: "导入、索引、图谱、问答与文档生成" },
-  standards: { label: "标准库", subLabel: "PRD / MRD / 字段标准" },
-  ask: { label: "智能问答", subLabel: "基于资料库的 AI 问答" },
+  home: { label: "工作台", subLabel: "团队研究枢纽" },
+  research: { label: "调研工坊", subLabel: "发起 · 沉淀 · 导出" },
+  demands: { label: "需求库", subLabel: "飞书镜像 + 品类分析" },
+  products: { label: "竞品库", subLabel: "快照 · 评论 · 标注" },
+  news: { label: "资讯流", subLabel: "行业资讯 · RSS 订阅" },
+  library: { label: "知识库", subLabel: "PRD / MRD · 向量检索" },
+  "library-import": { label: "知识库", subLabel: "导入资料" },
+  settings: { label: "设置", subLabel: "集成 · 数据源 · 团队" },
+  // legacy compat
   mrd: { label: "市场分析", subLabel: "MRD · 市场需求文档" },
   prd: { label: "产品定义", subLabel: "PRD · 产品需求文档" },
-  research: { label: "调研工坊", subLabel: "结构化分析报告" },
-  settings: { label: "设置", subLabel: "系统设置" },
-  feishu_space: { label: "飞书项目", subLabel: "项目自动同步" },
 };
 
 const SEARCH_ICON = {
@@ -891,22 +876,292 @@ function FeishuProjectsScreen({ sampleWorkspace = false }) {
   );
 }
 
+function HomeScreen({ data, onNavigate }) {
+  const research = data.research || [];
+  const demands = data.demands || [];
+  const products = data.products || [];
+  const news = data.news || [];
+  const activeResearch = research.filter((r) => r.status !== "done" && r.status !== "archived");
+  const currentUser = data.user?.name || "";
+  // Try to filter "mine" — but only if the data actually has owner fields.
+  // Otherwise fall back to all (and the label changes to be honest).
+  const demandsHaveOwner = demands.some((d) => d.pm || d.owner || d.assignee);
+  const myDemands = demandsHaveOwner && currentUser
+    ? demands.filter((d) => (d.pm || d.owner || d.assignee || "") === currentUser)
+    : demands;
+  const demandsLabel = demandsHaveOwner ? "我负责的需求" : "需求库 · 共追踪";
+  const feishuConnected = Boolean(
+    data.settings?.feishu_app_token ||
+    data.settings?.feishu_connected ||
+    data.workspace?.feishu_app_token
+  );
+  const lastSyncAt = data.settings?.feishu_last_sync_at || data.settings?.last_sync_at || null;
+
+  // News: top 5 most recent items for the 本周资讯 summary card
+  const recentNews = news
+    .filter((n) => n.titleZh || n.original_title)
+    .slice(0, 5);
+
+  // Hot keywords: derive top painpoints + scenarios from demands data
+  const keywordFreq = {};
+  demands.forEach((d) => {
+    const pool = [
+      ...(Array.isArray(d.painpoints) ? d.painpoints : []),
+      ...(Array.isArray(d.scenarios) ? d.scenarios : []),
+    ];
+    pool.forEach((raw) => {
+      const word = String(raw || "").split(/[\/·,，]/)[0].trim();
+      if (word && word.length <= 8) {
+        keywordFreq[word] = (keywordFreq[word] || 0) + 1;
+      }
+    });
+  });
+  const hotKeywords = Object.entries(keywordFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+
+  const fmtAgo = (iso) => {
+    if (!iso) return "";
+    const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 60) return `${s} 秒前`;
+    if (s < 3600) return `${Math.round(s / 60)} 分钟前`;
+    if (s < 86400) return `${Math.round(s / 3600)} 小时前`;
+    return `${Math.round(s / 86400)} 天前`;
+  };
+
+  // Compute "today's actionable summary" — what needs PM's attention today
+  const today = new Date();
+  const isFriday = today.getDay() === 5;
+  const myActiveCount = myDemands.filter((d) => d.status === "in-progress" || d.status === "调研中" || d.status === "立项").length;
+  const actionItems = [];
+  if (feishuConnected && isFriday && myActiveCount > 0) {
+    actionItems.push(`今天是周五，你有 ${myActiveCount} 条需求待更新`);
+  }
+  if (activeResearch.length > 0) {
+    actionItems.push(`${activeResearch.length} 个调研进行中`);
+  }
+
+  return (
+    <div className="viewport">
+      <div className="page page-home">
+        <div className="home-hello">
+          <div className="home-hello-title">
+            {(() => {
+              const h = today.getHours();
+              const greet = h < 6 ? "夜深了" : h < 12 ? "早上好" : h < 14 ? "中午好" : h < 18 ? "下午好" : "晚上好";
+              return `${greet}，${currentUser || "visitor"}`;
+            })()}
+          </div>
+          <div className="home-hello-sub">
+            {actionItems.length > 0
+              ? actionItems.join(" · ")
+              : feishuConnected
+                ? "没有待处理事项，看看本周行业资讯？"
+                : "先把飞书多维表格接入，工作台才能告诉你今天该做什么"}
+          </div>
+        </div>
+
+        <div className="home-kpi-strip">
+          <button className="home-kpi-card" onClick={() => onNavigate("research")}>
+            <div className="home-kpi-num">{activeResearch.length}</div>
+            <div className="home-kpi-label">我的进行中调研</div>
+          </button>
+          <button className="home-kpi-card" onClick={() => onNavigate("demands")}>
+            <div className="home-kpi-num">{myDemands.length}</div>
+            <div className="home-kpi-label">{demandsLabel}</div>
+          </button>
+          <button className="home-kpi-card" onClick={() => onNavigate("products")}>
+            <div className="home-kpi-num">{products.length}</div>
+            <div className="home-kpi-label">竞品快照</div>
+          </button>
+          <div className={`home-kpi-card ${feishuConnected ? "" : "home-kpi-card-pending"}`}>
+            <div className="home-kpi-num">{feishuConnected ? 0 : ""}</div>
+            <div className="home-kpi-label">
+              {feishuConnected ? "我本周的决策" : "我本周的决策 · 待接入飞书"}
+            </div>
+          </div>
+        </div>
+
+        {!feishuConnected && (
+          <div className="home-connect-banner">
+            <div className="home-connect-banner-icon">
+              <Icon name="feishu" size={16} />
+            </div>
+            <div className="home-connect-banner-body">
+              <div className="home-connect-banner-title">接入飞书多维表格，工作台才能告诉你今天该做什么</div>
+              <div className="home-connect-banner-desc">
+                Loom 从你每周五更新的单元格里自动抽取决策。无需新增动作，按现有节奏写更新即可。
+              </div>
+            </div>
+            <button className="home-connect-banner-cta" onClick={() => onNavigate("settings")}>
+              去配置 →
+            </button>
+          </div>
+        )}
+
+        <div className="home-grid">
+          <div className="home-main-stack">
+          <section className="home-section home-section-main">
+            <div className="home-section-head">
+              <h2 className="home-section-title">我的近期动态</h2>
+              {feishuConnected && lastSyncAt ? (
+                <span className="home-sync-badge home-sync-ok">
+                  <Icon name="check" size={10} />
+                  飞书 · {fmtAgo(lastSyncAt)}同步
+                </span>
+              ) : (
+                <span className="home-sync-badge home-sync-pending">待接入飞书</span>
+              )}
+            </div>
+            {feishuConnected ? (
+              <div className="home-empty-state">
+                <Icon name="check" size={18} style={{ color: "var(--success)" }} />
+                <div>近 7 天暂无你的决策或状态变更</div>
+              </div>
+            ) : (
+              <div className="home-pending-card">
+                <div className="home-pending-explain">
+                  接入飞书后，每周五你写完更新单元格，这里会自动出现你的决策摘要：
+                </div>
+                <ul className="home-pending-bullets">
+                  <li>
+                    <span className="home-pending-bullet-dot" />
+                    你做出的决策（暂缓 / 立项 / 弃单 …）
+                  </li>
+                  <li>
+                    <span className="home-pending-bullet-dot" />
+                    决策理由（从单元格自然语言抽取）
+                  </li>
+                  <li>
+                    <span className="home-pending-bullet-dot" />
+                    重启条件（"等模具降到 18 万再说"等隐性标记）
+                  </li>
+                </ul>
+                <div className="home-pending-note-2">
+                  团队全部动态见 <button className="home-link-btn home-link-inline" onClick={() => onNavigate("demands")}>需求库 → 决策时间线</button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {hotKeywords.length > 0 && (
+            <section className="home-section">
+              <div className="home-section-head">
+                <h2 className="home-section-title">本周用户声音热词</h2>
+                <span className="home-section-meta">来自 {demands.length} 条用户反馈聚合</span>
+              </div>
+              <div className="home-keywords">
+                {hotKeywords.map(([word, count]) => (
+                  <button
+                    key={word}
+                    type="button"
+                    className="home-keyword-pill"
+                    onClick={() => onNavigate("demands")}
+                    title={`${count} 条用户声音提及"${word}"`}
+                  >
+                    <span className="home-keyword-word">{word}</span>
+                    <span className="home-keyword-count">{count}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="home-keywords-foot">
+                <button className="home-link-btn home-link-inline" onClick={() => onNavigate("demands")}>
+                  去需求库逐条查看 →
+                </button>
+              </div>
+            </section>
+          )}
+          </div>
+
+          <div className="home-side-stack">
+            <section className="home-section home-section-side">
+              <div className="home-section-head">
+                <h2 className="home-section-title">我的进行中调研</h2>
+                <button className="home-section-link" onClick={() => onNavigate("research")}>
+                  全部 <Icon name="chevron-right" size={11} />
+                </button>
+              </div>
+              {activeResearch.length > 0 ? (
+                <div className="home-research-list">
+                  {activeResearch.slice(0, 5).map((item) => (
+                    <div key={item.id} className="home-research-row" onClick={() => onNavigate("research")}>
+                      <Icon name="compass" size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                      <span className="home-research-title">{item.title || "未命名调研"}</span>
+                      <Tag tone="outline">{item.status || "进行中"}</Tag>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="home-empty-state small">
+                  <Icon name="compass" size={16} style={{ color: "var(--text-4)" }} />
+                  <div style={{ color: "var(--text-3)", fontSize: 13 }}>还没有进行中的调研</div>
+                  <button className="home-link-btn" onClick={() => onNavigate("research")}>
+                    新建调研任务 →
+                  </button>
+                </div>
+              )}
+            </section>
+
+            <section className="home-section home-section-side">
+              <div className="home-section-head">
+                <h2 className="home-section-title">本周行业资讯</h2>
+                <button className="home-section-link" onClick={() => onNavigate("news")}>
+                  全部 {news.length > 0 ? `(${news.length})` : ""} <Icon name="chevron-right" size={11} />
+                </button>
+              </div>
+              {recentNews.length > 0 ? (
+                <div className="home-news-list">
+                  {recentNews.map((item) => (
+                    <div key={item.id} className="home-news-row" onClick={() => onNavigate("news")}>
+                      <Icon name="newspaper" size={12} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 3 }} />
+                      <div className="home-news-body">
+                        <div className="home-news-title">{item.titleZh || item.original_title}</div>
+                        <div className="home-news-meta">
+                          {item.source && <span>{item.source}</span>}
+                          {item.published_at && <span>· {fmtAgo(item.published_at)}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="home-empty-state small">
+                  <Icon name="newspaper" size={16} style={{ color: "var(--text-4)" }} />
+                  <div style={{ color: "var(--text-3)", fontSize: 13 }}>暂无资讯</div>
+                  <button className="home-link-btn" onClick={() => onNavigate("settings")}>
+                    配置 RSS 源 →
+                  </button>
+                </div>
+              )}
+            </section>
+
+            {feishuConnected && (
+              <section className="home-section home-section-side">
+                <div className="home-section-head">
+                  <h2 className="home-section-title">异常监测</h2>
+                  <span className="home-section-meta">卡 3 周 / 暂停 4 周以上</span>
+                </div>
+                <div className="home-empty-state small">
+                  <Icon name="check" size={16} style={{ color: "var(--success)" }} />
+                  <div style={{ color: "var(--text-3)", fontSize: 13 }}>暂无需关注的卡顿项</div>
+                </div>
+              </section>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Sidebar({ active, onNav, data, onLogout, onFeedback, isAdmin, collapsed, onToggleCollapsed }) {
   const [accountOpen, setAccountOpen] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState(() => {
-    try {
-      if (typeof localStorage === "undefined") return {};
-      return JSON.parse(localStorage.getItem("loom.sidebarGroupsCollapsed") || "{}");
-    } catch (err) {
-      return {};
-    }
-  });
   const accountRef = useRef(null);
   const counts = {
-    news: data.newsCounts?.all || data.news.length,
-    products: data.products.length,
-    demands: data.demands.length,
     research: data.research.length,
+    demands: data.demands.length,
+    products: data.products.length,
+    news: data.newsCounts?.all ?? data.news.length,
   };
   const user = data.user;
   const activeNavKey = active === "library-import" ? "library" : active;
@@ -927,15 +1182,6 @@ function Sidebar({ active, onNav, data, onLogout, onFeedback, isAdmin, collapsed
     };
   }, [accountOpen]);
 
-  useEffect(() => {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem("loom.sidebarGroupsCollapsed", JSON.stringify(collapsedGroups));
-  }, [collapsedGroups]);
-
-  const toggleGroup = (groupName) => {
-    setCollapsedGroups((current) => ({ ...current, [groupName]: !current[groupName] }));
-  };
-
   return (
     <aside className="sidebar" data-screen-label="sidebar">
       <button
@@ -954,35 +1200,23 @@ function Sidebar({ active, onNav, data, onLogout, onFeedback, isAdmin, collapsed
         </div>
       </div>
 
-      {NAV.map((group) => {
-        const groupActive = group.items.some((item) => item.key === activeNavKey);
-        const groupCollapsed = Boolean(collapsedGroups[group.group]) && !groupActive;
-        return (
-        <div key={group.group} className={`sb-group ${groupCollapsed ? "is-collapsed" : ""} ${groupActive ? "has-active" : ""}`}>
-          <button
-            type="button"
-            className="sb-group-label"
-            onClick={() => toggleGroup(group.group)}
-            aria-expanded={!groupCollapsed}
+      <div className="sb-nav">
+        {NAV.map((item) => (
+          <div
+            key={item.key}
+            className={`sb-item ${activeNavKey === item.key ? "active" : ""}`}
+            onClick={() => onNav(item.key)}
           >
-            <span>{group.group}</span>
-            <Icon name={groupCollapsed ? "chevron-right" : "chevron-down"} size={11} />
-          </button>
-          <div className="sb-group-items">
-          {(collapsed || !groupCollapsed) && group.items.map((item) => (
-            <div key={item.key} className={`sb-item ${activeNavKey === item.key ? "active" : ""}`} onClick={() => onNav(item.key)}>
-              <Icon name={item.icon} size={15} className="ico" />
-              <span className="sb-item-label">
-                <span className="sb-item-main">{item.label}</span>
-                {item.subLabel && <span className="sb-item-sub">{item.subLabel}</span>}
-              </span>
-              {counts[item.key] != null && <span className="badge">{counts[item.key]}</span>}
-            </div>
-          ))}
+            <Icon name={item.icon} size={15} className="ico" />
+            <span className="sb-item-label">
+              <span className="sb-item-main">{item.label}</span>
+            </span>
+            {counts[item.key] != null && counts[item.key] > 0 && (
+              <span className="badge">{counts[item.key]}</span>
+            )}
           </div>
-        </div>
-        );
-      })}
+        ))}
+      </div>
 
       <div className="sb-spacer" />
       <button type="button" className="sb-item sb-item-button sb-feedback" onClick={onFeedback}>
@@ -1140,12 +1374,16 @@ function App() {
   const initialScreen = (() => {
     const params = new URLSearchParams(window.location.search);
     const legacyScreens = {
-      "knowledge-import": "knowledge",
-      "knowledge-query": "ask",
-      "knowledge-draft": "mrd",
+      "knowledge-import": "library",
+      "knowledge-query": "library",
+      "knowledge-draft": "library",
+      "knowledge": "library",
+      "ask": "library",
+      "standards": "library",
+      "feishu_space": "home",
     };
     const screen = legacyScreens[params.get("screen")] || params.get("screen");
-    return ["news", "products", "demands", "research", "library", "library-import", "knowledge", "ask", "mrd", "prd", "standards", "feishu_space", "settings"].includes(screen) ? screen : "news";
+    return ["home", "research", "demands", "products", "news", "library", "library-import", "settings", "mrd", "prd"].includes(screen) ? screen : "home";
   })();
   const [active, setActive] = useState(initialScreen);
   const [me, setMe] = useState(null);
@@ -1373,61 +1611,18 @@ function App() {
   const liveNewsReady = Boolean(data.onboarding?.liveNewsReady);
   const latestNewsAt = data.onboarding?.latestNewsAt || data.onboarding?.latestFetchedAt || "";
     const screen = {
-      news: <NewsScreen {...screenProps} />,
-      products: <ProductsScreen {...screenProps} detailCollapsed={detailCollapsed} setDetailCollapsed={setDetailCollapsed} />,
-      demands: <DemandsScreen {...screenProps} />,
+      home: <HomeScreen data={data} onNavigate={setActive} />,
       research: <ResearchScreen {...screenProps} />,
+      demands: <DemandsScreen {...screenProps} />,
+      products: <ProductsScreen {...screenProps} detailCollapsed={detailCollapsed} setDetailCollapsed={setDetailCollapsed} />,
+      news: <NewsScreen {...screenProps} />,
       library: <LibraryScreen {...screenProps} reloadKey={libraryReloadKey} onNavigate={setActive} onOpenDocumentModal={setDocumentModalMode} />,
       "library-import": <LibraryImportScreen onOpenDocumentModal={setDocumentModalMode} />,
-      knowledge: <KnowledgeScreen {...screenProps} onNavigate={setActive} initialAction="ask" initialDocType="prd" />,
-      ask: (
-      <div className="viewport">
-        <div className="page page-fluid page-narrow">
-          <div className="screen-header">
-            <div className="screen-header-left">
-              <div className="screen-icon-box"><Icon name="bot" size={20} /></div>
-              <div>
-                <h1 className="h1" style={{ marginBottom: 2 }}>Ask</h1>
-                <div className="muted text-sm">基于公司知识库的智能问答，每个回答都带来源引用</div>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <Tag tone="outline">0 个知识片段</Tag>
-            </div>
-          </div>
-          <div className="ask-container">
-            <div className="ask-empty">
-              <div className="ask-empty-icon"><Icon name="bot" size={36} /></div>
-              <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Ask Loom</div>
-              <div style={{ fontSize: 13.5, color: "var(--text-3)", lineHeight: 1.7, maxWidth: 400 }}>
-                向知识库提问，获得带证据引用的答案。问答会自动识别权限边界——对内答全量，对客户只答可对外口径。
-              </div>
-              <div className="ask-example-questions">
-                <div className="ask-example-q"><Icon name="chevron-right" size={12} />这个产品和大疆某款有什么差异？</div>
-                <div className="ask-example-q"><Icon name="chevron-right" size={12} />客户问发热问题怎么回答？</div>
-                <div className="ask-example-q"><Icon name="chevron-right" size={12} />这个需求最近热不热？</div>
-                <div className="ask-example-q"><Icon name="chevron-right" size={12} />有没有 MRD 支持这个方向？</div>
-              </div>
-            </div>
-            <div className="ask-input-bar">
-              <Icon name="bot" size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
-              <input className="ask-input" placeholder="输入问题，按 Enter 发送…" disabled />
-              <div className="ask-audience-toggle">
-                <button className="ask-audience active">内部</button>
-                <button className="ask-audience">供应商</button>
-                <button className="ask-audience">销售</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    ),
-    mrd: <DocumentStudio screenType="mrd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={setActive} />,
-    prd: <DocumentStudio screenType="prd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={setActive} />,
-    standards: <StandardsScreen data={data} api={api} />,
-    settings: <SettingsScreen {...screenProps} />,
-    feishu_space: <FeishuProjectsScreen sampleWorkspace={sampleWorkspace} />,
-  }[active];
+      settings: <SettingsScreen {...screenProps} />,
+      // legacy routes kept for backward compat
+      mrd: <DocumentStudio screenType="mrd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={setActive} />,
+      prd: <DocumentStudio screenType="prd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={setActive} />,
+    }[active] ?? <HomeScreen data={data} onNavigate={setActive} />;
   const notifications = [
     { id: "n1", label: "系统", text: "全局搜索已经接通，可用 ⌘K 快速打开。", tone: "outline" },
     { id: "n2", label: "News", text: `${data.newsCounts?.all || data.news.length} 条资讯已载入。`, tone: "outline" },
@@ -1449,12 +1644,11 @@ function App() {
         <div className="topbar">
           <div className="topbar-title">
             {TITLES[active]?.label || active}
-            {TITLES[active]?.subLabel && <span className="topbar-title-sub"> {TITLES[active].subLabel}</span>}
+            {TITLES[active]?.subLabel && <span className="topbar-title-sub"> · {TITLES[active].subLabel}</span>}
           </div>
-          {active === "products" && <span className="topbar-crumb">· {data.products.length} 条记录</span>}
-          {active === "news" && <span className="topbar-crumb">· 插件采集 · {data.newsCounts?.all || data.news.length} 条资讯</span>}
-          {active === "demands" && <span className="topbar-crumb">· {data.demands.length} 条需求</span>}
-          {active === "research" && <span className="topbar-crumb">· {data.research.length} 个项目</span>}
+          {active === "products" && <span className="topbar-crumb">· {data.products.length} 条</span>}
+          {active === "demands" && <span className="topbar-crumb">· {data.demands.length} 条</span>}
+          {active === "research" && <span className="topbar-crumb">· {data.research.length} 个</span>}
           <div className="topbar-actions">
             {sampleWorkspace && (
               <span className="topbar-sample-chip" title={latestNewsAt ? `示例数据 · 更新 ${formatSampleDate(latestNewsAt)}` : "示例数据"}>
@@ -1462,19 +1656,8 @@ function App() {
                 示例工作区
               </span>
             )}
-            {isAdmin ? (
-              <a className="topbar-admin-link" href="/admin">
-                <Icon name="settings" size={13} />
-                <span>管理员总控台</span>
-              </a>
-            ) : null}
             {sampleWorkspace && canExitSample ? (
-              <Btn
-                className="demo-mode-exit-btn"
-                size="sm"
-                icon="check"
-                onClick={finishSampleWorkspace}
-              >
+              <Btn className="demo-mode-exit-btn" size="sm" icon="check" onClick={finishSampleWorkspace}>
                 退出演示模式
               </Btn>
             ) : null}
@@ -1515,12 +1698,6 @@ function App() {
             >
               <Icon name={t.mode === "dark" ? "sun" : "moon"} size={14} />
             </button>
-            <Btn
-              variant="ghost"
-              icon="panel-open"
-              size="sm"
-              onClick={() => setDetailCollapsed((value) => !value)}
-            />
           </div>
         </div>
         {screen}

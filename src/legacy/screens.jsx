@@ -1742,6 +1742,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [viewMode, setViewMode] = useState("card"); // card | table
   useEffect(() => setProducts(safeArray(data.products)), [data.products]);
   const updateSelected = async (patch) => {
     setProducts((ps) => ps.map((p) => p.id === selectedId ? { ...p, ...patch, tag_values: { ...(p.tag_values || {}), ...(patch.tag_values || {}) } } : p));
@@ -1760,10 +1761,11 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const [addFieldOpen, setAddFieldOpen] = useState(false);
 
   useEffect(() => {
+    if (selectMode) return; // don't auto-select first item while in bulk mode
     if (!products.some((p) => p.id === selectedId)) {
       setSelectedId(products[0]?.id || null);
     }
-  }, [products, selectedId]);
+  }, [products, selectedId, selectMode]);
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => products.some((item) => item.id === id)));
   }, [products]);
@@ -1877,52 +1879,152 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
           <div className="products-main">
             <div className="filter-bar">
               <div className="filter-bar-cluster">
-                <div className="products-toolbar-search">
-                  <Icon name="search" size={14} style={{ position: "absolute", left: 9, top: 8, color: "var(--text-3)" }} />
-                  <input className="input" placeholder="搜索竞品..." value={query} onChange={(e) => setQuery(e.target.value)}
-                  style={{ paddingLeft: 30, width: "100%" }} />
+                <div className="demand-filter-group" role="group" aria-label="竞品筛选">
+                  <div className="demand-filter-label">
+                    <Icon name="search" size={13} />
+                  </div>
+                  <input
+                    className="demand-filter-search"
+                    placeholder="搜索竞品..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  <select
+                    className="demand-filter-select"
+                    value={categoryFilter}
+                    onChange={(e) => setCategoryFilter(e.target.value)}
+                  >
+                    {categories.map((c) =>
+                      <option key={c} value={c}>{c === "全部" ? "全部品类" : c}</option>
+                    )}
+                  </select>
                 </div>
-                <select className="input sm products-toolbar-filter" style={{ height: 30, paddingRight: 24 }}
-                value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-                  {categories.map((c) =>
-                  <option key={c} value={c}>{c === "全部" ? "全部品类" : c}</option>
-                  )}
-                </select>
+                <div className="demand-view-switch" role="tablist" aria-label="竞品视图">
+                  <button type="button" className={viewMode === "card" ? "active" : ""} onClick={() => setViewMode("card")}>卡片</button>
+                  <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>列表</button>
+                </div>
               </div>
               <div className="filter-bar-meta">
                 <span className="demand-match-count">匹配 {filtered.length} / {products.length}</span>
                 {filtered.length > 0 && !selectMode && (
-                  <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+                  <Btn
+                    size="sm"
+                    variant="ghost"
+                    className="select-trigger"
+                    onClick={() => {
+                      setSelectMode(true);
+                      setSelectedId(null);
+                      setSelectedIds([]);
+                      setDetailCollapsed?.(true);
+                    }}
+                  >
+                    批量选择
+                  </Btn>
                 )}
               </div>
             </div>
         {notice && <div className="ai-block" style={{ margin: "0 12px 10px" }}>{notice}</div>}
-        {filtered.length > 0 &&
-          <div className={`bulk-toolbar products-selection-bar ${selectMode ? "" : "idle"}`} style={{ margin: "0 12px 10px" }}>
-            {selectMode ?
-            <>
-                <div className="bulk-left">
-                  <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
-                  <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>删除</Btn>
-                  <span className="muted text-sm">{selectedIds.length} 条已选择</span>
-                </div>
-                <label className="bulk-check">
-                  <input
-                    type="checkbox"
-                    checked={paged.items.length > 0 && paged.items.every((item) => selectedIds.includes(item.id))}
-                    onChange={(event) => {
-                      const visibleIds = paged.items.map((item) => item.id);
-                      setSelectedIds(event.target.checked ? Array.from(new Set([...selectedIds, ...visibleIds])) : selectedIds.filter((id) => !visibleIds.includes(id)));
-                    }}
-                  />
-                  <span>全选本页</span>
-                </label>
-              </> :
-            null
-            }
+        {filtered.length > 0 && selectMode && (
+          <div className="bulk-toolbar products-selection-bar" style={{ margin: "0 12px 10px" }}>
+            <div className="bulk-left">
+              <Btn size="sm" variant="ghost" onClick={() => { setSelectMode(false); setSelectedIds([]); }}>取消</Btn>
+              <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>
+                删除 {selectedIds.length || ""}
+              </Btn>
+              <span className="muted text-sm">已选 {selectedIds.length} / {paged.items.length}</span>
+            </div>
+            <label className="bulk-check">
+              <input
+                type="checkbox"
+                checked={paged.items.length > 0 && paged.items.every((item) => selectedIds.includes(item.id))}
+                onChange={(event) => {
+                  const visibleIds = paged.items.map((item) => item.id);
+                  setSelectedIds(event.target.checked ? Array.from(new Set([...selectedIds, ...visibleIds])) : selectedIds.filter((id) => !visibleIds.includes(id)));
+                }}
+              />
+              <span>全选本页</span>
+            </label>
           </div>
-        }
+        )}
 
+        {viewMode === "card" ? (
+          <div className="demands-grid" style={{ padding: "0 12px" }}>
+            {paged.items.map((p) => {
+              const platforms = safeArray(p.platforms);
+              const main = platforms[0] || {};
+              const platformKey = main.platform || p.source || "unknown";
+              return (
+                <div
+                  className={`demand-card ${selectMode && selectedIds.includes(p.id) ? "is-selected" : ""}`}
+                  key={p.id}
+                  onClick={() => {
+                    if (selectMode) toggleSelect(p.id);
+                    else { setSelectedId(p.id); setDetailCollapsed?.(false); }
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
+                  <div className="demand-thumb">
+                    {selectMode && (
+                      <label className="demand-card-check">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(p.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleSelect(p.id)}
+                        />
+                      </label>
+                    )}
+                    <DemandImage
+                      demand={{ source: platformKey, image: p.image }}
+                      label={(PLATFORM_LABEL[platformKey] || platformKey || "竞品").toUpperCase() + " · COMPETITOR"}
+                      className="demand-thumb-media"
+                    />
+                    <div className="platform-badge">
+                      <Icon name="boxes" size={10} /> {p.category || "未分类"}
+                    </div>
+                  </div>
+                  <div className="demand-body">
+                    <div className="demand-title">{p.name || "未命名竞品"}</div>
+                    <div className="demand-summary">
+                      {p.ai_summary || safeArray(p.tags).slice(0, 4).join(" · ") || "—"}
+                    </div>
+                    <div className="demand-tags">
+                      {platforms.slice(0, 3).map((pl, i) => (
+                        <span key={i} className={`platform-pill ${PLATFORM_KEY[pl.platform] || ""}`}>
+                          {PLATFORM_ICON[pl.platform] || PLATFORM_LABEL[pl.platform] || pl.platform}
+                        </span>
+                      ))}
+                      {p.status && (
+                        <Tag tone={p.status === "跟踪中" ? "success" : p.status === "已归档" ? "outline" : "accent"}>
+                          {p.status}
+                        </Tag>
+                      )}
+                    </div>
+                    <div className="demand-foot">
+                      <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                        💰 {main.price || "—"}
+                      </span>
+                      <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                        ⭐ {main.rating ?? "—"}
+                      </span>
+                      <span>📦 {main.sales || "—"}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {filtered.length === 0 && (
+              <div style={{ gridColumn: "1 / -1" }}>
+                <EmptyState
+                  icon="boxes"
+                  title={products.length ? "没有匹配的竞品" : "还没有真实竞品"}
+                >
+                  请使用 Chrome 插件采集。
+                </EmptyState>
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="products-table-wrap">
           <table className="products-table">
             <thead>
@@ -1937,7 +2039,14 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                 const main = platforms[0] || {};
                 const reviews = Number(main.reviews);
                 return (
-                  <tr key={p.id} className={selectedId === p.id ? "selected" : ""} onClick={() => { setSelectedId(p.id); setDetailCollapsed?.(false); }}>
+                  <tr
+                    key={p.id}
+                    className={`${selectedId === p.id ? "selected" : ""} ${selectMode && selectedIds.includes(p.id) ? "is-selected" : ""}`}
+                    onClick={() => {
+                      if (selectMode) toggleSelect(p.id);
+                      else { setSelectedId(p.id); setDetailCollapsed?.(false); }
+                    }}
+                  >
                     {selectMode && <td onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggleSelect(p.id)} />
                     </td>}
@@ -1992,12 +2101,16 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
               }
             </tbody>
           </table>
-          {paged.total > pageSize && (
-            <div className="products-pagination-shell">
-              <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
-            </div>
-          )}
         </div>
+        )}
+        {viewMode === "card" && paged.total > pageSize && (
+          <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
+        )}
+        {viewMode === "table" && paged.total > pageSize && (
+          <div className="products-pagination-shell">
+            <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
+          </div>
+        )}
       </div>
 
         </div>
@@ -2291,7 +2404,7 @@ function AddProductModal({ onClose, api, refreshData }) {
 }
 
 // ============ DEMANDS ============
-function DemandsScreen({ data, api, refreshData, navTarget }) {
+function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
   const [demands, setDemands] = useState(safeArray(data.demands));
   useEffect(() => setDemands(safeArray(data.demands)), [data.demands]);
   const [filterScenario, setFilterScenario] = useState("");
@@ -2301,6 +2414,12 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectMode, setSelectMode] = useState(false);
   const [viewMode, setViewMode] = useState("card");
+  const [tab, setTab] = useState("voices"); // requirements | analysis | timeline | voices
+  const feishuConnected = Boolean(
+    data.settings?.feishu_app_token ||
+    data.settings?.feishu_connected ||
+    data.workspace?.feishu_app_token
+  );
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
@@ -2398,11 +2517,11 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
       <div className="page page-fluid page-wide">
         <header className="page-head">
           <div className="page-head-left">
-            <div className="screen-icon-box"><Icon name="lightbulb" size={20} /></div>
+            <div className="screen-icon-box"><Icon name="bar-chart" size={20} /></div>
             <div>
-              <h1 className="h1" style={{ marginBottom: 2 }}>需求雷达</h1>
+              <h1 className="h1" style={{ marginBottom: 2 }}>需求库</h1>
               <div className="muted text-sm">
-                收集用户痛点和需求线索，AI 自动打标、聚类、关联到 PRD / MRD。
+                飞书多维表格镜像 · AI 语义搜索 · 品类分析视图。
               </div>
             </div>
           </div>
@@ -2427,7 +2546,139 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           }}>{notice}</div>
         )}
 
-        {hasAnyDemands ? (
+        <div className="demands-source-banner">
+          <Icon name="link" size={12} style={{ color: "var(--text-3)", flexShrink: 0 }} />
+          <span className="demands-source-text">
+            数据来源：<strong>飞书多维表格</strong>
+          </span>
+          {feishuConnected ? (
+            <Tag tone="success">已接入 · 2 分钟前同步</Tag>
+          ) : (
+            <Tag tone="outline">未接入</Tag>
+          )}
+          {!feishuConnected && (
+            <button
+              type="button"
+              className="demands-source-cta"
+              onClick={() => onNavigate?.("settings")}
+            >
+              配置 →
+            </button>
+          )}
+        </div>
+
+        <div className="demands-tabs" role="tablist" aria-label="需求库视图">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "voices"}
+            className={`demands-tab ${tab === "voices" ? "active" : ""}`}
+            onClick={() => setTab("voices")}
+          >
+            <Icon name="message-circle" size={12} />
+            <span>用户声音</span>
+            <span className="demands-tab-count">{demands.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "requirements"}
+            className={`demands-tab ${tab === "requirements" ? "active" : ""}`}
+            onClick={() => setTab("requirements")}
+          >
+            <Icon name="clipboard" size={12} />
+            <span>需求列表</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "analysis"}
+            className={`demands-tab ${tab === "analysis" ? "active" : ""}`}
+            onClick={() => setTab("analysis")}
+          >
+            <Icon name="bar-chart" size={12} />
+            <span>品类分析</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "timeline"}
+            className={`demands-tab ${tab === "timeline" ? "active" : ""}`}
+            onClick={() => setTab("timeline")}
+          >
+            <Icon name="calendar" size={12} />
+            <span>决策时间线</span>
+          </button>
+        </div>
+
+        {tab === "requirements" && (
+          <div className="demands-tab-empty">
+            <Icon name="clipboard" size={28} style={{ color: "var(--text-4)" }} />
+            <div className="demands-tab-empty-title">需求列表（飞书镜像表）</div>
+            <div className="demands-tab-empty-desc">
+              接入飞书 Loom 标准模板后，所有需求会在这里以表格形式镜像显示。
+              字段包括：需求名称 / 品类 / 负责 PM / 当前状态 / 优先级 / 周更新 / 决策状态 / 决策理由 / 关联竞品。
+            </div>
+            <div className="demands-tab-empty-fields">
+              <span>需求名称</span>
+              <span>品类</span>
+              <span>负责 PM</span>
+              <span>当前状态</span>
+              <span>优先级</span>
+              <span>周更新</span>
+              <span>决策状态</span>
+              <span>决策理由</span>
+              <span>关联竞品</span>
+            </div>
+            <button
+              type="button"
+              className="btn primary"
+              style={{ marginTop: 18 }}
+              onClick={() => onNavigate?.("settings")}
+            >
+              去配置飞书 →
+            </button>
+          </div>
+        )}
+
+        {tab === "analysis" && (
+          <div className="demands-tab-empty">
+            <Icon name="bar-chart" size={28} style={{ color: "var(--text-4)" }} />
+            <div className="demands-tab-empty-title">品类分析视图</div>
+            <div className="demands-tab-empty-desc">
+              选定某品类后（脚架 / 闪光灯 / 手柄 / 支架），自动汇总：
+            </div>
+            <div className="demands-tab-empty-bullets">
+              <div>💰 价格带分布（基于竞品快照数据）</div>
+              <div>📦 销量分布（电商抓取）</div>
+              <div>🎯 重点需求 TOP 5（按关联评论数排序）</div>
+              <div>🔥 用户呼声热词（评论 AI 聚类）</div>
+            </div>
+            <div className="demands-tab-empty-note">
+              需要飞书需求 + 竞品库快照同时具备才能生成完整分析。
+            </div>
+          </div>
+        )}
+
+        {tab === "timeline" && (
+          <div className="demands-tab-empty">
+            <Icon name="calendar" size={28} style={{ color: "var(--text-4)" }} />
+            <div className="demands-tab-empty-title">决策时间线</div>
+            <div className="demands-tab-empty-desc">
+              按时间顺序展示每条需求的状态变更与决策事件——AI 从每周五更新单元格自动抽取。
+            </div>
+            <div className="demands-tab-empty-bullets">
+              <div>· 立项 / 暂缓 / 弃单 / 重启 事件</div>
+              <div>· 决策理由 + 触发来源（销售反馈 / 竞品动作）</div>
+              <div>· 关联的调研任务与竞品快照</div>
+            </div>
+            <div className="demands-tab-empty-note">
+              团队全部动态在这里查看，工作台只显示"我"的部分。
+            </div>
+          </div>
+        )}
+
+        {tab === "voices" && hasAnyDemands ? (
           <div className="filter-bar">
             <div className="filter-bar-cluster">
               <div className="demand-filter-group" role="group" aria-label="需求筛选">
@@ -2452,13 +2703,20 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             <div className="filter-bar-meta">
               <span className="demand-match-count">匹配 {filtered.length} / {demands.length}</span>
               {filtered.length > 0 && !selectMode && (
-                <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+                <Btn
+                  size="sm"
+                  variant="ghost"
+                  className="select-trigger"
+                  onClick={() => { setSelectMode(true); setSelectedId(null); setSelectedIds([]); }}
+                >
+                  批量选择
+                </Btn>
               )}
             </div>
           </div>
         ) : null}
 
-        {filtered.length > 0 && selectMode &&
+        {tab === "voices" && filtered.length > 0 && selectMode &&
           <div className="bulk-toolbar" style={{
             marginBottom: 12,
             borderRadius: 14,
@@ -2466,9 +2724,11 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             boxShadow: "0 10px 30px rgba(0,0,0,.06)",
           }}>
             <div className="bulk-left">
-              <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
-              <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
-              <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+              <Btn size="sm" variant="ghost" onClick={() => { setSelectMode(false); setSelectedIds([]); }}>取消</Btn>
+              <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>
+                删除 {selectedIds.length || ""}
+              </Btn>
+              <span className="muted text-sm">已选 {selectedIds.length} / {paged.items.length}</span>
             </div>
             <label className="bulk-check">
               <input
@@ -2484,10 +2744,18 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           </div>
         }
 
-        {viewMode === "card" ?
+        {tab === "voices" && (viewMode === "card" ?
         <div className="demands-grid">
           {paged.items.map((d) =>
-          <div className="demand-card" key={d.id} onClick={() => setSelectedId(d.id)} style={{ cursor: "pointer" }}>
+          <div
+            className={`demand-card ${selectMode && selectedIds.includes(d.id) ? "is-selected" : ""}`}
+            key={d.id}
+            onClick={() => {
+              if (selectMode) toggleSelect(d.id);
+              else setSelectedId(d.id);
+            }}
+            style={{ cursor: "pointer" }}
+          >
               <div className="demand-thumb">
                 {selectMode && <label className="demand-card-check">
                   <input
@@ -2532,11 +2800,10 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           {filtered.length === 0 && demands.length === 0 ? (
             <div style={{ gridColumn: "1 / -1" }}>
               <div className="empty-hero">
-                <Icon name="lightbulb" size={48} />
-                <h2>需求雷达还没有数据</h2>
+                <Icon name="bar-chart" size={48} />
+                <h2>需求库还没有数据</h2>
                 <p className="muted">
-                  在小红书 / Amazon / Kickstarter 等平台用 Chrome 插件采集，AI 会自动打标并归类到这里。
-                  也可以手动新建一条需求。
+                  配置飞书多维表格后自动同步需求，也可手动新建。采集自小红书 / Amazon 等平台的用户声音会自动关联需求。
                 </p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <Btn variant="primary" icon="plus" onClick={() => setShowAdd(true)}>手动新建</Btn>
@@ -2568,7 +2835,14 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             </thead>
             <tbody>
               {paged.items.map((d) =>
-              <tr key={d.id} className={selectedId === d.id ? "selected" : ""} onClick={() => setSelectedId(d.id)}>
+              <tr
+                key={d.id}
+                className={`${selectedId === d.id ? "selected" : ""} ${selectMode && selectedIds.includes(d.id) ? "is-selected" : ""}`}
+                onClick={() => {
+                  if (selectMode) toggleSelect(d.id);
+                  else setSelectedId(d.id);
+                }}
+              >
                   {selectMode &&
                   <td onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} />
@@ -2590,8 +2864,10 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             </tbody>
           </table>
         </div>
-        }
-        <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条灵感" />
+        )}
+        {tab === "voices" && filtered.length > 0 && (
+          <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条灵感" />
+        )}
       </div>
 
       {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} fields={data.settings?.fields} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
