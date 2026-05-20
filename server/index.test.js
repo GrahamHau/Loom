@@ -1801,6 +1801,41 @@ describe("admin users", () => {
     expect(loginResult.body.user.role_code).toBe("member");
   });
 
+  it("lets the Mock account collect into visitor sample data", async () => {
+    const loginResult = await login("Mock", "Mock");
+    expect(loginResult.response.status).toBe(200);
+    expect(loginResult.body.user.id).toBe("password-mock");
+
+    const mockBootstrapResponse = await fetch(`${baseUrl}/api/bootstrap`, {
+      headers: { Cookie: loginResult.cookie },
+    });
+    const mockBootstrap = await mockBootstrapResponse.json();
+    expect(mockBootstrap.workspace).toMatchObject({ slug: "company" });
+
+    const productResponse = await fetch(`${baseUrl}/api/products`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: loginResult.cookie },
+      body: JSON.stringify({
+        name: "Mock 采集带图竞品",
+        image: "/uploads/remote-media/mock-product.avif",
+        thumbnail_url: "/uploads/remote-media/mock-product.avif",
+      }),
+    });
+    expect(productResponse.status).toBe(201);
+
+    const visitor = repo.bootstrap(dbModule.getLegacyUserId());
+    expect(visitor.onboarding).toMatchObject({
+      sampleWorkspace: true,
+      sampleSourceUserId: "password-mock",
+      sampleSourceUserName: "Mock",
+    });
+    expect(visitor.products.find((item) => item.name === "Mock 采集带图竞品")).toMatchObject({
+      sample: true,
+      image: "/uploads/remote-media/mock-product.avif",
+      thumbnail_url: "/uploads/remote-media/mock-product.avif",
+    });
+  });
+
   it("can map local password login to a mirrored production user outside production", async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousMappedUserId = process.env.LOOM_PASSWORD_USER_ID;
@@ -1956,6 +1991,51 @@ describe("admin users", () => {
     const logs = await logsResponse.json();
     expect(logsResponse.status).toBe(200);
     expect(logs.items.some((item) => item.id === "llm-log-test")).toBe(true);
+  });
+
+  it("lets admins configure platform AI organize access", async () => {
+    process.env.LOOM_OWNER_EMAIL = process.env.APP_USERNAME;
+    dbModule.migrate();
+    const ownerLogin = await login();
+    dbModule.db.prepare(`
+      INSERT INTO users (
+        id, email, name, initials, role, role_code, status, auth_provider, created_at, updated_at
+      ) VALUES (
+        'platform-ai-member', 'member@example.com', 'Member', 'ME', '成员', 'member', 'active', 'password', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+    `).run();
+
+    const saveResponse = await fetch(`${baseUrl}/api/admin/platform-ai`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: ownerLogin.cookie },
+      body: JSON.stringify({
+        enabled: true,
+        api_url: "https://platform.example/v1",
+        model: "platform-model",
+        api_key: "platform-key",
+        allow_all_users: false,
+        allowed_user_ids: ["platform-ai-member", "missing-user"],
+      }),
+    });
+    const saved = await saveResponse.json();
+    expect(saveResponse.status).toBe(200);
+    expect(saved).toMatchObject({
+      enabled: true,
+      api_url: "https://platform.example/v1",
+      model: "platform-model",
+      api_key: "********",
+      configured: true,
+      allow_all_users: false,
+      allowed_user_ids: ["platform-ai-member"],
+    });
+
+    const getResponse = await fetch(`${baseUrl}/api/admin/platform-ai`, {
+      headers: { Cookie: ownerLogin.cookie },
+    });
+    const config = await getResponse.json();
+    expect(getResponse.status).toBe(200);
+    expect(config.api_key).toBe("********");
+    expect(JSON.stringify(config)).not.toContain("platform-key");
   });
 });
 

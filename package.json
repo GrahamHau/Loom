@@ -17,6 +17,7 @@
     "test": "npm run check:node && vitest run",
     "db:seed": "npm run check:node && node scripts/seed-db.js",
     "db:sync-sample": "npm run check:node && node scripts/sync-sample-workspace.js",
+    "db:seed-mock": "npm run check:node && node scripts/seed-mock-sample-user.js",
     "db:clear-demo": "npm run check:node && node scripts/clear-demo-state.js",
     "db:pull-remote": "npm run check:node && node scripts/pull-remote-db.js",
     "fields:normalize-tags": "npm run check:node && node scripts/normalize-field-tags.js",

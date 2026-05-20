@@ -28,7 +28,10 @@ import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSour
 const STREAM_NEWS_MAX_AGE_DAYS = Math.max(1, Number(process.env.STREAM_NEWS_MAX_AGE_DAYS || 10));
 // 默认开启 visitor 示例数据；要在生产环境关掉，设 LOOM_ENABLE_PUBLIC_SAMPLE_DATA=false
 const ENABLE_PUBLIC_SAMPLE_DATA = process.env.LOOM_ENABLE_PUBLIC_SAMPLE_DATA !== "false";
-const SAMPLE_SOURCE_USER_ID = cleanText(process.env.LOOM_SAMPLE_SOURCE_USER_ID || "");
+export const MOCK_SAMPLE_USERNAME = cleanText(process.env.LOOM_MOCK_SAMPLE_USERNAME || "Mock", "Mock");
+export const MOCK_SAMPLE_PASSWORD = cleanText(process.env.LOOM_MOCK_SAMPLE_PASSWORD || "Mock", "Mock");
+export const MOCK_SAMPLE_USER_ID = cleanText(process.env.LOOM_MOCK_SAMPLE_USER_ID || "password-mock", "password-mock");
+const SAMPLE_SOURCE_USER_ID = cleanText(process.env.LOOM_SAMPLE_SOURCE_USER_ID || MOCK_SAMPLE_USER_ID);
 const SAMPLE_SYNC_LIMITS = {
   products: Math.max(0, Number(process.env.LOOM_SAMPLE_PRODUCTS_LIMIT || 12)),
   demands: Math.max(0, Number(process.env.LOOM_SAMPLE_DEMANDS_LIMIT || 36)),
@@ -81,6 +84,15 @@ function toSampleEntity(kind, item, sourceUserId) {
   return copied;
 }
 
+function toMockSeedEntity(item, sourceUserId) {
+  const copied = clone(item || {});
+  copied.sample = false;
+  copied.mock_seed_source_user_id = sourceUserId;
+  copied.mock_seed_source_id = item?.id || "";
+  copied.updated_at = nowIso();
+  return copied;
+}
+
 function sampleNewsInput(item, sourceUserId) {
   return {
     source_id: sampleSourceId("visitor", item.source_id || "sample-news"),
@@ -103,6 +115,31 @@ function sampleNewsInput(item, sourceUserId) {
       source_group: "sample-live",
       sample_source_user_id: sourceUserId,
       sample_source_news_id: item.id || "",
+    },
+  };
+}
+
+function mockSeedNewsInput(item, sourceUserId) {
+  return {
+    source_id: item.source_id,
+    source: item.source,
+    source_authority: item.source_authority,
+    original_title: item.original_title,
+    original_url: item.original_url,
+    original_content: item.original_content,
+    titleZh: item.titleZh,
+    summary: item.summary,
+    contentZh: item.contentZh,
+    type: item.type,
+    thumbnail_url: item.thumbnail_url,
+    thumbHue: item.thumbHue,
+    published_at: item.published_at,
+    llmProcessed: !item.needsTranslation,
+    needsTranslation: false,
+    classification: {
+      ...(item.classification || {}),
+      mock_seed_source_user_id: sourceUserId,
+      mock_seed_source_news_id: item.id || "",
     },
   };
 }
@@ -1243,6 +1280,14 @@ export function syncSampleWorkspaceFromUser({
   const sourceDemands = (sourceState.demands || []).filter((item) => !item.sample).slice(0, finalLimits.demands);
   const sourceResearch = (sourceState.research || []).filter((item) => !item.sample).slice(0, finalLimits.research);
   const sourceNews = visibleNewsItems(normalizedSourceUserId).slice(0, finalLimits.news);
+  if (!sourceProducts.length && !sourceDemands.length && !sourceResearch.length && !sourceNews.length) {
+    return {
+      skipped: true,
+      reason: "sample_source_has_no_data",
+      sourceUserId: normalizedSourceUserId,
+      targetUserId: normalizedTargetUserId,
+    };
+  }
 
   mutateUserState(normalizedTargetUserId, (state) => {
     state.onboarding = {
@@ -1299,6 +1344,101 @@ export function syncSampleWorkspaceFromUser({
     news: sourceNews.length,
     insertedNews: newsResult.inserted.length,
     updatedNews: newsResult.updated.length,
+  };
+}
+
+export function ensureMockSampleUser() {
+  const user = ensureLocalUser({
+    id: MOCK_SAMPLE_USER_ID,
+    name: MOCK_SAMPLE_USERNAME,
+    initials: "MO",
+    role: "成员",
+    role_code: "member",
+    status: "active",
+    auth_provider: "password",
+    withDefaultWorkspace: true,
+  });
+  ensureDefaultWorkspaceForUser(user, { autoAssign: true });
+  return user;
+}
+
+export function isSampleSourceUser(userId) {
+  return cleanText(userId) === cleanText(SAMPLE_SOURCE_USER_ID);
+}
+
+export function syncVisitorSampleWorkspaceFromSource() {
+  return syncSampleWorkspaceFromUser({ sourceUserId: SAMPLE_SOURCE_USER_ID, targetUserId: getLegacyUserId() });
+}
+
+export function seedMockSampleUserFromUser({
+  sourceUserId,
+  targetUserId = MOCK_SAMPLE_USER_ID,
+  limits = {},
+  replace = true,
+  syncVisitor = true,
+} = {}) {
+  const normalizedSourceUserId = cleanText(sourceUserId);
+  const normalizedTargetUserId = cleanText(targetUserId, MOCK_SAMPLE_USER_ID);
+  if (!normalizedSourceUserId) return { skipped: true, reason: "mock_seed_source_user_id_missing" };
+  if (normalizedSourceUserId === normalizedTargetUserId) return { skipped: true, reason: "mock_seed_source_is_target" };
+  const sourceState = requireState(normalizedSourceUserId);
+  if (!sourceState) return { skipped: true, reason: "mock_seed_source_user_not_found", sourceUserId: normalizedSourceUserId };
+
+  const targetUser = normalizedTargetUserId === MOCK_SAMPLE_USER_ID
+    ? ensureMockSampleUser()
+    : findUserById(normalizedTargetUserId);
+  if (!targetUser) return { skipped: true, reason: "mock_seed_target_user_not_found", targetUserId: normalizedTargetUserId };
+
+  const finalLimits = sampleSyncLimits(limits);
+  const sourceProducts = (sourceState.products || []).filter((item) => !item.sample).slice(0, finalLimits.products);
+  const sourceDemands = (sourceState.demands || []).filter((item) => !item.sample).slice(0, finalLimits.demands);
+  const sourceResearch = (sourceState.research || []).filter((item) => !item.sample).slice(0, finalLimits.research);
+  const sourceNews = visibleNewsItems(normalizedSourceUserId).slice(0, finalLimits.news);
+
+  mutateUserState(normalizedTargetUserId, (state) => {
+    state.onboarding = {
+      ...(state.onboarding || {}),
+      mockSeedSourceUserId: normalizedSourceUserId,
+      mockSeedSourceUserName: sourceState.user?.name || "",
+      mockSeedSyncedAt: nowIso(),
+    };
+    if (replace) {
+      state.products = [];
+      state.demands = [];
+      state.research = [];
+    }
+    state.products = [
+      ...sourceProducts.map((item) => toMockSeedEntity(item, normalizedSourceUserId)),
+      ...(replace ? [] : (state.products || [])),
+    ];
+    state.demands = [
+      ...sourceDemands.map((item) => toMockSeedEntity(item, normalizedSourceUserId)),
+      ...(replace ? [] : (state.demands || [])),
+    ];
+    state.research = [
+      ...sourceResearch.map((item) => toMockSeedEntity(item, normalizedSourceUserId)),
+      ...(replace ? [] : (state.research || [])),
+    ];
+    return state;
+  });
+
+  if (replace) db.prepare("DELETE FROM news_items WHERE user_id = ?").run(normalizedTargetUserId);
+  const newsResult = sourceNews.length
+    ? upsertNews(normalizedTargetUserId, sourceNews.map((item) => mockSeedNewsInput(item, normalizedSourceUserId)))
+    : { inserted: [], updated: [] };
+  const visitorResult = syncVisitor ? syncVisitorSampleWorkspaceFromSource() : null;
+
+  return {
+    skipped: false,
+    sourceUserId: normalizedSourceUserId,
+    targetUserId: normalizedTargetUserId,
+    products: sourceProducts.length,
+    demands: sourceDemands.length,
+    research: sourceResearch.length,
+    news: sourceNews.length,
+    insertedNews: newsResult.inserted.length,
+    updatedNews: newsResult.updated.length,
+    visitor: visitorResult,
   };
 }
 
@@ -3070,10 +3210,11 @@ export function ensureLegacyWorkspace() {
     role: "产品经理",
     auth_provider: "password",
   });
+  ensureMockSampleUser();
   ensureUserState(user);
   if (ENABLE_PUBLIC_SAMPLE_DATA) {
     ensureSampleUserState(user, { force: true });
-    syncSampleWorkspaceFromUser({ targetUserId: user.id });
+    syncVisitorSampleWorkspaceFromSource();
     ensureSampleNewsSources(user.id);
     ensureDefaultNewsSources(user.id);
   }

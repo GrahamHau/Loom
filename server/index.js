@@ -229,6 +229,8 @@ import {
   updateResearch,
   updateSettings,
   removeFieldOption,
+  isSampleSourceUser,
+  syncVisitorSampleWorkspaceFromSource,
   visibleNewsItems,
 } from "./repository.js";
 
@@ -628,6 +630,11 @@ function sampleNewsReady(userId) {
   const state = rawState(userId);
   if (!isSampleWorkspace(state)) return true;
   return listNews(userId).some((item) => isRecentSampleNews(item));
+}
+
+function syncVisitorSampleIfNeeded(userId) {
+  if (!isSampleSourceUser(userId)) return;
+  syncVisitorSampleWorkspaceFromSource();
 }
 
 function refreshSampleWorkspaceNews(userId, { force = false } = {}) {
@@ -1760,6 +1767,7 @@ app.post("/api/products", requireAuth, asyncHandler(async (req, res) => {
   const body = req.body || {};
   const payload = await withCachedImageFields(req.body || {});
   const product = createProduct(userId, payload);
+  syncVisitorSampleIfNeeded(userId);
   if (body.import_method === "chrome_extension" && !body.__loom_ai_processed) {
     const job = queueAiOrganizeJob({
       userId,
@@ -1849,6 +1857,7 @@ app.post("/api/demands", requireAuth, asyncHandler(async (req, res) => {
   const userId = currentUserId(req);
   const payload = await withCachedImageFields(req.body || {});
   const demand = createDemand(userId, payload);
+  syncVisitorSampleIfNeeded(userId);
   if (payload.import_method === "chrome_extension" && !payload.__loom_ai_processed) {
     const job = queueAiOrganizeJob({
       userId,
@@ -2198,7 +2207,11 @@ app.get("/api/feed-hub/public/groups/:slug.xml", (req, res) => {
 });
 
 app.get("/api/research", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).research || []));
-app.post("/api/research", requireAuth, (req, res) => res.status(201).json(createResearch(currentUserId(req), req.body || {})));
+app.post("/api/research", requireAuth, (req, res) => {
+  const research = createResearch(currentUserId(req), req.body || {});
+  syncVisitorSampleIfNeeded(currentUserId(req));
+  res.status(201).json(research);
+});
 app.get("/api/feishu-project/items", requireAuth, (req, res) => {
   res.json(listFeishuProjectItems({
     workspace_id: requestWorkspaceId(req, "query"),

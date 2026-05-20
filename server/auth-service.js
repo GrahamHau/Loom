@@ -14,6 +14,14 @@ function normalizeUsername(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function mockAccountConfig() {
+  return {
+    username: process.env.LOOM_MOCK_SAMPLE_USERNAME || "Mock",
+    normalizedUsername: normalizeUsername(process.env.LOOM_MOCK_SAMPLE_USERNAME || "Mock"),
+    password: process.env.LOOM_MOCK_SAMPLE_PASSWORD || "Mock",
+  };
+}
+
 export function getPasswordAuthConfig() {
   return {
     username: process.env.APP_USERNAME || "visitor",
@@ -45,6 +53,7 @@ export function getPasswordAuthAccounts() {
       normalizedUsername: normalizeUsername(primary.username),
       password: primary.password,
     },
+    mockAccountConfig(),
     ...parsePasswordAccountList(process.env.APP_PASSWORD_ACCOUNTS),
   ];
   const deduped = new Map();

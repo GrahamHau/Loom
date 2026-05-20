@@ -1273,6 +1273,57 @@ describe("repository", () => {
     expect(sourceState.products.find((item) => item.id === product.id)?.sample).toBe(false);
   });
 
+  it("seeds the Mock account from a real user and preserves media fields", () => {
+    const sourceUser = repo.ensureLocalUser({ id: "real-mock-seed-source", name: "黄冠淏", auth_provider: "feishu" });
+    const product = repo.createProduct(sourceUser.id, {
+      name: "带图真实竞品",
+      image: "/uploads/remote-media/product.avif",
+      thumbnail_url: "/uploads/remote-media/product.avif",
+      original_image_url: "https://img.test/original-product.webp",
+    });
+    const demand = repo.createDemand(sourceUser.id, {
+      title: "带图真实需求",
+      image: "/uploads/remote-media/demand.webp",
+      thumbnail_url: "/uploads/remote-media/demand.webp",
+      original_image_url: "https://img.test/original-demand.webp",
+    });
+
+    const result = repo.seedMockSampleUserFromUser({
+      sourceUserId: sourceUser.id,
+      limits: { products: 10, demands: 10, research: 10, news: 10 },
+    });
+    const mockState = repo.bootstrap(repo.MOCK_SAMPLE_USER_ID);
+    const visitorState = repo.bootstrap(dbModule.getLegacyUserId());
+
+    expect(result).toMatchObject({
+      skipped: false,
+      sourceUserId: sourceUser.id,
+      targetUserId: repo.MOCK_SAMPLE_USER_ID,
+      products: 1,
+      demands: 1,
+    });
+    expect(mockState.workspace).toMatchObject({ slug: "company" });
+    expect(mockState.products.find((item) => item.mock_seed_source_id === product.id)).toMatchObject({
+      name: "带图真实竞品",
+      sample: false,
+      image: "/uploads/remote-media/product.avif",
+      thumbnail_url: "/uploads/remote-media/product.avif",
+      original_image_url: "https://img.test/original-product.webp",
+    });
+    expect(mockState.demands.find((item) => item.mock_seed_source_id === demand.id)).toMatchObject({
+      title: "带图真实需求",
+      sample: false,
+      image: "/uploads/remote-media/demand.webp",
+      thumbnail_url: "/uploads/remote-media/demand.webp",
+      original_image_url: "https://img.test/original-demand.webp",
+    });
+    expect(visitorState.products.find((item) => item.sample_source_id === product.id)).toMatchObject({
+      sample: true,
+      image: "/uploads/remote-media/product.avif",
+      thumbnail_url: "/uploads/remote-media/product.avif",
+    });
+  });
+
   it("keeps old visitor data as real data without marking it sample", () => {
     const visitor = repo.ensureLegacyWorkspace();
     repo.createProduct(visitor.id, { name: "Old Visitor Product" });

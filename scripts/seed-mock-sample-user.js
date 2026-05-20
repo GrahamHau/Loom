@@ -10,15 +10,14 @@ main().catch((error) => {
 });
 
 async function main() {
-  const { getLegacyUserId, migrate } = await import("../server/db.js");
-  const { MOCK_SAMPLE_USER_ID, syncSampleWorkspaceFromUser } = await import("../server/repository.js");
+  const { migrate } = await import("../server/db.js");
+  const { MOCK_SAMPLE_USER_ID, seedMockSampleUserFromUser } = await import("../server/repository.js");
   migrate();
   const args = parseArgs(process.argv.slice(2));
-  const sourceUserId = cleanText(args["source-user-id"] || process.env.LOOM_SAMPLE_SOURCE_USER_ID || MOCK_SAMPLE_USER_ID);
-  const targetUserId = cleanText(args["target-user-id"] || getLegacyUserId(), getLegacyUserId());
-  const result = syncSampleWorkspaceFromUser({
+  const sourceUserId = cleanText(args["source-user-id"] || process.env.LOOM_MOCK_SEED_SOURCE_USER_ID);
+  const result = seedMockSampleUserFromUser({
     sourceUserId,
-    targetUserId,
+    targetUserId: cleanText(args["target-user-id"] || MOCK_SAMPLE_USER_ID, MOCK_SAMPLE_USER_ID),
     limits: {
       products: numberArg(args.products),
       demands: numberArg(args.demands),
@@ -26,6 +25,7 @@ async function main() {
       news: numberArg(args.news),
     },
     replace: args.replace !== "false",
+    syncVisitor: args["sync-visitor"] !== "false",
   });
   console.log(JSON.stringify(result, null, 2));
   if (result.skipped) process.exitCode = 1;
