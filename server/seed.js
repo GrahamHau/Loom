@@ -51,7 +51,7 @@ export function defaultSettings() {
     official_news_enabled: true,
     rss_collect_enabled: process.env.RSS_COLLECT_ENABLED !== "false",
     rss_collect_interval_ms: Number(process.env.RSS_COLLECT_INTERVAL_MS || 15 * 60 * 1000),
-    extension_ai_before_save: true,
+    extension_ai_before_save: false,
   };
 }
 

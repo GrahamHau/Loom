@@ -5,6 +5,16 @@ const ROLE_LABEL = { owner: "主理人", admin: "管理员", member: "成员" };
 const STATUS_LABEL = { active: "正常", suspended: "已停用", deleted: "已删除" };
 const AUTH_LABEL = { password: "密码", feishu: "飞书" };
 const WORKSPACE_TYPE_LABEL = { company: "公司", personal: "个人", small_team: "小团队", system: "系统" };
+const EMPTY_PLATFORM_AI = {
+  enabled: false,
+  api_type: "openai",
+  api_url: "",
+  model: "",
+  api_key: "",
+  allow_all_users: false,
+  allowed_user_ids: [],
+  configured: false,
+};
 
 function Badge({ children, tone = "neutral" }) {
   return <span className={`admin-badge ${tone}`}>{children}</span>;
@@ -22,6 +32,7 @@ export default function AdminApp() {
   const [workspaces, setWorkspaces] = useState([]);
   const [llmSummary, setLlmSummary] = useState(null);
   const [llmLogs, setLlmLogs] = useState([]);
+  const [platformAi, setPlatformAi] = useState(EMPTY_PLATFORM_AI);
   const [users, setUsers] = useState([]);
   const [selected, setSelected] = useState(null);
   const [filters, setFilters] = useState({ q: "", status: "", role: "", auth_provider: "" });
@@ -77,6 +88,15 @@ export default function AdminApp() {
     }
   }, []);
 
+  const loadPlatformAi = useCallback(async () => {
+    try {
+      setPlatformAi({ ...EMPTY_PLATFORM_AI, ...(await adminApi.platformAi.get()) });
+      setError("");
+    } catch (err) {
+      setError(err.message || "加载平台 AI 整理配置失败");
+    }
+  }, []);
+
   useEffect(() => {
     fetch("/api/me", { credentials: "same-origin" })
       .then(async (response) => {
@@ -95,7 +115,8 @@ export default function AdminApp() {
     loadUsers();
     loadWorkspaces();
     loadObservability();
-  }, [me, loadDashboard, loadUsers, loadWorkspaces, loadObservability]);
+    loadPlatformAi();
+  }, [me, loadDashboard, loadUsers, loadWorkspaces, loadObservability, loadPlatformAi]);
 
   async function refreshSelected(userId) {
     try {
@@ -143,6 +164,17 @@ export default function AdminApp() {
     }
   }
 
+  async function savePlatformAi(nextConfig) {
+    setNotice("");
+    try {
+      const saved = await adminApi.platformAi.update(nextConfig);
+      setPlatformAi({ ...EMPTY_PLATFORM_AI, ...saved });
+      setNotice("平台 AI 整理配置已保存");
+    } catch (err) {
+      setNotice(err.message || "保存失败");
+    }
+  }
+
   if (error && !me) {
     return (
       <main className="admin-empty">
@@ -159,6 +191,7 @@ export default function AdminApp() {
         <a className="admin-brand" href="/app">LOOM Admin</a>
         <button className={`admin-nav ${activeView === "dashboard" ? "active" : ""}`} type="button" onClick={() => setActiveView("dashboard")}>总览看板</button>
         <button className={`admin-nav ${activeView === "workspaces" ? "active" : ""}`} type="button" onClick={() => setActiveView("workspaces")}>工作区</button>
+        <button className={`admin-nav ${activeView === "platform-ai" ? "active" : ""}`} type="button" onClick={() => setActiveView("platform-ai")}>AI 整理</button>
         <button className={`admin-nav ${activeView === "observability" ? "active" : ""}`} type="button" onClick={() => setActiveView("observability")}>AI 观测</button>
         <button className={`admin-nav ${activeView === "users" ? "active" : ""}`} type="button" onClick={() => setActiveView("users")}>用户管理</button>
         {me && <div className="admin-user">{me.name} · {ROLE_LABEL[me.role_code] || "管理员"}</div>}
@@ -264,6 +297,27 @@ export default function AdminApp() {
                 </tbody>
               </table>
             </div>
+          </>
+        )}
+
+        {activeView === "platform-ai" && (
+          <>
+            <header className="admin-header">
+              <div>
+                <h1>AI 整理</h1>
+                <p>为新用户统一提供 AI 整理模型；用户自己配置模型时仍优先使用个人配置。</p>
+              </div>
+              <button className="admin-button primary" type="button" onClick={loadPlatformAi}>刷新</button>
+            </header>
+
+            {notice && <div className="admin-notice">{notice}</div>}
+            {error && <div className="admin-notice error">{error}</div>}
+
+            <PlatformAiPanel
+              config={platformAi}
+              users={users.filter((user) => !user.is_legacy && user.status === "active")}
+              onSave={savePlatformAi}
+            />
           </>
         )}
 
@@ -438,6 +492,130 @@ function WorkspaceTable({ workspaces }) {
           {workspaces.length === 0 && <tr><td colSpan="5">暂无工作区。飞书用户登录后会自动创建公司工作区。</td></tr>}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function PlatformAiPanel({ config, users, onSave }) {
+  const [draft, setDraft] = useState(config || EMPTY_PLATFORM_AI);
+
+  useEffect(() => {
+    setDraft({ ...EMPTY_PLATFORM_AI, ...(config || {}) });
+  }, [config]);
+
+  function patch(next) {
+    setDraft((current) => ({ ...current, ...next }));
+  }
+
+  function toggleUser(userId) {
+    const current = new Set(draft.allowed_user_ids || []);
+    if (current.has(userId)) {
+      current.delete(userId);
+    } else {
+      current.add(userId);
+    }
+    patch({ allowed_user_ids: Array.from(current) });
+  }
+
+  const allowedCount = draft.allow_all_users ? users.length : (draft.allowed_user_ids || []).length;
+
+  return (
+    <div className="admin-layout single">
+      <section className="admin-config-card">
+        <div className="admin-config-head">
+          <div>
+            <h2>平台默认模型</h2>
+            <p>只用于 AI 整理、资讯分析等文本整理链路；不会替用户写入个人 key。</p>
+          </div>
+          <button
+            type="button"
+            className={`admin-switch ${draft.enabled ? "on" : ""}`}
+            aria-label="平台 AI 整理开关"
+            onClick={() => patch({ enabled: !draft.enabled })}
+          />
+        </div>
+
+        <div className="admin-form-grid">
+          <label>
+            <span>Base URL</span>
+            <input
+              value={draft.api_url || ""}
+              onChange={(event) => patch({ api_url: event.target.value })}
+              placeholder="https://api.openai.com/v1"
+            />
+          </label>
+          <label>
+            <span>Model</span>
+            <input
+              value={draft.model || ""}
+              onChange={(event) => patch({ model: event.target.value })}
+              placeholder="gpt-4.1-mini"
+            />
+          </label>
+          <label>
+            <span>API Key</span>
+            <input
+              type="password"
+              value={draft.api_key || ""}
+              onChange={(event) => patch({ api_key: event.target.value })}
+              placeholder={config?.api_key ? "********" : "sk-..."}
+            />
+          </label>
+          <label>
+            <span>API Type</span>
+            <select value={draft.api_type || "openai"} onChange={(event) => patch({ api_type: event.target.value })}>
+              <option value="openai">OpenAI Compatible</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="admin-config-foot">
+          <Badge tone={draft.configured || (draft.api_url && draft.model && draft.api_key) ? "active" : "suspended"}>
+            {draft.configured || (draft.api_url && draft.model && draft.api_key) ? "已配置" : "未完整配置"}
+          </Badge>
+          <span className="admin-muted">允许 {allowedCount} 个用户使用</span>
+          <button className="admin-button primary" type="button" onClick={() => onSave(draft)}>保存配置</button>
+        </div>
+      </section>
+
+      <section className="admin-config-card">
+        <div className="admin-config-head">
+          <div>
+            <h2>使用权限</h2>
+            <p>适合应用初期：先给需要测试的用户开通，之后可切到全员可用。</p>
+          </div>
+          <label className="admin-checkline">
+            <input
+              type="checkbox"
+              checked={Boolean(draft.allow_all_users)}
+              onChange={(event) => patch({ allow_all_users: event.target.checked })}
+            />
+            全部活跃用户
+          </label>
+        </div>
+
+        <div className="admin-user-access-list">
+          {users.map((user) => {
+            const checked = draft.allow_all_users || (draft.allowed_user_ids || []).includes(user.id);
+            return (
+              <label className="admin-user-access-row" key={user.id}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={draft.allow_all_users}
+                  onChange={() => toggleUser(user.id)}
+                />
+                <span>
+                  <strong>{user.name}</strong>
+                  <small>{user.email || user.id}</small>
+                </span>
+                <Badge tone={user.role_code}>{ROLE_LABEL[user.role_code] || user.role_code}</Badge>
+              </label>
+            );
+          })}
+          {users.length === 0 && <p className="admin-muted">暂无可授权用户</p>}
+        </div>
+      </section>
     </div>
   );
 }

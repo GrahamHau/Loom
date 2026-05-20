@@ -19,6 +19,7 @@ const LLM_NOTICE_DISMISSED_KEY = "loom_llm_notice_dismissed";
 const DRAFT_STATE_KEY = "loom_sidepanel_draft_state_v1";
 const URL_WATCH_INTERVAL_MS = 650;
 const EDIT_IDLE_GUARD_MS = 4000;
+const TAOBAO_IMAGE_LOAD_HINT = "下滑加载所有图片后，再使用AI整理";
 const LEGACY_KEY_MAP = {
   pmcopilot_api_base: API_BASE_KEY,
   pmcopilot_token: TOKEN_KEY,
@@ -91,6 +92,7 @@ const state = {
   lastSeenUrl: "",
   page: null,
   pageSignature: "",
+  aiProcessedSignature: "",
   mode: "product",
   processed: null,
   form: null,
@@ -263,6 +265,15 @@ function clearEditGuard() {
   lastUserEditAt = 0;
 }
 
+function taobaoImageLoadHint(result = state.page) {
+  return result?.platform === "taobao" ? TAOBAO_IMAGE_LOAD_HINT : "";
+}
+
+function resetAiProcessedFlag(value) {
+  if (!value || typeof value !== "object") return value;
+  return { ...value, __loom_ai_processed: false };
+}
+
 function currentCaptureUrl() {
   return cleanText(state.page?.data?.url || state.lastSeenUrl || "");
 }
@@ -324,8 +335,12 @@ async function restoreDraftState(result, mode) {
     if (snapshot.url !== url) return false;
     if (snapshot.platform !== cleanText(result?.platform || "")) return false;
     if (snapshot.mode !== cleanText(mode || "")) return false;
-    state.processed = snapshot.processed || { ...result.data, __loom_ai_processed: false };
-    state.form = snapshot.form || buildDraft(mode, state.processed);
+    if (!snapshot.formDirty && !snapshot.processingAi) {
+      await clearPersistedDraftState();
+      return false;
+    }
+    state.processed = resetAiProcessedFlag(snapshot.processed) || { ...result.data, __loom_ai_processed: false };
+    state.form = resetAiProcessedFlag(snapshot.form) || buildDraft(mode, state.processed);
     state.activeTagFields = snapshot.activeTagFields || activeTagFieldsForDraft(mode, state.form, state.processed);
     state.formDirty = Boolean(snapshot.formDirty);
     state.message = snapshot.processingAi
@@ -440,7 +455,7 @@ async function loadCurrentPage(defaultMode = "auto") {
       state.form = buildDraft(state.mode, state.processed);
       state.activeTagFields = {};
       state.formDirty = false;
-      state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
+      state.message = taobaoImageLoadHint(result) || "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
     }
     debugEvent("collect:read-ok", {
       platform: result.platform,
@@ -662,6 +677,7 @@ function clearSuccessReturnTimer() {
 function clearCapturedPageState() {
   state.page = null;
   state.pageSignature = "";
+  state.aiProcessedSignature = "";
   state.processed = null;
   state.form = null;
   state.formDirty = false;
@@ -713,6 +729,7 @@ async function processRaw() {
       return;
     }
     state.processed = { ...state.page.data, ...data, __loom_ai_processed: true };
+    state.aiProcessedSignature = state.pageSignature;
     state.form = buildDraft(state.mode, state.processed);
     state.activeTagFields = activeTagFieldsForDraft(state.mode, state.form, state.processed);
     state.formDirty = false;
@@ -724,6 +741,7 @@ async function processRaw() {
     });
   } catch (error) {
     state.processed = { ...state.page.data, __loom_ai_processed: false };
+    state.aiProcessedSignature = "";
     state.form = buildDraft(state.mode, state.processed);
     state.formDirty = false;
     debugEvent("parse-raw:error", { endpoint, code: error.code || "", error: error.message || "parse failed" });
@@ -780,7 +798,7 @@ async function reloadCurrentPage() {
       state.form = buildDraft(state.mode, state.processed);
       state.activeTagFields = {};
       state.formDirty = false;
-      state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
+      state.message = taobaoImageLoadHint(result) || "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
     }
     debugEvent("collect:reload-ok", {
       platform: result.platform,
@@ -1063,13 +1081,16 @@ async function clearAuthState() {
   state.form = null;
   state.formDirty = false;
   state.pageSignature = "";
+  state.aiProcessedSignature = "";
   state.message = "";
   await chrome.storage.local.remove([TOKEN_KEY, USER_KEY, DRAFT_STATE_KEY, "pmcopilot_token", "pmcopilot_user"]);
 }
 
 async function maybeAutoProcessAfterCapture(storedSettings = null) {
   const settings = storedSettings || await getStoredSettings();
-  if (settings?.[AI_BEFORE_SAVE_KEY] === false) return;
+  const explicitAutoAi = settings?.[AI_BEFORE_SAVE_KEY] === true;
+  if (!explicitAutoAi) return;
+  if (state.page?.platform === "taobao") return;
   if (!state.page?.data || !state.form) return;
   if (!state.llmConfigured || state.processingAi || state.busy) return;
   if (state.formDirty) return;
@@ -1493,9 +1514,15 @@ function renderMain() {
   const canProduct = PRODUCT_PLATFORMS.has(platform);
   const canDemand = DEMAND_PLATFORMS.has(platform) || platform === "kickstarter";
   const aiLabel = aiActionLabel();
+  const taobaoHint = taobaoImageLoadHint(state.page);
   document.getElementById("app").innerHTML = `
     <div class="shell">
       ${headerHtml({ platform, mode: state.mode, loading: state.reloading })}
+      ${taobaoHint ? `
+        <div class="cl-top-notice taobao-image-notice">
+          <div class="cl-top-notice-copy">${escapeHtml(taobaoHint)}</div>
+        </div>
+      ` : ""}
       <div class="cl-top-actions">
         <button class="btn top-action" id="save-top" ${state.busy ? "disabled" : ""}>保存</button>
         <button class="btn top-action ${state.processingAi ? "is-processing" : ""}" id="process-top" ${state.busy ? "disabled" : ""}>${aiLabel}</button>
@@ -1595,7 +1622,7 @@ function aiActionLabel() {
   if (state.processingAi) {
     return `<span class="top-action-spinner" aria-label="AI 整理中">${spinIcon()}</span>`;
   }
-  return state.processed?.__loom_ai_processed ? "重新整理" : "AI 整理";
+  return state.processed?.__loom_ai_processed && state.aiProcessedSignature === state.pageSignature ? "重新整理" : "AI 整理";
 }
 
 function bindUiStateWatchdog() {
@@ -2482,8 +2509,9 @@ function kickstarterPlatformMetrics(platform, item, index) {
 }
 
 function taobaoPlatformMetrics(platform, item, index) {
+  const originalPrice = platform.original_price || item.original_price || "";
   return `
-    ${metric("原价", `platforms.${index}.original_price`, platform.original_price || item.original_price || platform.price || "", currencyPrefixForValue(platform.platform, platform.original_price || item.original_price || platform.price || ""))}
+    ${metric("原价", `platforms.${index}.original_price`, originalPrice, originalPrice ? currencyPrefixForValue(platform.platform, originalPrice) : "")}
     ${metric("折扣价", `platforms.${index}.discount_price`, platform.discount_price || item.discount_price || platform.price || "", currencyPrefixForValue(platform.platform, platform.discount_price || item.discount_price || platform.price || ""))}
     ${metric("参考成本", `platforms.${index}.cost`, platform.cost || item.cost_estimate || "", currencyPrefixForValue("cost", platform.cost || item.cost_estimate || ""))}
     ${metric("已售", `platforms.${index}.sales`, platform.sales || item.monthly_sales || "", "")}
@@ -2511,7 +2539,7 @@ function showMarketplaceRating(platform) {
 
 function metric(label, key, value, prefix, suffix = "") {
   return `
-    <label class="metric${label === "月销估算" || label === "已售" ? " span-2" : ""}">
+    <label class="metric${label === "月销估算" ? " span-2" : ""}">
       <div class="metric-label">${escapeHtml(label)}</div>
       <div class="metric-input-wrap">
         ${prefix ? `<span class="metric-prefix ${prefix === "★" ? "rating-star" : ""}">${escapeHtml(prefix)}</span>` : ""}

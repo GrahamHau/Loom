@@ -118,6 +118,79 @@ describe("ai-service routing", () => {
     expect(logs[0]).toMatchObject({ kind: "text", status: "ok" });
   });
 
+  it("falls back to admin platform AI config for allowed users without personal LLM", async () => {
+    const userId = "platform-ai-user";
+    dbModule.db.prepare(`
+      INSERT INTO users (
+        id, email, name, initials, role, role_code, status, auth_provider, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run(userId, "user@example.com", "Platform User", "PU", "成员", "member", "active", "password");
+    dbModule.saveUserState(userId, {
+      user: { id: userId, name: "Platform User", auth_provider: "password" },
+      products: [],
+      demands: [],
+      news: [],
+      research: [],
+      rssSources: [],
+      settings: {},
+    });
+    dbModule.writeJson("platform_ai_organize_config", {
+      enabled: true,
+      api_type: "openai",
+      api_url: "https://platform.example/v1",
+      model: "platform-model",
+      api_key: "platform-key",
+      allow_all_users: false,
+      allowed_user_ids: [userId],
+    });
+    const calls = [];
+    vi.stubGlobal("fetch", async (url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url, body, authorization: options.headers.Authorization });
+      return mockResponse({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+    });
+
+    await aiService.callLLM({
+      userId,
+      purpose: "platform-ai:test",
+      system: "system",
+      user: "user",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0].url)).toBe("https://platform.example/v1/chat/completions");
+    expect(calls[0].body.model).toBe("platform-model");
+    expect(calls[0].authorization).toBe("Bearer platform-key");
+  });
+
+  it("does not use platform AI config for users outside the allow list", async () => {
+    const userId = "platform-ai-denied";
+    dbModule.db.prepare(`
+      INSERT INTO users (
+        id, email, name, initials, role, role_code, status, auth_provider, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run(userId, "denied@example.com", "Denied User", "DU", "成员", "member", "active", "password");
+    dbModule.saveUserState(userId, {
+      user: { id: userId, name: "Denied User", auth_provider: "password" },
+      settings: {},
+    });
+    dbModule.writeJson("platform_ai_organize_config", {
+      enabled: true,
+      api_url: "https://platform.example/v1",
+      model: "platform-model",
+      api_key: "platform-key",
+      allow_all_users: false,
+      allowed_user_ids: ["other-user"],
+    });
+
+    await expect(aiService.callLLM({
+      userId,
+      purpose: "platform-ai:denied",
+      system: "system",
+      user: "user",
+    })).rejects.toMatchObject({ code: "llm_not_configured" });
+  });
+
   it("records failed LLM calls without storing prompt content", async () => {
     vi.stubGlobal("fetch", async () => ({
       ok: false,

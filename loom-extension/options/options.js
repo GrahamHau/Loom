@@ -148,7 +148,7 @@ async function load() {
   document.getElementById("default-mode").value = data.loom_default_mode || "auto";
   const aiBeforeSave = accountSettings.extension_ai_before_save !== undefined
     ? accountSettings.extension_ai_before_save !== false
-    : data.loom_ai_before_save !== false;
+    : data.loom_ai_before_save === true;
   document.getElementById("ai-before-save").value = aiBeforeSave ? "true" : "false";
   document.querySelectorAll("[data-platform]").forEach((input) => {
     input.checked = data.loom_platforms?.[input.dataset.platform] !== false;

@@ -16,9 +16,9 @@ function normalizeUsername(value) {
 
 function mockAccountConfig() {
   return {
-    username: process.env.LOOM_MOCK_SAMPLE_USERNAME || "Mock",
-    normalizedUsername: normalizeUsername(process.env.LOOM_MOCK_SAMPLE_USERNAME || "Mock"),
-    password: process.env.LOOM_MOCK_SAMPLE_PASSWORD || "Mock",
+    username: process.env.LOOM_MOCK_SAMPLE_USERNAME || "mock",
+    normalizedUsername: normalizeUsername(process.env.LOOM_MOCK_SAMPLE_USERNAME || "mock"),
+    password: process.env.LOOM_MOCK_SAMPLE_PASSWORD || "mock",
   };
 }
 

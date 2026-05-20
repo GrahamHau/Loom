@@ -215,7 +215,7 @@ function normalizeData(input = {}) {
     products: Array.isArray(input.products) ? input.products : [],
     demands: Array.isArray(input.demands) ? input.demands : [],
     news: Array.isArray(input.news) ? input.news : [],
-    newsCounts: input.newsCounts || { all: Array.isArray(input.news) ? input.news.length : 0, wechat: 0, trend: 0, starred: 0 },
+    newsCounts: input.newsCounts || { all: Array.isArray(input.news) ? input.news.length : 0, official: Array.isArray(input.news) ? input.news.length : 0, wechat: 0, trend: 0, starred: 0 },
     research: Array.isArray(input.research) ? input.research : [],
     rssSources: Array.isArray(input.rssSources) ? input.rssSources : [],
     officialRssSources: Array.isArray(input.officialRssSources) ? input.officialRssSources : [],

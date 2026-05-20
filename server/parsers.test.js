@@ -102,6 +102,35 @@ describe("parsers account fields", () => {
     });
   });
 
+  it("does not pass current Taobao price as original price when source lacks a real original price", async () => {
+    let prompt = "";
+    mockLlmJson({
+      name: "SmallRig cage",
+      price: "¥435",
+      discount_price: "¥435",
+      original_price: "",
+      selling_points: [],
+      negative_keywords: [],
+      tag_values: {},
+    }, (body) => {
+      prompt = body.messages?.map((message) => message.content).join("\n") || "";
+    });
+
+    const result = await parsers.parseProductRaw(dbModule.getLegacyUserId(), {
+      platform: "taobao",
+      data: {
+        name: "SmallRig cage",
+        price: "¥435",
+        discount_price: "¥435",
+        original_price: "",
+      },
+    });
+
+    expect(prompt).toContain("原价：");
+    expect(prompt).not.toContain("原价：¥435");
+    expect(result.original_price).toBe("");
+  });
+
   it("maps legacy product AI fields into configured account fields", async () => {
     const userId = dbModule.getLegacyUserId();
     const brand = repo.createField(userId, {

@@ -28,8 +28,8 @@ import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSour
 const STREAM_NEWS_MAX_AGE_DAYS = Math.max(1, Number(process.env.STREAM_NEWS_MAX_AGE_DAYS || 10));
 // 默认开启 visitor 示例数据；要在生产环境关掉，设 LOOM_ENABLE_PUBLIC_SAMPLE_DATA=false
 const ENABLE_PUBLIC_SAMPLE_DATA = process.env.LOOM_ENABLE_PUBLIC_SAMPLE_DATA !== "false";
-export const MOCK_SAMPLE_USERNAME = cleanText(process.env.LOOM_MOCK_SAMPLE_USERNAME || "Mock", "Mock");
-export const MOCK_SAMPLE_PASSWORD = cleanText(process.env.LOOM_MOCK_SAMPLE_PASSWORD || "Mock", "Mock");
+export const MOCK_SAMPLE_USERNAME = cleanText(process.env.LOOM_MOCK_SAMPLE_USERNAME || "mock", "mock");
+export const MOCK_SAMPLE_PASSWORD = cleanText(process.env.LOOM_MOCK_SAMPLE_PASSWORD || "mock", "mock");
 export const MOCK_SAMPLE_USER_ID = cleanText(process.env.LOOM_MOCK_SAMPLE_USER_ID || "password-mock", "password-mock");
 const SAMPLE_SOURCE_USER_ID = cleanText(process.env.LOOM_SAMPLE_SOURCE_USER_ID || MOCK_SAMPLE_USER_ID);
 const SAMPLE_SYNC_LIMITS = {
@@ -219,6 +219,7 @@ function newsCountsFrom(items) {
   const typed = items.filter((item) => item.type);
   return {
     all: typed.length,
+    official: typed.filter((item) => isOfficialNewsItem(item)).length,
     new_product: typed.filter((item) => item.type === "新品发布").length,
     trend: typed.filter((item) => item.type === "行业趋势").length,
     starred: typed.filter((item) => item.starred).length,
@@ -1026,7 +1027,7 @@ function isOfficialSourceLike(source = {}) {
   return isOfficialSourceGroup(source.source_group || source.group);
 }
 
-function isOfficialNewsItem(item = {}) {
+export function isOfficialNewsItem(item = {}) {
   return isOfficialSourceGroup(item?.classification?.source_group) ||
     String(item?.source_id || "").startsWith("default-news-") ||
     String(item?.source_id || "").startsWith("sample-news-");
@@ -1968,8 +1969,9 @@ export function createField(userId, input = {}) {
       .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "_")
       .replace(/^_+|_+$/g, "")
       .slice(0, 40);
-    let key = input.key ? `u_${keyBase.replace(/^u_/, "")}` : `u_${nanoid(8).replace(/-/g, "_")}`;
-    if (fields.some((field) => field.key === key)) key = `u_${nanoid(8).replace(/-/g, "_")}`;
+    const generatedKey = () => `u_${nanoid(8).replace(/-/g, "_").replace(/^_+|_+$/g, "")}`;
+    let key = input.key ? `u_${keyBase.replace(/^u_/, "")}` : generatedKey();
+    if (fields.some((field) => field.key === key)) key = generatedKey();
     const field = {
       key,
       legacyKey: key,

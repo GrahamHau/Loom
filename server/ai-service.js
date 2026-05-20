@@ -1,5 +1,6 @@
 import { rawState, updateSettings } from "./repository.js";
 import { recordLLMCall } from "./llm-log-service.js";
+import { platformAiSettingsForUser } from "./platform-ai-config.js";
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const FETCH_TIMEOUT_MS = 30000;
@@ -19,12 +20,15 @@ function getSettings(userId, kind = "text") {
   const prefix = isVision ? "llm_vision_" : "llm_";
   const envPrefix = isVision ? "LLM_VISION_" : "LLM_";
   const openAiPrefix = isVision ? "OPENAI_VISION_" : "OPENAI_";
+  const userConfigured = Boolean(settings[`${prefix}api_url`] && settings[`${prefix}model`] && settings[`${prefix}api_key`]);
+  const platformSettings = !isVision && !userConfigured ? platformAiSettingsForUser(userId) : null;
   return {
     ...settings,
-    llm_api_type: settings[`${prefix}api_type`] || settings.llm_api_type || process.env[`${envPrefix}API_TYPE`] || process.env[`${openAiPrefix}API_TYPE`] || "openai",
-    llm_api_url: settings[`${prefix}api_url`] || process.env[`${envPrefix}API_URL`] || process.env[`${openAiPrefix}API_URL`] || process.env[`${openAiPrefix}BASE_URL`] || process.env.LLM_API_URL || process.env.OPENAI_BASE_URL || "",
-    llm_model: settings[`${prefix}model`] || process.env[`${envPrefix}MODEL`] || process.env[`${openAiPrefix}MODEL`] || "",
-    llm_api_key: settings[`${prefix}api_key`] || process.env[`${envPrefix}API_KEY`] || process.env[`${openAiPrefix}API_KEY`] || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
+    ...(platformSettings || {}),
+    llm_api_type: settings[`${prefix}api_type`] || platformSettings?.llm_api_type || settings.llm_api_type || process.env[`${envPrefix}API_TYPE`] || process.env[`${openAiPrefix}API_TYPE`] || "openai",
+    llm_api_url: settings[`${prefix}api_url`] || platformSettings?.llm_api_url || process.env[`${envPrefix}API_URL`] || process.env[`${openAiPrefix}API_URL`] || process.env[`${openAiPrefix}BASE_URL`] || process.env.LLM_API_URL || process.env.OPENAI_BASE_URL || "",
+    llm_model: settings[`${prefix}model`] || platformSettings?.llm_model || process.env[`${envPrefix}MODEL`] || process.env[`${openAiPrefix}MODEL`] || "",
+    llm_api_key: settings[`${prefix}api_key`] || platformSettings?.llm_api_key || process.env[`${envPrefix}API_KEY`] || process.env[`${openAiPrefix}API_KEY`] || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
   };
 }
 

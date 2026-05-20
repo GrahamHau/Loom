@@ -1536,6 +1536,72 @@ describe("news daily digest", () => {
     return { cookie: extractCookie(response.headers), body: await response.json() };
   }
 
+  it("filters the stream to unified official RSS items", async () => {
+    const { cookie, body } = await login();
+    dbModule.db.prepare(`
+      INSERT INTO news_items (
+        id, user_id, source_id, source_name, original_title, original_url,
+        title_zh, summary_zh, content_zh, type, classification_json,
+        is_kept, is_read, is_starred, published_at, llm_processed, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "official-news-filter",
+      body.user.id,
+      "default-news-camera-launches",
+      "官方 RSS",
+      "Official launch",
+      "https://example.com/official",
+      "官方新品",
+      "官方摘要",
+      "官方正文",
+      "新品发布",
+      JSON.stringify({ source_group: "official-default" }),
+      1,
+      0,
+      0,
+      "2026-05-19T08:00:00.000Z",
+      1,
+      "2026-05-19T08:00:00.000Z",
+      "2026-05-19T08:00:00.000Z",
+    );
+    dbModule.db.prepare(`
+      INSERT INTO news_items (
+        id, user_id, source_id, source_name, original_title, original_url,
+        title_zh, summary_zh, content_zh, type, classification_json,
+        is_kept, is_read, is_starred, published_at, llm_processed, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "custom-news-filter",
+      body.user.id,
+      "custom-source",
+      "自定义源",
+      "Custom item",
+      "https://example.com/custom",
+      "自定义资讯",
+      "自定义摘要",
+      "自定义正文",
+      "行业趋势",
+      JSON.stringify({ source_group: "custom" }),
+      1,
+      0,
+      0,
+      "2026-05-19T09:00:00.000Z",
+      1,
+      "2026-05-19T09:00:00.000Z",
+      "2026-05-19T09:00:00.000Z",
+    );
+
+    const response = await fetch(`${baseUrl}/api/news?page=1&limit=20&source_group=official`, {
+      headers: { Cookie: cookie },
+    });
+    const bodyJson = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(bodyJson.items.map((item) => item.id)).toContain("official-news-filter");
+    expect(bodyJson.items.map((item) => item.id)).not.toContain("custom-news-filter");
+    expect(bodyJson.counts.official).toBeGreaterThanOrEqual(1);
+  });
+
   it("generates today's stream digest with the configured LLM", async () => {
     const { cookie, body } = await login();
     repo.updateSettings(body.user.id, {
@@ -1801,8 +1867,8 @@ describe("admin users", () => {
     expect(loginResult.body.user.role_code).toBe("member");
   });
 
-  it("lets the Mock account collect into visitor sample data", async () => {
-    const loginResult = await login("Mock", "Mock");
+  it("lets the mock account collect into visitor sample data", async () => {
+    const loginResult = await login("mock", "mock");
     expect(loginResult.response.status).toBe(200);
     expect(loginResult.body.user.id).toBe("password-mock");
 
@@ -1827,7 +1893,7 @@ describe("admin users", () => {
     expect(visitor.onboarding).toMatchObject({
       sampleWorkspace: true,
       sampleSourceUserId: "password-mock",
-      sampleSourceUserName: "Mock",
+      sampleSourceUserName: "mock",
     });
     expect(visitor.products.find((item) => item.name === "Mock 采集带图竞品")).toMatchObject({
       sample: true,
@@ -1839,9 +1905,11 @@ describe("admin users", () => {
   it("can map local password login to a mirrored production user outside production", async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousMappedUserId = process.env.LOOM_PASSWORD_USER_ID;
+    const previousMappedUsername = process.env.LOOM_PASSWORD_USER_ID_USERNAME;
     try {
       process.env.NODE_ENV = "development";
       process.env.LOOM_PASSWORD_USER_ID = "feishu-prod-user";
+      process.env.LOOM_PASSWORD_USER_ID_USERNAME = process.env.APP_USERNAME;
       repo.ensureLocalUser({
         id: "feishu-prod-user",
         email: "prod@example.com",
@@ -1862,6 +1930,11 @@ describe("admin users", () => {
         delete process.env.LOOM_PASSWORD_USER_ID;
       } else {
         process.env.LOOM_PASSWORD_USER_ID = previousMappedUserId;
+      }
+      if (previousMappedUsername === undefined) {
+        delete process.env.LOOM_PASSWORD_USER_ID_USERNAME;
+      } else {
+        process.env.LOOM_PASSWORD_USER_ID_USERNAME = previousMappedUsername;
       }
     }
   });

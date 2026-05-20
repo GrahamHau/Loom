@@ -231,6 +231,7 @@ import {
   removeFieldOption,
   isSampleSourceUser,
   syncVisitorSampleWorkspaceFromSource,
+  isOfficialNewsItem,
   visibleNewsItems,
 } from "./repository.js";
 
@@ -679,9 +680,13 @@ function passwordUserId(username) {
   return safe ? `password-${safe}` : `password-user`;
 }
 
-function localPasswordUserIdOverride() {
+function localPasswordUserIdOverride(username = "") {
   const userId = String(process.env.LOOM_PASSWORD_USER_ID || "").trim();
   if (!userId) return "";
+  const mappedUsername = String(process.env.LOOM_PASSWORD_USER_ID_USERNAME || "").trim().toLowerCase();
+  if (mappedUsername && mappedUsername !== String(username || "").trim().toLowerCase()) {
+    return "";
+  }
   if (process.env.NODE_ENV === "production" && process.env.LOOM_ALLOW_PASSWORD_USER_ID_IN_PRODUCTION !== "true") {
     return "";
   }
@@ -692,7 +697,7 @@ function ensurePasswordUser(account = getPasswordAuthConfig()) {
   const { username } = account;
   const normalizedEmail = String(username || "").trim().toLowerCase();
   const ownerEmail = String(process.env.LOOM_OWNER_EMAIL || "").trim().toLowerCase();
-  const mappedUserId = localPasswordUserIdOverride();
+  const mappedUserId = localPasswordUserIdOverride(username);
   const existing = (mappedUserId ? findUserById(mappedUserId) : null) || (normalizedEmail ? findUserByEmail(normalizedEmail) : null);
   const isConfiguredOwner = ownerEmail && normalizedEmail === ownerEmail;
   return ensureLocalUser({
@@ -2003,7 +2008,11 @@ app.get("/api/news", requireAuth, (req, res) => {
   if (req.query.type) items = items.filter((item) => item.type === (typeMap[req.query.type] || req.query.type));
   if (req.query.source_group) {
     const sourceGroup = String(req.query.source_group || "").toLowerCase();
-    items = items.filter((item) => sourceGroup === "wechat-exporter" ? isWechatNewsItem(item) : String(item?.classification?.source_group || "").toLowerCase() === sourceGroup);
+    items = items.filter((item) => {
+      if (sourceGroup === "official") return isOfficialNewsItem(item);
+      if (sourceGroup === "wechat-exporter") return isWechatNewsItem(item);
+      return String(item?.classification?.source_group || "").toLowerCase() === sourceGroup;
+    });
   }
   if (req.query.starred === "1" || req.query.starred === "true") items = items.filter((item) => item.starred);
   if (req.query.q) {
@@ -2014,6 +2023,7 @@ app.get("/api/news", requireAuth, (req, res) => {
   }
   const counts = {
     all: allItems.length,
+    official: allItems.filter((item) => isOfficialNewsItem(item)).length,
     wechat: allItems.filter((item) => isWechatNewsItem(item)).length,
     trend: allItems.filter((item) => isGoogleNewsItem(item)).length,
     starred: allItems.filter((item) => item.starred).length,

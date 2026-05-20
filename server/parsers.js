@@ -396,7 +396,7 @@ ${fieldLibraryPrompt(userId, "competitor")}
 平台：${platform}
 URL：${source.url || ""}
 商品名：${source.name || source.title || ""}
-原价：${source.original_price || source.price || ""}
+原价：${source.original_price || ""}
 折扣价：${source.discount_price || source.price || ""}
 SKU：${source.sku_id || ""}
 已售：${source.monthly_sales || ""}

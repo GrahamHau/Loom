@@ -31,6 +31,10 @@ export const adminApi = {
     llmSummary: (params = {}) => adminFetch(`/observability/llm/summary?${query(params)}`),
     llmLogs: (params = {}) => adminFetch(`/observability/llm/logs?${query(params)}`),
   },
+  platformAi: {
+    get: () => adminFetch("/platform-ai"),
+    update: (body) => adminFetch("/platform-ai", { method: "PATCH", body }),
+  },
   users: {
     list: (params = {}) => adminFetch(`/users?${query(params)}`),
     get: (id) => adminFetch(`/users/${id}`),

@@ -126,15 +126,51 @@ function demandSourceUrl(demand) {
   return demand?.url || demand?.source_url || "";
 }
 
+function inferPlatformFromUrl(url) {
+  const value = String(url || "").toLowerCase();
+  if (value.includes("taobao.") || value.includes("tmall.")) return "taobao";
+  if (value.includes("amazon.")) return "amazon";
+  if (value.includes("kickstarter.")) return "kickstarter";
+  if (value.includes("xiaohongshu.") || value.includes("xhslink.")) return "xiaohongshu";
+  if (value.includes("youtube.") || value.includes("youtu.be")) return "youtube";
+  if (value.includes("instagram.")) return "instagram";
+  return "";
+}
+
+function normalizePlatformKey(platform, url = "") {
+  const inferred = inferPlatformFromUrl(url);
+  const raw = String(platform || "").trim().toLowerCase();
+  const compact = raw.replace(/[\s_\-/.]+/g, "");
+  if (
+    inferred === "taobao" ||
+    ["taobao", "tb", "tmall", "淘宝", "天猫", "淘宝天猫", "taobao天猫"].includes(compact)
+  ) return "taobao";
+  if (
+    inferred === "amazon" ||
+    ["amazon", "amz", "亚马逊"].includes(compact)
+  ) return "amazon";
+  if (
+    inferred === "kickstarter" ||
+    ["kickstarter", "ks", "众筹"].includes(compact)
+  ) return "kickstarter";
+  if (
+    inferred === "xiaohongshu" ||
+    ["xiaohongshu", "xhs", "red", "小红书"].includes(compact)
+  ) return "xiaohongshu";
+  if (inferred) return inferred;
+  return raw || "";
+}
+
 const SUPPORTED_PRODUCT_PLATFORMS = ["amazon", "taobao", "kickstarter"];
 const SUPPORTED_INSPIRATION_PLATFORMS = ["xiaohongshu", "kickstarter"];
 
-function platformClass(platform) {
-  return PLATFORM_KEY[platform] || "";
+function platformClass(platform, url = "") {
+  return PLATFORM_KEY[normalizePlatformKey(platform, url)] || "";
 }
 
-function platformLabel(platform) {
-  return PLATFORM_LABEL[platform] || platform || "未知平台";
+function platformLabel(platform, url = "") {
+  const key = normalizePlatformKey(platform, url);
+  return PLATFORM_LABEL[key] || platform || "未知平台";
 }
 
 function platformUrlLabel(url, fallback = "未填写链接") {
@@ -149,7 +185,8 @@ function platformUrlLabel(url, fallback = "未填写链接") {
 }
 
 function platformMetricConfig(platform) {
-  if (platform === "kickstarter") {
+  const platformKey = normalizePlatformKey(platform);
+  if (platformKey === "kickstarter") {
     return [
       { key: "price", label: "档位金额", prefix: "$" },
       { key: "cost", label: "参考成本", prefix: "¥" },
@@ -159,7 +196,7 @@ function platformMetricConfig(platform) {
       { key: "backers", label: "支持者", inputMode: "numeric" },
     ];
   }
-  if (platform === "taobao") {
+  if (platformKey === "taobao") {
     return [
       { key: "original_price", label: "原价", prefix: "¥" },
       { key: "discount_price", label: "折扣价", prefix: "¥" },
@@ -167,7 +204,7 @@ function platformMetricConfig(platform) {
       { key: "sales", label: "已售", inputMode: "numeric" },
     ];
   }
-  if (platform === "xiaohongshu") {
+  if (platformKey === "xiaohongshu") {
     return [
       { key: "likes", label: "点赞", inputMode: "numeric" },
       { key: "collects", label: "收藏", inputMode: "numeric" },
@@ -180,14 +217,15 @@ function platformMetricConfig(platform) {
     { key: "cost", label: "参考成本", prefix: "¥" },
     { key: "rating", label: "评分", prefix: "★" },
     { key: "reviews", label: "评论数", inputMode: "numeric" },
-    { key: "sales", label: "月销估算", suffix: "/ 月", inputMode: "numeric" },
+    { key: "sales", label: "月销估算", suffix: "/月", inputMode: "numeric" },
   ];
 }
 
 function createEmptyPlatform(platform = "amazon") {
+  const platformKey = normalizePlatformKey(platform) || "amazon";
   return {
-    id: `${platform}-${Date.now()}`,
-    platform,
+    id: `${platformKey}-${Date.now()}`,
+    platform: platformKey,
     url: "",
     price: "",
     original_price: "",
@@ -399,12 +437,11 @@ function buildNewsGroups(items = [], tagGroups = []) {
 
 function newsGroupCounts(groups = []) {
   const list = safeArray(groups);
-  const wechat = list.filter((n) => isWechatNewsItem(n));
-  const googleNews = list.filter((n) => isGoogleNewsItem(n));
   return {
     all: list.length,
-    wechat: wechat.length,
-    trend: googleNews.length,
+    official: list.length,
+    wechat: list.filter((n) => isWechatNewsItem(n)).length,
+    trend: list.filter((n) => isGoogleNewsItem(n)).length,
     starred: list.filter((n) => n.starred).length,
   };
 }
@@ -449,16 +486,10 @@ function newsEmptyState(tab, sampleWorkspace) {
       body: "在资讯流里点右侧星标后，这里会自动汇总你收藏过的内容。",
     };
   }
-  if (tab === "微信公众号") {
+  if (tab === "official") {
     return {
-      title: sampleWorkspace ? "正在等待公众号内容" : "还没有公众号资讯",
-      body: "公众号文章同步进来后，这里会展示对应内容。",
-    };
-  }
-  if (tab === "Google News") {
-    return {
-      title: sampleWorkspace ? "正在等待 Google News 内容" : "还没有 Google News 资讯",
-      body: "Google News 聚合内容同步进来后，这里会展示对应内容。",
+      title: sampleWorkspace ? "正在等待官方 RSS 内容" : "还没有官方 RSS 资讯",
+      body: "官方 RSS 内容同步进来后，这里会展示对应内容。",
     };
   }
   return {
@@ -642,6 +673,18 @@ function buildFieldPatch(fieldKey, values) {
     case "custom_tags":  return { tags: values, tag_values: { custom_tags: values } };
     default:             return { tag_values: { [fieldKey]: values } };
   }
+}
+
+function mergeEntityPatch(entity, patch) {
+  if (!patch || typeof patch !== "object") return entity;
+  return {
+    ...(entity || {}),
+    ...patch,
+    tag_values: {
+      ...((entity || {}).tag_values || {}),
+      ...(patch.tag_values || {}),
+    },
+  };
 }
 
 function MultiSelectField({ label, fieldKey, values, tagGroups, tone = "accent", single = false, compact = false, onChange, onCreateOption }) {
@@ -1294,9 +1337,9 @@ function InsightItem({ item }) {
 }
 
 function NewsScreen({ data, api, refreshData, navTarget }) {
-  const [tab, setTab] = useState("微信公众号");
+  const [tab, setTab] = useState("official");
   const [items, setItems] = useState([]);
-  const [counts, setCounts] = useState(data.newsCounts || { all: 0, wechat: 0, trend: 0, starred: 0 });
+  const [counts, setCounts] = useState(data.newsCounts || { all: 0, official: 0, wechat: 0, trend: 0, starred: 0 });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [selectedIds, setSelectedIds] = useState([]);
@@ -1340,7 +1383,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   };
 
   useEffect(() => {
-    setCounts(data.newsCounts || { all: 0, wechat: 0, trend: 0, starred: 0 });
+    setCounts(data.newsCounts || { all: 0, official: data.newsCounts?.all || 0, wechat: 0, trend: 0, starred: 0 });
     if (!api) {
       const groups = buildNewsGroups(data.news, data.settings?.tag_groups);
       setItems(groups);
@@ -1417,12 +1460,11 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     if (!api) return;
     const params = new URLSearchParams({ page: "1", limit: "100" });
     if (nextTab === "starred") params.set("starred", "1");
-    if (nextTab === "微信公众号") params.set("source_group", "wechat-exporter");
+    if (nextTab === "official") params.set("source_group", "official");
     const result = await api(`/api/news?${params.toString()}`);
     let groups = buildNewsGroups(result.items || result, data.settings?.tag_groups);
-    if (nextTab === "Google News") groups = groups.filter((item) => isGoogleNewsItem(item));
     setItems(groups);
-    if (nextTab === "all") setCounts(newsGroupCounts(groups));
+    if (nextTab === "official") setCounts((current) => ({ ...current, ...newsGroupCounts(groups), official: groups.length }));
     if (result.counts) setCounts((current) => ({ ...current, ...result.counts, all: result.counts.all ?? current.all }));
   };
 
@@ -1433,7 +1475,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
 
   useEffect(() => {
     if (!navTarget || navTarget.screen !== "news") return;
-    setTab("微信公众号");
+    setTab("official");
   }, [navTarget]);
 
   useEffect(() => {
@@ -1508,10 +1550,8 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
         <div className="news-feed-col">
           <div className="news-tabs">
             {[
-            ["微信公众号", "微信公众号", counts.wechat],
-            ["Google News", "Google News", counts.trend],
-            ["starred", "已收藏", counts.starred],
-            ["all", "全部", counts.all]].
+            ["official", "官方 RSS", counts.official ?? counts.all],
+            ["starred", "已收藏", counts.starred]].
             map(([k, label, count]) =>
             <div key={k} className={`news-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
                 {label} <span style={{ color: "var(--text-4)", marginLeft: 4 }}>{count}</span>
@@ -1786,18 +1826,28 @@ function PlatformInput({ label, value, onChange, prefix, suffix, inputMode = "te
 }
 
 function ProductPlatformCard({ platform, index, onUpdate, onRemove }) {
-  const fields = platformMetricConfig(platform.platform);
   const url = platform.url || platform.source_url || "";
+  const platformKey = normalizePlatformKey(platform.platform, url) || platform.platform || "unknown";
+  const fields = platformMetricConfig(platformKey);
+  const platformValue = (field) => {
+    if (platformKey === "taobao" && field.key === "discount_price") {
+      return platform.discount_price || platform.price || "";
+    }
+    if (platformKey === "taobao" && field.key === "sales") {
+      return normalizeMonthlySales(platform.sales || platform.monthly_sales);
+    }
+    return field.key === "sales" ? normalizeMonthlySales(platform[field.key]) : platform[field.key];
+  };
   return (
     <div className="platform-card">
       <div className="platform-card-head">
-        <span className={`platform-pill ${platformClass(platform.platform)}`}>{platformLabel(platform.platform)}</span>
+        <span className={`platform-pill ${platformClass(platformKey)}`}>{platformLabel(platformKey)}</span>
         {url ?
           <a className="platform-card-link" href={externalHref(url)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title={url}>
             打开链接
             <Icon name="external" size={12} />
           </a> :
-          <span className="platform-card-link">{platformLabel(platform.platform)}</span>
+          <span className="platform-card-link">{platformLabel(platformKey)}</span>
         }
         <button className="icon-btn" type="button" title="删除平台" onClick={() => onRemove?.(index)}>
           <Icon name="x" size={11} />
@@ -1808,16 +1858,20 @@ function ProductPlatformCard({ platform, index, onUpdate, onRemove }) {
         <input
           className="ghost-input mono"
           value={url}
-          onChange={(event) => onUpdate(index, { url: event.target.value })}
-          placeholder={`${platformLabel(platform.platform)} 链接`}
+          onChange={(event) => {
+            const nextUrl = event.target.value;
+            const nextPlatform = normalizePlatformKey(platform.platform, nextUrl) || platformKey;
+            onUpdate(index, { url: nextUrl, platform: nextPlatform });
+          }}
+          placeholder={`${platformLabel(platformKey)} 链接`}
         />
       </div>
-      <div className={`platform-card-grid ${platform.platform === "taobao" ? "compact" : ""}`}>
+      <div className={`platform-card-grid ${platformKey === "taobao" ? "compact" : ""}`}>
         {fields.map((field) =>
           <PlatformInput
             key={field.key}
             label={field.label}
-            value={field.key === "sales" ? normalizeMonthlySales(platform[field.key]) : platform[field.key]}
+            value={platformValue(field)}
             prefix={field.prefix === "★" ? <span className="rating-star" style={{ fontSize: 11 }}>★</span> : field.prefix}
             suffix={field.suffix}
             inputMode={field.inputMode}
@@ -1830,7 +1884,8 @@ function ProductPlatformCard({ platform, index, onUpdate, onRemove }) {
 }
 
 function AddPlatformControl({ existingPlatforms, onAdd }) {
-  const available = SUPPORTED_PRODUCT_PLATFORMS.filter((platform) => !safeArray(existingPlatforms).some((item) => item.platform === platform));
+  const existingKeys = safeArray(existingPlatforms).map((item) => normalizePlatformKey(item.platform, item.url || item.source_url || ""));
+  const available = SUPPORTED_PRODUCT_PLATFORMS.filter((platform) => !existingKeys.includes(platform));
   const [platform, setPlatform] = useState(available[0] || SUPPORTED_PRODUCT_PLATFORMS[0]);
   useEffect(() => {
     if (!available.length) return;
@@ -1986,6 +2041,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
     await api(`/api/fields/${encodeURIComponent(groupKey)}/options`, { method: "POST", body: JSON.stringify({ value: cleanValue }) });
     await refreshData?.();
   };
+  const productFields = normalizeFields(data.settings?.fields, data.settings?.tag_groups, { includeDefaults: true });
   const toggleSelect = (id) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
@@ -2106,7 +2162,9 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
           {paged.items.map((p) => {
             const platforms = safeArray(p.platforms);
             const main = platforms[0] || {};
-            const platformKey = main.platform || p.platform || p.source || "unknown";
+            const platformKey = normalizePlatformKey(main.platform || p.platform || p.source, main.url || p.source_url || "") || "unknown";
+            const mainPrice = platformKey === "taobao" ? (main.discount_price || main.price) : main.price;
+            const mainSales = normalizeMonthlySales(main.sales || main.monthly_sales);
             return (
               <div
                 className={`demand-card ${selectMode && selectedIds.includes(p.id) ? "is-selected" : ""}`}
@@ -2137,18 +2195,21 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                     {p.ai_summary || safeArray(p.tags).slice(0, 4).join(" · ") || "暂无摘要"}
                   </div>
                   <div className="demand-tags">
-                    {platforms.slice(0, 3).map((pl, i) =>
-                      <span key={i} className={`platform-pill ${PLATFORM_KEY[pl.platform] || ""}`}>
-                        {PLATFORM_ICON[pl.platform] || PLATFORM_LABEL[pl.platform] || pl.platform}
+                    {platforms.slice(0, 3).map((pl, i) => {
+                      const key = normalizePlatformKey(pl.platform, pl.url || pl.source_url || "");
+                      return (
+                      <span key={i} className={`platform-pill ${PLATFORM_KEY[key] || ""}`}>
+                        {PLATFORM_ICON[key] || PLATFORM_LABEL[key] || pl.platform}
                       </span>
-                    )}
-                    {platforms.length === 0 && <Tag tone="outline">{PLATFORM_LABEL[platformKey] || platformKey}</Tag>}
+                      );
+                    })}
+                    {platforms.length === 0 && <Tag tone="outline">{platformLabel(platformKey)}</Tag>}
                     {p.status && <Tag tone={p.status === "跟踪中" ? "success" : p.status === "已归档" ? "outline" : "accent"}>{p.status}</Tag>}
                   </div>
                   <div className="demand-foot">
-                    <span style={{ fontVariantNumeric: "tabular-nums" }}>价格 {main.price || "—"}</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{platformKey === "taobao" ? "折扣价" : "价格"} {mainPrice || "—"}</span>
                     <span style={{ fontVariantNumeric: "tabular-nums" }}>评分 {main.rating ?? "—"}</span>
-                    <span>月销 {main.sales || "—"}</span>
+                    <span>{platformKey === "taobao" ? "已售" : "月销"} {mainSales || "—"}</span>
                   </div>
                 </div>
               </div>
@@ -2177,6 +2238,9 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
               {paged.items.map((p) => {
                 const platforms = safeArray(p.platforms);
                 const main = platforms[0] || {};
+                const platformKey = normalizePlatformKey(main.platform || p.platform || p.source, main.url || p.source_url || "") || "unknown";
+                const mainPrice = platformKey === "taobao" ? (main.discount_price || main.price) : main.price;
+                const mainSales = normalizeMonthlySales(main.sales || main.monthly_sales);
                 const reviews = Number(main.reviews);
                 return (
                   <tr
@@ -2204,19 +2268,20 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                     <td><Tag>{p.category || "未分类"}</Tag></td>
                     <td>
                       <div className="product-platforms">
-                        {platforms.map((pl, i) =>
-                        <span key={i} className={`platform-pill ${PLATFORM_KEY[pl.platform]}`}>{PLATFORM_ICON[pl.platform]}</span>
-                        )}
+                        {platforms.map((pl, i) => {
+                          const key = normalizePlatformKey(pl.platform, pl.url || pl.source_url || "");
+                          return <span key={i} className={`platform-pill ${PLATFORM_KEY[key] || ""}`}>{PLATFORM_ICON[key] || platformLabel(key)}</span>;
+                        })}
                         {platforms.length === 0 && <span style={{ color: "var(--text-3)" }}>—</span>}
                       </div>
                     </td>
-                    <td style={{ fontVariantNumeric: "tabular-nums" }}>{main.price || "—"}</td>
+                    <td style={{ fontVariantNumeric: "tabular-nums" }}>{mainPrice || "—"}</td>
                     <td style={{ color: "var(--text-3)", fontVariantNumeric: "tabular-nums" }}>{main.cost || p.cost_estimate || "—"}</td>
                     <td>
                       <span className="rating-cell"><span className="rating-star">★</span>{main.rating ?? "—"}</span>
                       {Number.isFinite(reviews) && <span style={{ color: "var(--text-3)", marginLeft: 6, fontSize: 11 }}>{reviews.toLocaleString()}</span>}
                     </td>
-                    <td style={{ color: "var(--text-2)" }}>{main.sales || "—"}</td>
+                    <td style={{ color: "var(--text-2)" }}>{mainSales || "—"}</td>
                     <td>
                       <Tag tone={p.status === "跟踪中" ? "success" : p.status === "已归档" ? "default" : "accent"}>{p.status}</Tag>
                     </td>
@@ -2304,7 +2369,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
               </div>
 
               {(() => {
-                const fields = normalizeFields(data.settings?.fields, data.settings?.tag_groups, { includeDefaults: true });
+                const fields = productFields;
                 const competitorFields = fields.filter((f) => f.entities.includes("competitor") && entityUsesField(selected, f));
                 const attachField = async (field) => {
                   await updateSelected(buildFieldPatch(field.key, []));
@@ -2374,6 +2439,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
           ) : null}
         </Drawer>
 
+        {showAdd && <AddProductModal onClose={() => setShowAdd(false)} api={api} refreshData={refreshData} fields={productFields} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} />}
         {deleteTarget && <DeleteItemsConfirmModal entityLabel="竞品" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
         {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="竞品" items={selectedProducts} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}
       </div>
@@ -2383,15 +2449,45 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
 window.ProductsScreen = ProductsScreen;
 
 // AddProduct modal with AI parse animation
-function AddProductModal({ onClose, api, refreshData }) {
+function AddProductModal({ onClose, api, refreshData, fields = [], tagGroups = [], onCreateTagOption }) {
   const [step, setStep] = useState("input"); // input | parsing | preview
   const [progress, setProgress] = useState(0);
   const [url, setUrl] = useState("");
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState("");
+  const [addFieldOpen, setAddFieldOpen] = useState(false);
 
   const platforms = SUPPORTED_PRODUCT_PLATFORMS;
   const [platform, setPlatform] = useState("amazon");
+  const normalizedFields = normalizeFields(fields, tagGroups, { includeDefaults: true });
+  const previewPlatforms = safeArray(preview?.platforms).length
+    ? safeArray(preview.platforms)
+    : [{ ...createEmptyPlatform(preview?.platform || platform), url }];
+  const updatePreview = (patch) => setPreview((current) => mergeEntityPatch(current || {}, patch));
+  const updatePreviewPlatform = (index, patch) => {
+    setPreview((current) => {
+      const currentPlatforms = safeArray(current?.platforms).length
+        ? safeArray(current.platforms)
+        : [{ ...createEmptyPlatform(current?.platform || platform), url }];
+      const normalizedPatch = patch.discount_price !== undefined ? { ...patch, price: patch.discount_price } : patch;
+      return {
+        ...(current || {}),
+        platforms: currentPlatforms.map((item, idx) => idx === index ? { ...item, ...normalizedPatch } : item),
+      };
+    });
+  };
+  const removePreviewPlatform = (index) => {
+    setPreview((current) => ({
+      ...(current || {}),
+      platforms: safeArray(current?.platforms).filter((_, idx) => idx !== index),
+    }));
+  };
+  const addPreviewPlatform = (nextPlatform) => {
+    setPreview((current) => ({
+      ...(current || {}),
+      platforms: [...safeArray(current?.platforms), createEmptyPlatform(nextPlatform)],
+    }));
+  };
 
   const startParse = async () => {
     setStep("parsing");setProgress(0);setError("");
@@ -2408,7 +2504,22 @@ function AddProductModal({ onClose, api, refreshData }) {
         method: "POST",
         body: JSON.stringify({ url, platform }),
       });
-      setPreview(result);
+      const resultPlatforms = safeArray(result?.platforms);
+      const parsedPlatform = normalizePlatformKey(result?.platform || platform, url) || platform;
+      setPreview({
+        ...result,
+        platform: parsedPlatform,
+        source_url: url,
+        platforms: resultPlatforms.length
+          ? resultPlatforms.map((item, index) => ({
+            ...createEmptyPlatform(normalizePlatformKey(item.platform || parsedPlatform, item.url || url) || parsedPlatform),
+            ...item,
+            platform: normalizePlatformKey(item.platform || parsedPlatform, item.url || url) || parsedPlatform,
+            url: item.url || url,
+            id: item.id || `${normalizePlatformKey(item.platform || parsedPlatform, item.url || url) || parsedPlatform}-${index}`,
+          }))
+          : [{ ...createEmptyPlatform(parsedPlatform), url }],
+      });
       setProgress(3);
       setStep("preview");
     } catch (err) {
@@ -2481,37 +2592,90 @@ function AddProductModal({ onClose, api, refreshData }) {
 
           {step === "preview" &&
           <div className="col" style={{ gap: 14 }}>
-              <div style={{ display: "flex", gap: 12 }}>
+              <div className="source-capture-card product-capture-card">
                 <div style={{ width: 96, height: 96 }}>
                   <ProductThumb product={preview} size={96} fontSize={28} />
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>{preview?.name || "未命名竞品"}</div>
-                  <div className="tag-row">
-                    <Tag tone="accent">{preview?.category || "未分类"}</Tag>
-                    {(preview?.tags || []).slice(0, 3).map((tag) => <Tag key={tag}>{tag}</Tag>)}
-                  </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <label className="field-label">商品名称</label>
+                  <input
+                    className="ghost-input cl-detail-title-input"
+                    value={preview?.name || ""}
+                    placeholder="填入商品名"
+                    onChange={(event) => updatePreview({ name: event.target.value })}
+                    style={{ width: "100%", fontSize: 14, fontWeight: 650 }}
+                  />
                   <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-3)" }}>
-                    <Icon name="sparkles" size={11} /> AI 已填充 7 个字段,可逐项修改
+                    <Icon name="sparkles" size={11} /> AI 建议已填入，可在保存前逐项修改
                   </div>
                 </div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {[
-              ["售价", preview?.platforms?.[0]?.price || ""], ["参考成本", preview?.platforms?.[0]?.cost || ""], ["评分", preview?.platforms?.[0]?.rating || ""],
-              ["评论数", preview?.platforms?.[0]?.reviews || ""], ["月销估算", preview?.platforms?.[0]?.sales || ""], ["平台", PLATFORM_LABEL[preview?.platform] || preview?.platform || platform]].
-              map(([k, v]) =>
-              <div key={k}>
-                    <label className="field-label">{k}</label>
-                    <input className="input" style={{ width: "100%" }} defaultValue={v} />
-                  </div>
-              )}
+
+              <div className="drawer-section">
+                <div className="drawer-section-label"><Icon name="boxes" size={11} /> 平台信息 · {previewPlatforms.length} 个</div>
+                {previewPlatforms.map((pl, i) =>
+                  <ProductPlatformCard
+                    key={pl.id || `${pl.platform}-${i}`}
+                    platform={pl}
+                    index={i}
+                    onUpdate={updatePreviewPlatform}
+                    onRemove={removePreviewPlatform}
+                  />
+                )}
+                <AddPlatformControl existingPlatforms={previewPlatforms} onAdd={addPreviewPlatform} />
               </div>
-              <div>
-                <label className="field-label">核心卖点 (回车添加)</label>
-                <div className="tag-row" style={{ padding: 6, border: "1px solid var(--border)", borderRadius: 6, minHeight: 36 }}>
-                  {(preview?.selling_points || []).map((point) => <Tag key={point} tone="success">{point}</Tag>)}
+
+              <div className="drawer-section">
+                <div className="drawer-section-label"><Icon name="tag" size={11} /> 标签字段</div>
+                <div className="detail-inline-grid">
+                  {normalizedFields.filter((field) => field.entities.includes("competitor") && entityUsesField(preview, field)).map((field) => (
+                    <FieldRow
+                      key={field.key}
+                      field={field}
+                      entity={preview}
+                      onSave={updatePreview}
+                      onCreateOption={onCreateTagOption}
+                    />
+                  ))}
                 </div>
+                <div className="detail-add-field-wrap">
+                  <button className="add-field-trigger" onClick={() => setAddFieldOpen((v) => !v)}>
+                    <Icon name="plus" size={12} /> 添加字段
+                  </button>
+                  {addFieldOpen && (
+                    <AddFieldPopover
+                      fields={normalizedFields}
+                      entityType="competitor"
+                      entity={preview}
+                      onAttach={(field) => updatePreview(buildFieldPatch(field.key, []))}
+                      onGoSettings={() => setAddFieldOpen(false)}
+                      onClose={() => setAddFieldOpen(false)}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="drawer-section">
+                <div className="drawer-section-label"><Icon name="sparkles" size={11} /> 核心卖点 · AI 总结</div>
+                <DetailFieldCard>
+                  <BulletListEditor
+                    items={safeArray(preview?.selling_points)}
+                    onChange={(next) => updatePreview({ selling_points: next })}
+                    tone="success"
+                    placeholder="输入卖点，回车添加"
+                  />
+                </DetailFieldCard>
+              </div>
+
+              <div className="drawer-section">
+                <div className="drawer-section-label"><Icon name="sparkles" size={11} /> AI 摘要</div>
+                <textarea
+                  className="ghost-input drawer-textarea compact"
+                  value={preview?.ai_summary || ""}
+                  onChange={(event) => updatePreview({ ai_summary: event.target.value })}
+                  placeholder="可补充或修改摘要"
+                  style={{ width: "100%", minHeight: 64, fontSize: 12.5, resize: "vertical" }}
+                />
               </div>
             </div>
           }
@@ -2526,8 +2690,12 @@ function AddProductModal({ onClose, api, refreshData }) {
                 method: "POST",
                 body: JSON.stringify({
                   ...(preview || {}),
-                  platform,
+                  platform: normalizePlatformKey(preview?.platform || platform, url) || platform,
                   source_url: url,
+                  platforms: previewPlatforms.map((item) => ({
+                    ...item,
+                    platform: normalizePlatformKey(item.platform, item.url || url) || item.platform,
+                  })),
                 }),
               });
               await refreshData?.();
@@ -2585,6 +2753,7 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
     await api(`/api/fields/${encodeURIComponent(groupKey)}/options`, { method: "POST", body: JSON.stringify({ value: cleanValue }) });
     await refreshData?.();
   };
+  const demandFields = normalizeFields(data.settings?.fields, data.settings?.tag_groups, { includeDefaults: true });
 
   const openDeleteConfirm = (demand) => {
     setDeleteTarget(demand);
@@ -2860,19 +3029,7 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
                 </div>
               </div>
               <div className="demand-body">
-                {demandSourceUrl(d) ?
-                <a
-                  className="demand-title demand-title-link"
-                  href={externalHref(demandSourceUrl(d))}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                    <span>{d.title}</span>
-                    <Icon name="external" size={12} />
-                  </a> :
                 <div className="demand-title">{d.title}</div>
-                }
                 <div className="demand-summary">{d.summary}</div>
                 <div className="demand-tags">
                   <Tag tone="accent">{d.innovation}</Tag>
@@ -2881,7 +3038,22 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
                 </div>
                 <div className="demand-foot">
                   <span><Icon name="calendar" size={10} /> {d.date}</span>
-                  <span><Icon name="sparkles" size={10} /> AI 打标</span>
+                  <span className="demand-foot-actions">
+                    {demandSourceUrl(d) &&
+                      <a
+                        className="demand-open-link"
+                        href={externalHref(demandSourceUrl(d))}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="打开原始链接"
+                        aria-label="打开原始链接"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Icon name="external" size={12} />
+                      </a>
+                    }
+                    <span><Icon name="sparkles" size={10} /> AI 打标</span>
+                  </span>
                 </div>
               </div>
             </div>
@@ -2957,7 +3129,8 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
         {tab === "voices" && <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条需求" />}
       </div>
 
-      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} fields={data.settings?.fields} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
+      {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} fields={demandFields} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
+      {showAdd && <AddDemandModal onClose={() => setShowAdd(false)} api={api} refreshData={refreshData} fields={demandFields} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} />}
       {deleteTarget && <DeleteDemandConfirmModal demand={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={confirmDelete} />}
       {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="需求" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={async () => { await deleteSelected(); setShowBulkDeleteConfirm(false); }} />}
     </div>);
@@ -2967,7 +3140,10 @@ window.DemandsScreen = DemandsScreen;
 
 function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete, fields = [], tagGroups = [], onCreateTagOption, onNavigateSettings }) {
   const [addFieldOpen, setAddFieldOpen] = useState(false);
+  const [draft, setDraft] = useState(demand);
+  useEffect(() => setDraft(demand), [demand]);
   const save = async (patch) => {
+    setDraft((current) => mergeEntityPatch(current, patch));
     if (api) {
       await api(`/api/demands/${demand.id}`, { method: "PATCH", body: JSON.stringify(patch) });
       await refreshData?.();
@@ -2978,15 +3154,15 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
     await api("/api/sync/feishu", { method: "POST", body: JSON.stringify({ kinds: ["demands"] }) });
     await refreshData?.();
   };
-  const sourceUrl = demandSourceUrl(demand);
+  const sourceUrl = demandSourceUrl(draft);
   return (
     <div className="drawer-root" onClick={onClose}>
       <div className="drawer-overlay" />
       <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
         <div className="drawer-head">
           <div className="drawer-head-main">
-            <span className={`platform-pill ${PLATFORM_KEY[demand.source] || ""}`}>{PLATFORM_LABEL[demand.source] || demand.source}</span>
-            <span className="drawer-head-meta"><Icon name="calendar" size={10} /> {demand.date}</span>
+            <span className={`platform-pill ${PLATFORM_KEY[draft.source] || ""}`}>{PLATFORM_LABEL[draft.source] || draft.source}</span>
+            <span className="drawer-head-meta"><Icon name="calendar" size={10} /> {draft.date}</span>
           </div>
           <div className="drawer-head-actions">
             <Btn
@@ -3000,20 +3176,20 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
           </div>
         </div>
         <div className="drawer-body">
-          <DemandSourceCard demand={demand} />
+          <DemandSourceCard demand={draft} />
 
           <div className="detail-section">
             <div className="detail-section-label">原文正文</div>
-            <textarea className="ghost-input drawer-textarea" defaultValue={demand.original_content || demand.summary}
+            <textarea className="ghost-input drawer-textarea" defaultValue={draft.original_content || draft.summary}
             onBlur={(e) => save({ original_content: e.target.value, summary: e.target.value })}
             style={{ width: "100%", minHeight: 70, lineHeight: 1.6, resize: "vertical", fontSize: 12.5 }} />
           </div>
 
-          <DemandCommentsSection demand={demand} />
+          <DemandCommentsSection demand={draft} />
 
           {(() => {
             const normalizedFields = normalizeFields(fields, tagGroups, { includeDefaults: true });
-            const inspirationFields = normalizedFields.filter((f) => f.entities.includes("inspiration") && entityUsesField(demand, f));
+            const inspirationFields = normalizedFields.filter((f) => f.entities.includes("inspiration") && entityUsesField(draft, f));
             const attachField = async (field) => {
               await save(buildFieldPatch(field.key, []));
             };
@@ -3023,7 +3199,7 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
                   <FieldRow
                     key={field.key}
                     field={field}
-                    entity={demand}
+                    entity={draft}
                     onSave={save}
                     onCreateOption={onCreateTagOption}
                   />
@@ -3036,7 +3212,7 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
                       <AddFieldPopover
                         fields={normalizedFields}
                         entityType="inspiration"
-                        entity={demand}
+                        entity={draft}
                         onAttach={attachField}
                       onGoSettings={() => { setAddFieldOpen(false); onNavigateSettings?.(); }}
                       onClose={() => setAddFieldOpen(false)}
@@ -3064,14 +3240,14 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
           <div className="detail-section">
             <div className="detail-section-label">备注</div>
             <textarea className="ghost-input drawer-textarea compact" placeholder="补充备注、相关资料链接..."
-            defaultValue={demand.note || ""}
+            defaultValue={draft.note || ""}
             onBlur={(e) => save({ note: e.target.value })}
             style={{ width: "100%", minHeight: 60, resize: "vertical", fontSize: 12.5 }} />
           </div>
 
           <div className="detail-section" style={{ display: "flex", gap: 6 }}>
             <Btn variant="default" icon="sync" onClick={syncDemand} style={{ flex: 1, justifyContent: "center" }}>同步飞书</Btn>
-            <Btn variant="ghost" icon="trash" onClick={() => onRequestDelete?.(demand)}>删除</Btn>
+            <Btn variant="ghost" icon="trash" onClick={() => onRequestDelete?.(draft)}>删除</Btn>
           </div>
         </div>
       </div>
@@ -3080,11 +3256,12 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
 }
 window.DemandDetailDrawer = DemandDetailDrawer;
 
-function ProductDetailDrawer({ product, onClose, api, refreshData }) {
+function ProductDetailDrawer({ product, onClose, api, refreshData, fields = [], tagGroups = [], onCreateTagOption, onNavigateSettings }) {
   const [draft, setDraft] = useState(product);
+  const [addFieldOpen, setAddFieldOpen] = useState(false);
   useEffect(() => setDraft(product), [product]);
   const save = async (patch) => {
-    const next = { ...draft, ...patch };
+    const next = mergeEntityPatch(draft, patch);
     setDraft(next);
     if (api) {
       const nextPatch = patch.image !== undefined ? { ...patch, image_override: "manual" } : patch;
@@ -3092,6 +3269,16 @@ function ProductDetailDrawer({ product, onClose, api, refreshData }) {
       await refreshData?.();
     }
   };
+  const updatePlatform = (index, patch) => {
+    const normalizedPatch = patch.discount_price !== undefined ? { ...patch, price: patch.discount_price } : patch;
+    save({
+      platforms: safeArray(draft?.platforms).map((platform, idx) => idx === index ? { ...platform, ...normalizedPatch } : platform),
+    });
+  };
+  const removePlatform = (index) => save({ platforms: safeArray(draft?.platforms).filter((_, idx) => idx !== index) });
+  const addPlatform = (platform) => save({ platforms: [...safeArray(draft?.platforms), createEmptyPlatform(platform)] });
+  const normalizedFields = normalizeFields(fields, tagGroups, { includeDefaults: true });
+  const competitorFields = normalizedFields.filter((field) => field.entities.includes("competitor") && entityUsesField(draft, field));
   return (
     <div className="drawer-root" onClick={onClose}>
       <div className="drawer-overlay" />
@@ -3108,46 +3295,68 @@ function ProductDetailDrawer({ product, onClose, api, refreshData }) {
         </div>
         <div className="drawer-body">
           <div className="detail-section">
-            <div className="detail-section-label">品牌</div>
-            <input
-              className="ghost-input"
-              defaultValue={draft.brand || draft.name?.split(/[\s·]/)[0] || ""}
-              onBlur={(e) => save({ brand: e.target.value })}
-              style={{ width: "100%", fontSize: 13, fontWeight: 600 }}
-            />
-          </div>
-          <div className="detail-section">
             <div className="detail-section-label"><Icon name="boxes" size={11} /> 平台信息 · {safeArray(draft.platforms).length} 个</div>
             {safeArray(draft.platforms).map((pl, i) =>
-              <div className="platform-card" key={i}>
-                <div className="platform-card-head">
-                  <span className={`platform-pill ${PLATFORM_KEY[pl.platform]}`}>{PLATFORM_LABEL[pl.platform] || pl.platform}</span>
-                  {pl.url ?
-                    <a className="platform-card-link" href={externalHref(pl.url)} target="_blank" rel="noreferrer">
-                      {pl.url}
-                      <Icon name="external" size={12} />
-                    </a> :
-                    <span className="platform-card-link">{pl.platform || "未知平台"}</span>
-                  }
-                </div>
-                <div className={`platform-card-grid ${pl.platform === "taobao" ? "compact" : ""}`}>
-                  <div><div className="metric-label">售价</div><div className="metric-value">{pl.price || "—"}</div></div>
-                  {pl.platform !== "taobao" && <>
-                  <div><div className="metric-label">评分</div><div className="metric-value">{pl.rating ?? "—"}</div></div>
-                  <div><div className="metric-label">评论数</div><div className="metric-value">{pl.reviews ?? "—"}</div></div>
-                  </>}
-                  <div><div className="metric-label">月销估算</div><div className="metric-value">{pl.sales || "—"}</div></div>
-                </div>
-              </div>
+              <ProductPlatformCard
+                key={pl.id || `${pl.platform}-${i}`}
+                platform={pl}
+                index={i}
+                onUpdate={updatePlatform}
+                onRemove={removePlatform}
+              />
             )}
+            <AddPlatformControl existingPlatforms={draft.platforms} onAdd={addPlatform} />
           </div>
           <div className="detail-section">
-            <div className="detail-section-label">品类 / 标签</div>
-            <DemandTagList items={safeArray(draft.tags)} />
+            <div className="detail-section-label"><Icon name="tag" size={11} /> 标签字段</div>
+            <div className="detail-inline-grid">
+              {competitorFields.map((field) => (
+                <FieldRow
+                  key={field.key}
+                  field={field}
+                  entity={draft}
+                  onSave={save}
+                  onCreateOption={onCreateTagOption}
+                />
+              ))}
+            </div>
+            <div className="detail-add-field-wrap">
+              <button className="add-field-trigger" onClick={() => setAddFieldOpen((v) => !v)}>
+                <Icon name="plus" size={12} /> 添加字段
+              </button>
+              {addFieldOpen && (
+                <AddFieldPopover
+                  fields={normalizedFields}
+                  entityType="competitor"
+                  entity={draft}
+                  onAttach={(field) => save(buildFieldPatch(field.key, []))}
+                  onGoSettings={() => { setAddFieldOpen(false); onNavigateSettings?.(); }}
+                  onClose={() => setAddFieldOpen(false)}
+                />
+              )}
+            </div>
           </div>
           <div className="detail-section">
-            <div className="detail-section-label"><Icon name="sparkles" size={11} /> 核心卖点</div>
-            <DemandTagList items={safeArray(draft.selling_points)} tone="accent" />
+            <div className="detail-section-label"><Icon name="sparkles" size={11} /> 核心卖点 · AI 总结 + 用户补充</div>
+            <DetailFieldCard>
+              <BulletListEditor
+                items={safeArray(draft.selling_points)}
+                onChange={(next) => save({ selling_points: next })}
+                tone="success"
+                placeholder="输入卖点，回车添加"
+              />
+            </DetailFieldCard>
+          </div>
+          <div className="detail-section">
+            <div className="detail-section-label"><Icon name="tag" size={11} /> 差评关键词</div>
+            <DetailFieldCard>
+              <BulletListEditor
+                items={safeArray(draft.negative_keywords)}
+                onChange={(next) => save({ negative_keywords: next })}
+                tone="danger"
+                placeholder="输入差评关键词，回车添加"
+              />
+            </DetailFieldCard>
           </div>
           <div className="detail-section">
             <div className="detail-section-label"><Icon name="sparkles" size={11} /> AI 摘要</div>
@@ -3160,12 +3369,15 @@ function ProductDetailDrawer({ product, onClose, api, refreshData }) {
 }
 window.ProductDetailDrawer = ProductDetailDrawer;
 
-function AddDemandModal({ onClose, api, refreshData, tagGroups = [], onCreateTagOption }) {
+function AddDemandModal({ onClose, api, refreshData, fields = [], tagGroups = [], onCreateTagOption }) {
   const [step, setStep] = useState("input");
   const [progress, setProgress] = useState(0);
   const [url, setUrl] = useState("");
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState("");
+  const [addFieldOpen, setAddFieldOpen] = useState(false);
+  const normalizedFields = normalizeFields(fields, tagGroups, { includeDefaults: true });
+  const updatePreview = (patch) => setPreview((current) => mergeEntityPatch(current || {}, patch));
 
   const startParse = async () => {
     setStep("parsing");setProgress(0);setError("");
@@ -3182,7 +3394,11 @@ function AddDemandModal({ onClose, api, refreshData, tagGroups = [], onCreateTag
         method: "POST",
         body: JSON.stringify({ url }),
       });
-      setPreview(result);
+      setPreview({
+        ...result,
+        source: result?.source || inferPlatformFromUrl(url) || "xiaohongshu",
+        url: result?.url || url,
+      });
       setProgress(3);
       setStep("preview");
     } catch (err) {
@@ -3260,51 +3476,50 @@ function AddDemandModal({ onClose, api, refreshData, tagGroups = [], onCreateTag
               <div className="detail-section">
                 <div className="detail-section-label">原文正文</div>
                 <textarea className="ghost-input drawer-textarea"
-                  defaultValue={preview?.original_content || preview?.summary || ""}
+                  value={preview?.original_content || preview?.summary || ""}
+                  onChange={(event) => updatePreview({ original_content: event.target.value, summary: event.target.value, content: event.target.value })}
                   style={{ width: "100%", minHeight: 70, lineHeight: 1.6, fontSize: 12.5, resize: "vertical" }} />
               </div>
 
               <div className="detail-section">
-                <MultiSelectField
-                  label="创新类型"
-                  fieldKey="innovation"
-                  values={[preview?.innovation || "待分类"]}
-                  tagGroups={tagGroups}
-                  tone="success"
-                  single
-                  onChange={(values) => setPreview({ ...(preview || {}), innovation: values[0] || "待分类" })}
-                  onCreateOption={onCreateTagOption}
-                />
-              </div>
-
-              <div className="detail-section">
-                <MultiSelectField
-                  label="使用场景"
-                  fieldKey="scenarios"
-                  values={preview?.scenarios}
-                  tagGroups={tagGroups}
-                  tone="accent"
-                  onChange={(values) => setPreview({ ...(preview || {}), scenarios: values })}
-                  onCreateOption={onCreateTagOption}
-                />
-              </div>
-
-              <div className="detail-section">
-                <MultiSelectField
-                  label="用户痛点"
-                  fieldKey="painpoints"
-                  values={preview?.painpoints}
-                  tagGroups={tagGroups}
-                  tone="danger"
-                  onChange={(values) => setPreview({ ...(preview || {}), painpoints: values })}
-                  onCreateOption={onCreateTagOption}
-                />
+                <div className="detail-section-label"><Icon name="tag" size={11} /> 标签字段</div>
+                <div className="detail-inline-grid">
+                  {normalizedFields.filter((field) => field.entities.includes("inspiration") && entityUsesField(preview, field)).map((field) => (
+                    <FieldRow
+                      key={field.key}
+                      field={field}
+                      entity={preview}
+                      onSave={updatePreview}
+                      onCreateOption={onCreateTagOption}
+                    />
+                  ))}
+                </div>
+                <div className="detail-add-field-wrap">
+                  <button className="add-field-trigger" onClick={() => setAddFieldOpen((value) => !value)}>
+                    <Icon name="plus" size={12} /> 添加字段
+                  </button>
+                  {addFieldOpen && (
+                    <AddFieldPopover
+                      fields={normalizedFields}
+                      entityType="inspiration"
+                      entity={preview}
+                      onAttach={(field) => updatePreview(buildFieldPatch(field.key, []))}
+                      onGoSettings={() => setAddFieldOpen(false)}
+                      onClose={() => setAddFieldOpen(false)}
+                    />
+                  )}
+                </div>
               </div>
 
               <div className="detail-section">
                 <div className="detail-section-label">备注</div>
-                <textarea className="ghost-input drawer-textarea compact" placeholder="补充备注、相关资料链接..."
-                  style={{ width: "100%", minHeight: 50, fontSize: 12.5, resize: "vertical" }} />
+                <textarea
+                  className="ghost-input drawer-textarea compact"
+                  value={preview?.note || ""}
+                  onChange={(event) => updatePreview({ note: event.target.value })}
+                  placeholder="补充备注、相关资料链接..."
+                  style={{ width: "100%", minHeight: 50, fontSize: 12.5, resize: "vertical" }}
+                />
               </div>
             </div>
           }
@@ -4925,6 +5140,13 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const demands = demandIds.map((id) => safeArray(data.demands).find((d) => d.id === id)).filter(Boolean);
   const detailProduct = detailTarget?.type === "product" ? safeArray(data.products).find((p) => p.id === detailTarget.id) : null;
   const detailDemand = detailTarget?.type === "demand" ? safeArray(data.demands).find((d) => d.id === detailTarget.id) : null;
+  const normalizedFields = normalizeFields(data.settings?.fields, data.settings?.tag_groups, { includeDefaults: true });
+  const createTagOption = async (groupKey, value) => {
+    const cleanValue = String(value || "").trim();
+    if (!api || !cleanValue) return;
+    await api(`/api/fields/${encodeURIComponent(groupKey)}/options`, { method: "POST", body: JSON.stringify({ value: cleanValue }) });
+    await refreshData?.();
+  };
   useEffect(() => setStatus(research.status || "草稿"), [research.status]);
   const saveLinks = async (nextProducts = productIds, nextDemands = demandIds) => {
     await api?.(`/api/research/${research.id}`, {
@@ -5180,10 +5402,10 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
           />
         }
         {detailProduct &&
-        <ProductDetailDrawer product={detailProduct} api={api} refreshData={refreshData} onClose={() => setDetailTarget(null)} />
+        <ProductDetailDrawer product={detailProduct} api={api} refreshData={refreshData} fields={normalizedFields} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setDetailTarget(null)} />
         }
         {detailDemand &&
-        <DemandDetailDrawer demand={detailDemand} api={api} refreshData={refreshData} onClose={() => setDetailTarget(null)} />
+        <DemandDetailDrawer demand={detailDemand} api={api} refreshData={refreshData} fields={normalizedFields} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setDetailTarget(null)} />
         }
         {feishuPreview &&
         <div className="modal-backdrop" onClick={() => setFeishuPreview(null)}>

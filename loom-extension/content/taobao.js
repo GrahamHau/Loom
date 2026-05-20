@@ -18,7 +18,7 @@
 
   function normalizeImageUrl(value) {
     const url = normalizeUrl(String(value || "").replace(/&amp;/g, "&").trim());
-    if (!url || url.startsWith("data:")) return "";
+    if (!url || url.startsWith("data:") || url.startsWith("blob:")) return "";
     return url;
   }
 
@@ -38,6 +38,16 @@
 
   function cleanPriceNumber(value) {
     return cleanPrice(value).replace(/^¥/, "");
+  }
+
+  function priceNumber(value) {
+    return String(value || "").replace(/[^\d.]/g, "");
+  }
+
+  function samePrice(a, b) {
+    const left = priceNumber(a);
+    const right = priceNumber(b);
+    return Boolean(left && right && left === right);
   }
 
   function visibleText(selector, root = document) {
@@ -66,6 +76,46 @@
     return "";
   }
 
+  function parseOriginalPrice(value) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    const beforeDiscountMatch = text.match(/优惠前\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    if (beforeDiscountMatch?.[1]) return beforeDiscountMatch[1];
+    const originalMatch = text.match(/(?:原价|划线价)\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    if (originalMatch?.[1]) return originalMatch[1];
+    return "";
+  }
+
+  function topVisibleText(selector) {
+    const nodes = [...document.querySelectorAll(selector)]
+      .filter((node) => node instanceof Element)
+      .map((node) => {
+        const rect = node.getBoundingClientRect();
+        const value = node.textContent?.replace(/\s+/g, " ").trim() || "";
+        return { node, rect, value };
+      })
+      .filter(({ rect, value }) => value && rect.width > 0 && rect.height > 0 && rect.top >= 0)
+      .sort((a, b) => a.rect.top - b.rect.top);
+    return nodes[0]?.value || "";
+  }
+
+  function findPrimaryPriceBand() {
+    const selectors = [
+      "[class*='beltPrice']",
+      "[class*='PricePanel']",
+      "[class*='pricePanel']",
+      "[class*='PriceWrap']",
+      "[class*='priceWrap']",
+      "[class*='priceArea']",
+      "[class*='PriceArea']",
+    ];
+    for (const selector of selectors) {
+      const value = topVisibleText(selector);
+      if (parsePrimaryPrice(value) || parseOriginalPrice(value)) return value;
+    }
+    return "";
+  }
+
   function findPrimaryTitle() {
     const selectors = [
       "[class*='mainTitle']",
@@ -81,11 +131,12 @@
   }
 
   function findPrimaryPrice() {
+    const priceBand = findPrimaryPriceBand();
+    const priceFromBand = parsePrimaryPrice(priceBand);
+    if (priceFromBand) return priceFromBand;
     const selectors = [
-      "[class*='priceWrap']",
       "[class*='Price--priceText']",
       "[class*='priceText']",
-      "[class*='price--']",
       ".tb-rmb-num",
       ".J_price .price",
     ];
@@ -114,11 +165,14 @@
   }
 
   function findOriginalPriceFromText() {
+    const priceBand = findPrimaryPriceBand();
+    const originalFromBand = parseOriginalPrice(priceBand);
+    if (originalFromBand) return originalFromBand;
     const bodyText = document.body?.innerText || "";
     const patterns = [
+      /优惠前\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
       /原价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
       /划线价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
-      /价格\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
     ];
     for (const pattern of patterns) {
       const match = bodyText.match(pattern);
@@ -179,6 +233,8 @@
 
   function imageUrlFromNode(node) {
     if (!(node instanceof Element)) return "";
+    const currentSrc = normalizeImageUrl(node.currentSrc);
+    if (currentSrc) return currentSrc;
     const attrs = ["src", "data-src", "data-ks-lazyload", "data-lazyload", "data-original", "data-img", "data-url"];
     for (const name of attrs) {
       const value = normalizeImageUrl(node.getAttribute(name));
@@ -195,14 +251,107 @@
     return "";
   }
 
+  function isBlockedImageUrl(url) {
+    const lower = normalizeImageUrl(url).toLowerCase();
+    return !lower
+      || /(\.gif|\.svg)(?:[?#]|$)/.test(lower)
+      || /avatar|icon|logo|sprite|blank|loading|placeholder|qrcode|qr-code|wangwang|shop|seller|store|coupon|favicon/i.test(lower);
+  }
+
+  function isUsefulProductImage(url) {
+    const value = normalizeImageUrl(url);
+    if (!value || isBlockedImageUrl(value)) return false;
+    return /alicdn|taobaocdn|tbcdn|tmall|taobao|imgextra|bao\/uploaded/i.test(value) || /\.(jpg|jpeg|png|webp)(?:[?#]|$)/i.test(value);
+  }
+
+  function elementMarker(node) {
+    const parts = [];
+    let current = node;
+    for (let depth = 0; current instanceof Element && depth < 4; depth += 1) {
+      parts.push(
+        current.id,
+        current.className,
+        current.getAttribute("alt"),
+        current.getAttribute("aria-label"),
+        current.getAttribute("data-spm")
+      );
+      current = current.parentElement;
+    }
+    return parts.filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function looksLikeNonProductImageNode(node) {
+    const marker = elementMarker(node);
+    return /desc|detail|recommend|related|seller|shop|store|coupon|comment|review|评价|详情|推荐|店铺|客服|优惠|二维码|qrcode/i.test(marker);
+  }
+
+  function primaryImageScore(node, selectorRank) {
+    const rect = node.getBoundingClientRect();
+    const naturalWidth = Number(node.naturalWidth || 0);
+    const naturalHeight = Number(node.naturalHeight || 0);
+    const renderedArea = Math.max(0, rect.width) * Math.max(0, rect.height);
+    const naturalArea = naturalWidth * naturalHeight;
+    return selectorRank * 1_000_000_000 + Math.max(renderedArea, naturalArea);
+  }
+
+  function collectPrimaryImageCandidates() {
+    const selectors = [
+      "#J_ImgBooth img",
+      ".tb-booth img",
+      "[class*='ImgBooth'] img",
+      "[class*='imgBooth'] img",
+      "[class*='mainPic'] img",
+      "img[class*='mainPic']",
+      "[class*='mainImage'] img",
+      "[class*='main-image'] img",
+      "[class*='MainImage'] img",
+      "[class*='picGallery'] img",
+      "[class*='PicGallery'] img",
+      "[class*='gallery'] img",
+      "[class*='Gallery'] img",
+      "[class*='swiper-slide-active'] img",
+      "[class*='slick-active'] img",
+      "img[alt*='商品']",
+    ];
+    const candidates = [];
+    selectors.forEach((selector, index) => {
+      document.querySelectorAll(selector).forEach((node) => {
+        if (!(node instanceof Element) || !visibleElement(node) || looksLikeNonProductImageNode(node)) return;
+        const rect = node.getBoundingClientRect();
+        const naturalWidth = Number(node.naturalWidth || 0);
+        const naturalHeight = Number(node.naturalHeight || 0);
+        if (Math.max(rect.width, naturalWidth) < 80 || Math.max(rect.height, naturalHeight) < 80) return;
+        const url = imageUrlFromNode(node);
+        if (!isUsefulProductImage(url)) return;
+        candidates.push({
+          url,
+          score: primaryImageScore(node, selectors.length - index),
+        });
+      });
+    });
+    return candidates;
+  }
+
+  function findPrimaryImageFromDom() {
+    const candidates = collectPrimaryImageCandidates()
+      .sort((a, b) => b.score - a.score)
+      .map((candidate) => candidate.url);
+    return uniq(candidates)[0] || "";
+  }
+
+  function pickUsefulImage(...values) {
+    for (const value of values.flat()) {
+      const url = normalizeImageUrl(value);
+      if (isUsefulProductImage(url)) return url;
+    }
+    return "";
+  }
+
   function isUsefulDetailImage(url, thumbnail = "") {
     const value = normalizeImageUrl(url);
-    if (!value) return false;
-    const lower = value.toLowerCase();
+    if (!value || !isUsefulProductImage(value)) return false;
     if (thumbnail && value === thumbnail) return false;
-    if (/(\.gif|\.svg)(?:[?#]|$)/.test(lower)) return false;
-    if (/avatar|icon|logo|sprite|blank|loading|placeholder|qrcode|qr-code|wangwang|shop/i.test(lower)) return false;
-    return /alicdn|taobaocdn|tbcdn|tmall|taobao|imgextra|bao\/uploaded/i.test(value) || /\.(jpg|jpeg|png|webp)(?:[?#]|$)/i.test(value);
+    return true;
   }
 
   function visibleElement(node) {
@@ -446,10 +595,9 @@
       || parsePrimaryPrice(findPriceFromText())
       || attr("[data-price]", "data-price")
     );
-    const originalPrice = cleanPrice(
+    const rawOriginalPrice = cleanPrice(
       parsePrimaryPrice(originalPriceFromScripts)
       || findOriginalPriceFromText()
-      || price
     );
     const discountPrice = cleanPrice(
       parsePrimaryPrice(discountPriceFromScripts)
@@ -457,6 +605,9 @@
       || parsePrimaryPrice(priceFromScripts)
       || cleanPriceNumber(price)
     );
+    const originalPrice = rawOriginalPrice && !samePrice(rawOriginalPrice, discountPrice)
+      ? rawOriginalPrice
+      : "";
 
     const monthlySales = cleanSales(
       salesFromScripts
@@ -464,14 +615,11 @@
       || ""
     );
 
-    const thumbnail = normalizeUrl(
+    const thumbnail = pickUsefulImage(
+      findPrimaryImageFromDom(),
+      imageFromScripts,
+      attr('meta[property="og:image"]', "content"),
       getByPath(jsonLd, [["image", 0], ["image"]])
-      || imageFromScripts
-      || attr('meta[property="og:image"]', "content")
-      || attr("#J_ImgBooth img", "src")
-      || attr(".tb-booth img", "src")
-      || attr("img[class*='mainPic']", "src")
-      || attr("img[alt*='商品']", "src")
     );
 
     const description = cleanTitle(

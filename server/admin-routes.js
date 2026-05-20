@@ -6,9 +6,11 @@ import {
   adminCreateWorkspace,
   adminDashboard,
   adminForceSignout,
+  adminGetPlatformAiConfig,
   adminGetUser,
   adminListUsers,
   adminListWorkspaces,
+  adminUpdatePlatformAiConfig,
   adminUpdateUser,
 } from "./admin-service.js";
 import { listLLMLogs, summarizeLLMLogs } from "./llm-log-service.js";
@@ -38,6 +40,14 @@ router.get("/observability/llm/logs", asyncHandler(async (req, res) => {
   const { user_id, workspace_id, kind, purpose, status, limit } = req.query;
   const items = listLLMLogs({ userId: user_id, workspaceId: workspace_id, kind, purpose, status, limit });
   res.json({ items, total: items.length });
+}));
+
+router.get("/platform-ai", asyncHandler(async (_req, res) => {
+  res.json(adminGetPlatformAiConfig());
+}));
+
+router.patch("/platform-ai", asyncHandler(async (req, res) => {
+  res.json(adminUpdatePlatformAiConfig(req.adminUser, req.body || {}));
 }));
 
 router.post("/workspaces", asyncHandler(async (req, res) => {

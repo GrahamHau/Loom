@@ -1,6 +1,7 @@
 import { AppError } from "./ai-service.js";
 import { ROLE_LABEL, VALID_ROLE_CODES, VALID_USER_STATUSES, isOwner } from "./access-control.js";
 import { addWorkspaceMember, db, ensureWorkspace, LEGACY_USER_ID, purgeUserSessions, revokeUserApiTokens } from "./db.js";
+import { getPlatformAiConfig, updatePlatformAiConfig } from "./platform-ai-config.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -192,6 +193,14 @@ export function adminDashboard() {
 
 export function adminListWorkspaces() {
   return db.prepare("SELECT * FROM workspaces ORDER BY created_at ASC").all().map(enrichWorkspace);
+}
+
+export function adminGetPlatformAiConfig() {
+  return getPlatformAiConfig();
+}
+
+export function adminUpdatePlatformAiConfig(actorUser, input = {}) {
+  return updatePlatformAiConfig(actorUser, input);
 }
 
 export function adminCreateWorkspace(input = {}) {
