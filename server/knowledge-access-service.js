@@ -86,6 +86,10 @@ export function canAccessPolicy(policyInput = {}, context = {}) {
 
 export function canAccessDocument(document, context = {}) {
   if (!document) return false;
+  const metadata = document.metadata || parseJson(document.metadata_json, {}) || {};
+  if (context.sample_only === true && metadata.is_sample !== true) {
+    return false;
+  }
   return canAccessPolicy(document.access_policy || parseJson(document.access_policy_json, {}), {
     ...context,
     owner_user_id: document.owner_user_id,

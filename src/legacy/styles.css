@@ -3278,6 +3278,29 @@ a.platform-card-link:hover {
   line-height: 1.7;
   color: var(--text-2);
 }
+.research-idea-input {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text-1);
+  font: inherit;
+  outline: none;
+  box-shadow: none;
+  padding: 12px 14px;
+  resize: vertical;
+  transition: none;
+}
+.research-idea-input:hover,
+.research-idea-input:focus {
+  border-color: var(--border);
+  background: #fff;
+  box-shadow: none;
+}
+.research-idea-input::placeholder {
+  color: var(--text-3);
+}
 .research-products-box {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

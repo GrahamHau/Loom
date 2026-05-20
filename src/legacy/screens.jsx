@@ -1975,7 +1975,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
       await refreshData?.();
     }
   };
-  const [selectedId, setSelectedId] = useState(products[0]?.id || null);
+  const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部");
   const [viewMode, setViewMode] = useState("card");
@@ -1987,7 +1987,7 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   useEffect(() => {
     if (selectMode) return;
     if (!products.some((p) => p.id === selectedId)) {
-      setSelectedId(products[0]?.id || null);
+      setSelectedId(null);
     }
   }, [products, selectedId, selectMode]);
   useEffect(() => {
@@ -5164,6 +5164,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const [feishuPreview, setFeishuPreview] = useState(null);
   const [notice, setNotice] = useState("");
   const [status, setStatus] = useState(research.status || "草稿");
+  const [ideaText, setIdeaText] = useState(research.desc || "");
   const [dossierOpen, setDossierOpen] = useState(false);
   const linkedFeishuIdea = research.feishu_project_idea || null;
   const products = productIds.map((id) => safeArray(data.products).find((p) => p.id === id)).filter(Boolean);
@@ -5178,10 +5179,20 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
     await refreshData?.();
   };
   useEffect(() => setStatus(research.status || "草稿"), [research.status]);
+  useEffect(() => setIdeaText(research.desc || ""), [research.desc, research.id]);
   const saveLinks = async (nextProducts = productIds, nextDemands = demandIds) => {
     await api?.(`/api/research/${research.id}`, {
       method: "PATCH",
       body: JSON.stringify({ products: nextProducts, demands: nextDemands }),
+    });
+    await refreshData?.();
+  };
+  const saveIdeaText = async (nextValue) => {
+    const normalized = String(nextValue || "");
+    setIdeaText(normalized);
+    await api?.(`/api/research/${research.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ desc: normalized }),
     });
     await refreshData?.();
   };
@@ -5238,7 +5249,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
             >
               生成调研档案
             </Btn>
-            <Btn icon="external" onClick={previewFeishuProjectIdea} disabled={feishuPreviewBusy}>{feishuPreviewBusy ? "检查中..." : "提交到飞书产品想法登记"}</Btn>
+            <Btn icon="external" onClick={previewFeishuProjectIdea} disabled={feishuPreviewBusy}>{feishuPreviewBusy ? "检查中..." : "提交到产品想法登记"}</Btn>
             <Btn variant="primary" icon="external" onClick={exportCsv}>导出整理数据</Btn>
           </div>
         </div>
@@ -5260,9 +5271,19 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
             </div>
             {notice && <div className="ai-block" style={{ marginBottom: 16 }}>{notice}</div>}
 
-            <Section icon="edit" label="产品描述">
+            <Section icon="edit" label="产品想法">
               <div className="research-detail-box research-desc-box">
-                {research.desc}
+                <textarea
+                  className="research-idea-input"
+                  value={ideaText}
+                  onChange={(event) => setIdeaText(event.target.value)}
+                  onBlur={(event) => {
+                    if ((research.desc || "") === event.target.value) return;
+                    saveIdeaText(event.target.value);
+                  }}
+                  placeholder="补充产品想法、目标用户、关键洞察或资料链接..."
+                  style={{ width: "100%", minHeight: 140, resize: "vertical", fontSize: 13, lineHeight: 1.65 }}
+                />
               </div>
             </Section>
 
@@ -5685,8 +5706,8 @@ function CreateResearchModal({ api, refreshData, onClose }) {
               <input className="input lg" style={{ width: "100%" }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：便携双色温补光灯 Pro" />
             </div>
             <div>
-              <label className="field-label">备注</label>
-              <textarea className="input" style={{ width: "100%", minHeight: 120, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="补充想法、相关资料链接..." />
+              <label className="field-label">产品想法</label>
+              <textarea className="input" style={{ width: "100%", minHeight: 120, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="补充产品想法、目标用户、关键洞察或资料链接..." />
             </div>
             {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
           </div>

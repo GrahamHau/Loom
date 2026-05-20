@@ -1902,6 +1902,45 @@ describe("admin users", () => {
     });
   });
 
+  it("limits mock knowledge library access to sample documents only", async () => {
+    const loginResult = await login("mock", "mock");
+    expect(loginResult.response.status).toBe(200);
+
+    const mockBootstrapResponse = await fetch(`${baseUrl}/api/bootstrap`, {
+      headers: { Cookie: loginResult.cookie },
+    });
+    const mockBootstrap = await mockBootstrapResponse.json();
+    const workspaceId = mockBootstrap.workspace?.id || "ws-company";
+
+    const realDoc = (await import("./mrd-prd-service.js")).createStructuredDocument("prd", {
+      id: "prd-real-knowledge-doc",
+      workspace_id: workspaceId,
+      title: "真实知识库文档",
+      owner_user_id: "real-owner",
+      access_policy: {
+        visibility: "workspace",
+        rag_enabled: true,
+        bot_enabled: true,
+      },
+      metadata: {
+        is_sample: false,
+      },
+    });
+
+    const listResponse = await fetch(`${baseUrl}/api/documents?workspace_id=${encodeURIComponent(workspaceId)}`, {
+      headers: { Cookie: loginResult.cookie },
+    });
+    expect(listResponse.status).toBe(200);
+    const documents = await listResponse.json();
+    expect(documents.some((item) => item.id === realDoc.id)).toBe(false);
+    expect(documents.every((item) => item.metadata?.is_sample === true)).toBe(true);
+
+    const detailResponse = await fetch(`${baseUrl}/api/documents/${realDoc.id}`, {
+      headers: { Cookie: loginResult.cookie },
+    });
+    expect(detailResponse.status).toBe(404);
+  });
+
   it("can map local password login to a mirrored production user outside production", async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousMappedUserId = process.env.LOOM_PASSWORD_USER_ID;

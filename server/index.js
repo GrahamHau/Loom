@@ -229,6 +229,7 @@ import {
   updateResearch,
   updateSettings,
   removeFieldOption,
+  MOCK_SAMPLE_USER_ID,
   isSampleSourceUser,
   syncVisitorSampleWorkspaceFromSource,
   isOfficialNewsItem,
@@ -492,6 +493,15 @@ function currentWorkspaceRoles(req, workspaceId) {
   return roleCodesForUser(currentUser(req), workspaceId);
 }
 
+function isSampleOnlyDocumentUser(req, workspaceId = "") {
+  const user = currentUser(req);
+  if (!user) return false;
+  if (user.id === legacyUser.id || user.id === MOCK_SAMPLE_USER_ID) return true;
+  if (!workspaceId) return false;
+  const state = rawState(user.id);
+  return Boolean(state && isSampleWorkspace(state));
+}
+
 function canManageWorkspaceResource(req, resource) {
   const user = currentUser(req);
   const roles = currentWorkspaceRoles(req, resource?.workspace_id);
@@ -519,6 +529,7 @@ function assertCanReadDocument(req, document) {
   if (!canAccessDocument(document, {
     user: currentUser(req),
     roles: currentWorkspaceRoles(req, document.workspace_id),
+    sample_only: isSampleOnlyDocumentUser(req, document.workspace_id),
   })) {
     throw new AppError(404, "document_not_found", "文档不存在或无权访问。");
   }
@@ -539,6 +550,7 @@ function canAccessKnowledgeResource(req, resource) {
     return document && document.workspace_id === resource.workspace_id && canAccessDocument(document, {
       user: currentUser(req),
       roles: currentWorkspaceRoles(req, resource.workspace_id),
+      sample_only: isSampleOnlyDocumentUser(req, resource.workspace_id),
     });
   });
 }
@@ -997,7 +1009,11 @@ app.get("/api/documents", requireAuth, (req, res) => {
   const documents = listDocuments(workspaceId, {
     project_id: req.query?.project_id,
     doc_type: req.query?.doc_type,
-  }).filter((document) => canAccessDocument(document, { user, roles }));
+  }).filter((document) => canAccessDocument(document, {
+    user,
+    roles,
+    sample_only: isSampleOnlyDocumentUser(req, workspaceId),
+  }));
   res.json(documents);
 });
 
