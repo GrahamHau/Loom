@@ -1197,6 +1197,82 @@ describe("repository", () => {
     expect(state.products.every((item) => item.sample)).toBe(true);
   });
 
+  it("syncs visitor sample workspace from a real user's collected data", () => {
+    const visitor = repo.ensureLegacyWorkspace();
+    const sourceUser = repo.ensureLocalUser({ id: "real-sample-source", name: "黄冠淏", auth_provider: "feishu" });
+    const product = repo.createProduct(sourceUser.id, {
+      name: "真实采集竞品",
+      image: "https://img.test/product.jpg",
+      category: "脚架",
+    });
+    const demand = repo.createDemand(sourceUser.id, {
+      title: "真实小红书需求",
+      source: "xiaohongshu",
+      source_url: "https://www.xiaohongshu.com/explore/real",
+      thumbnail_url: "https://img.test/demand.jpg",
+    });
+    const research = repo.createResearch(sourceUser.id, {
+      title: "真实调研项目",
+      products: [product.id],
+      demands: [demand.id],
+    });
+    repo.upsertNews(sourceUser.id, [{
+      source_id: "real-google-news",
+      source: "主机新品 - Google News",
+      original_url: "https://real.test/news",
+      original_title: "Real camera launch",
+      titleZh: "真实新品资讯",
+      summary: "来自真实账号的信息流。",
+      contentZh: "来自真实账号的信息流。",
+      type: "新品发布",
+      thumbnail_url: "https://img.test/news.jpg",
+      published_at: new Date().toISOString(),
+      llmProcessed: true,
+      classification: { source_group: "official-default" },
+    }]);
+
+    const result = repo.syncSampleWorkspaceFromUser({
+      sourceUserId: sourceUser.id,
+      targetUserId: visitor.id,
+      limits: { products: 10, demands: 10, research: 10, news: 10 },
+    });
+    const visitorState = repo.bootstrap(visitor.id);
+    const sourceState = repo.bootstrap(sourceUser.id);
+
+    expect(result).toMatchObject({
+      skipped: false,
+      sourceUserId: sourceUser.id,
+      targetUserId: visitor.id,
+      products: 1,
+      demands: 1,
+      research: 1,
+      news: 1,
+    });
+    expect(visitorState.onboarding).toMatchObject({
+      sampleWorkspace: true,
+      sampleSourceUserId: sourceUser.id,
+      sampleSourceUserName: "黄冠淏",
+    });
+    expect(visitorState.products.find((item) => item.sample_source_id === product.id)).toMatchObject({
+      name: "真实采集竞品",
+      sample: true,
+      sample_source_user_id: sourceUser.id,
+    });
+    expect(visitorState.demands.find((item) => item.sample_source_id === demand.id)).toMatchObject({
+      title: "真实小红书需求",
+      sample: true,
+    });
+    expect(visitorState.research.find((item) => item.sample_source_id === research.id)).toMatchObject({
+      title: "真实调研项目",
+      sample: true,
+    });
+    expect(visitorState.news.find((item) => item.original_url === "https://real.test/news")?.classification).toMatchObject({
+      source_group: "sample-live",
+      sample_source_user_id: sourceUser.id,
+    });
+    expect(sourceState.products.find((item) => item.id === product.id)?.sample).toBe(false);
+  });
+
   it("keeps old visitor data as real data without marking it sample", () => {
     const visitor = repo.ensureLegacyWorkspace();
     repo.createProduct(visitor.id, { name: "Old Visitor Product" });

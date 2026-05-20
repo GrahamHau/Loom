@@ -28,6 +28,13 @@ import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSour
 const STREAM_NEWS_MAX_AGE_DAYS = Math.max(1, Number(process.env.STREAM_NEWS_MAX_AGE_DAYS || 10));
 // 默认开启 visitor 示例数据；要在生产环境关掉，设 LOOM_ENABLE_PUBLIC_SAMPLE_DATA=false
 const ENABLE_PUBLIC_SAMPLE_DATA = process.env.LOOM_ENABLE_PUBLIC_SAMPLE_DATA !== "false";
+const SAMPLE_SOURCE_USER_ID = cleanText(process.env.LOOM_SAMPLE_SOURCE_USER_ID || "");
+const SAMPLE_SYNC_LIMITS = {
+  products: Math.max(0, Number(process.env.LOOM_SAMPLE_PRODUCTS_LIMIT || 12)),
+  demands: Math.max(0, Number(process.env.LOOM_SAMPLE_DEMANDS_LIMIT || 36)),
+  research: Math.max(0, Number(process.env.LOOM_SAMPLE_RESEARCH_LIMIT || 6)),
+  news: Math.max(0, Number(process.env.LOOM_SAMPLE_NEWS_LIMIT || 80)),
+};
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -39,6 +46,65 @@ function nowIso() {
 
 function cleanProductImage(value, fallback = "") {
   return cleanText(value, fallback);
+}
+
+function sampleSyncLimits(input = {}) {
+  return Object.fromEntries(Object.entries({
+    ...SAMPLE_SYNC_LIMITS,
+    ...(input || {}),
+  }).map(([key, value]) => [
+    key,
+    value === undefined || value === null || Number.isNaN(Number(value))
+      ? SAMPLE_SYNC_LIMITS[key]
+      : Math.max(0, Number(value)),
+  ]));
+}
+
+function sampleCloneId(kind, id) {
+  const safe = cleanText(id || nanoid(8), "item")
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return `sample-${kind}-${safe || nanoid(8)}`;
+}
+
+function toSampleEntity(kind, item, sourceUserId) {
+  const copied = clone(item || {});
+  delete copied.feishu_record_id;
+  delete copied.synced_at;
+  copied.id = sampleCloneId(kind, item?.id);
+  copied.sample = true;
+  copied.sample_source_user_id = sourceUserId;
+  copied.sample_source_id = item?.id || "";
+  copied.created_at = item?.created_at || nowIso();
+  copied.updated_at = nowIso();
+  return copied;
+}
+
+function sampleNewsInput(item, sourceUserId) {
+  return {
+    source_id: sampleSourceId("visitor", item.source_id || "sample-news"),
+    source: item.source,
+    source_authority: item.source_authority,
+    original_title: item.original_title,
+    original_url: item.original_url,
+    original_content: item.original_content,
+    titleZh: item.titleZh,
+    summary: item.summary,
+    contentZh: item.contentZh,
+    type: item.type,
+    thumbnail_url: item.thumbnail_url,
+    thumbHue: item.thumbHue,
+    published_at: item.published_at,
+    llmProcessed: !item.needsTranslation,
+    needsTranslation: false,
+    classification: {
+      ...(item.classification || {}),
+      source_group: "sample-live",
+      sample_source_user_id: sourceUserId,
+      sample_source_news_id: item.id || "",
+    },
+  };
 }
 
 function resolveProductImagePatch(item, patch) {
@@ -1151,6 +1217,89 @@ export function resetRegularUsersToSampleWorkspace() {
     reset.push(user.id);
   }
   return { reset };
+}
+
+export function syncSampleWorkspaceFromUser({
+  sourceUserId = SAMPLE_SOURCE_USER_ID,
+  targetUserId = getLegacyUserId(),
+  limits = {},
+  replace = true,
+} = {}) {
+  const normalizedSourceUserId = cleanText(sourceUserId);
+  const normalizedTargetUserId = cleanText(targetUserId, getLegacyUserId());
+  if (!normalizedSourceUserId) {
+    return { skipped: true, reason: "sample_source_user_id_missing" };
+  }
+  if (normalizedSourceUserId === normalizedTargetUserId) {
+    return { skipped: true, reason: "sample_source_is_target" };
+  }
+  const sourceState = requireState(normalizedSourceUserId);
+  const targetState = requireState(normalizedTargetUserId);
+  if (!sourceState) return { skipped: true, reason: "sample_source_user_not_found", sourceUserId: normalizedSourceUserId };
+  if (!targetState) return { skipped: true, reason: "sample_target_user_not_found", targetUserId: normalizedTargetUserId };
+
+  const finalLimits = sampleSyncLimits(limits);
+  const sourceProducts = (sourceState.products || []).filter((item) => !item.sample).slice(0, finalLimits.products);
+  const sourceDemands = (sourceState.demands || []).filter((item) => !item.sample).slice(0, finalLimits.demands);
+  const sourceResearch = (sourceState.research || []).filter((item) => !item.sample).slice(0, finalLimits.research);
+  const sourceNews = visibleNewsItems(normalizedSourceUserId).slice(0, finalLimits.news);
+
+  mutateUserState(normalizedTargetUserId, (state) => {
+    state.onboarding = {
+      ...(state.onboarding || {}),
+      sampleWorkspace: true,
+      sampleVersion: `source-user-${normalizedSourceUserId}`,
+      label: "体验工作区",
+      liveNews: sourceNews.length > 0,
+      sampleSourceUserId: normalizedSourceUserId,
+      sampleSourceUserName: sourceState.user?.name || "",
+      synced_at: nowIso(),
+    };
+    if (replace) {
+      state.products = (state.products || []).filter((item) => !item.sample);
+      state.demands = (state.demands || []).filter((item) => !item.sample);
+      state.research = (state.research || []).filter((item) => !item.sample);
+    }
+    const existingProductIds = new Set((state.products || []).map((item) => item.id));
+    const existingDemandIds = new Set((state.demands || []).map((item) => item.id));
+    const existingResearchIds = new Set((state.research || []).map((item) => item.id));
+    state.products = [
+      ...sourceProducts.map((item) => toSampleEntity("product", item, normalizedSourceUserId)).filter((item) => !existingProductIds.has(item.id)),
+      ...(state.products || []),
+    ];
+    state.demands = [
+      ...sourceDemands.map((item) => toSampleEntity("demand", item, normalizedSourceUserId)).filter((item) => !existingDemandIds.has(item.id)),
+      ...(state.demands || []),
+    ];
+    state.research = [
+      ...sourceResearch.map((item) => toSampleEntity("research", item, normalizedSourceUserId)).filter((item) => !existingResearchIds.has(item.id)),
+      ...(state.research || []),
+    ];
+    return state;
+  });
+
+  if (replace) {
+    db.prepare(`
+      DELETE FROM news_items
+      WHERE user_id = ?
+        AND COALESCE(json_extract(classification_json, '$.source_group'), '') = 'sample-live'
+    `).run(normalizedTargetUserId);
+  }
+  const newsResult = sourceNews.length
+    ? upsertNews(normalizedTargetUserId, sourceNews.map((item) => sampleNewsInput(item, normalizedSourceUserId)))
+    : { inserted: [], updated: [] };
+
+  return {
+    skipped: false,
+    sourceUserId: normalizedSourceUserId,
+    targetUserId: normalizedTargetUserId,
+    products: sourceProducts.length,
+    demands: sourceDemands.length,
+    research: sourceResearch.length,
+    news: sourceNews.length,
+    insertedNews: newsResult.inserted.length,
+    updatedNews: newsResult.updated.length,
+  };
 }
 
 export function createProduct(userId, input) {
@@ -2924,6 +3073,7 @@ export function ensureLegacyWorkspace() {
   ensureUserState(user);
   if (ENABLE_PUBLIC_SAMPLE_DATA) {
     ensureSampleUserState(user, { force: true });
+    syncSampleWorkspaceFromUser({ targetUserId: user.id });
     ensureSampleNewsSources(user.id);
     ensureDefaultNewsSources(user.id);
   }
