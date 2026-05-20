@@ -53,6 +53,9 @@ const Icon = ({ name, size = 16, ...rest }) => {
     case "lock": return <svg {...props}><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>;
     case "layers": return <svg {...props}><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>;
     case "network": return <svg {...props}><circle cx="6" cy="6" r="3"/><circle cx="18" cy="7" r="3"/><circle cx="8" cy="18" r="3"/><circle cx="19" cy="18" r="2"/><path d="m8.7 7.1 6.6-.7"/><path d="m7 9 1 6"/><path d="m10.8 17.9 6.2.1"/><path d="m16.4 9.5-6.1 6.2"/></svg>;
+    case "home": return <svg {...props}><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
+    case "feishu": return <svg {...props}><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M13 17h8M17 13v8"/></svg>;
+    case "download": return <svg {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>;
     default: return null;
   }
 };

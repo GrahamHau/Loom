@@ -161,9 +161,10 @@ function platformMetricConfig(platform) {
   }
   if (platform === "taobao") {
     return [
-      { key: "price", label: "售价", prefix: "¥" },
+      { key: "original_price", label: "原价", prefix: "¥" },
+      { key: "discount_price", label: "折扣价", prefix: "¥" },
       { key: "cost", label: "参考成本", prefix: "¥" },
-      { key: "sales", label: "月销估算", suffix: "/ 月", inputMode: "numeric" },
+      { key: "sales", label: "已售", inputMode: "numeric" },
     ];
   }
   if (platform === "xiaohongshu") {
@@ -189,6 +190,8 @@ function createEmptyPlatform(platform = "amazon") {
     platform,
     url: "",
     price: "",
+    original_price: "",
+    discount_price: "",
     cost: "",
     rating: "",
     reviews: "",
@@ -470,14 +473,69 @@ function tagGroupByKey(tagGroups, key) {
 }
 
 // ===== Field System =====
+const OFFICIAL_PRODUCT_CATEGORY_OPTIONS = [
+  "A音视频类",
+  "B箱包带类",
+  "C配件类",
+  "E供电类",
+  "L灯光类",
+  "T脚架类",
+  "S支架类",
+  "I智能工作室",
+  "X其他类",
+];
+
+const OFFICIAL_BRAND_OPTIONS = [
+  "Ulanzi",
+  "DJI",
+  "Insta360",
+  "SmallRig",
+  "NEEWER",
+  "Tilta",
+  "K&F CONCEPT",
+  "Godox",
+  "Nanlite",
+  "Zhiyun",
+  "智云",
+  "Aputure",
+  "Rode",
+  "RODE",
+];
+
+const OFFICIAL_HOST_OPTIONS = [
+  "Osmo Pocket 3",
+  "Osmo Action 5 Pro",
+  "Osmo Action 4",
+  "Osmo Mobile 7P",
+  "Osmo Mobile 7",
+  "DJI Mini 4 Pro",
+  "DJI Air 3S",
+  "DJI Flip",
+  "DJI Neo",
+  "Insta360 Ace Pro 2",
+  "Insta360 Ace Pro",
+  "Insta360 X5",
+  "Insta360 GO 3",
+  "Insta360 GO 3S",
+  "Insta360 X4",
+  "Insta360 Flow 2 Pro",
+  "Insta360 Flow 2",
+  "Insta360 Flow Pro",
+];
+
+const OFFICIAL_FIELD_OPTIONS = {
+  brand: OFFICIAL_BRAND_OPTIONS,
+  host: OFFICIAL_HOST_OPTIONS,
+  category: OFFICIAL_PRODUCT_CATEGORY_OPTIONS,
+};
+
 const OFFICIAL_FIELD_DEFS = [
   { key: "brand",       name: "品牌",    tagGroupKey: "competitor_brands",  official: true,  multi: true,  entities: ["competitor"],               tone: "outline" },
-  { key: "host",        name: "主机",    tagGroupKey: "camera_brands",      official: true,  multi: false, entities: ["competitor"],               tone: "outline" },
+  { key: "host",        name: "主机",    tagGroupKey: "camera_brands",      official: true,  multi: true,  entities: ["competitor"],               tone: "outline" },
   { key: "category",    name: "品类",    tagGroupKey: "product_categories", official: true,  multi: true,  entities: ["competitor"],               tone: "default" },
   { key: "scenarios",   name: "使用场景", tagGroupKey: "scenarios",          official: true,  multi: true,  entities: ["competitor", "inspiration"], tone: "accent"  },
   { key: "painpoints",  name: "用户痛点", tagGroupKey: "painpoints",         official: true,  multi: true,  entities: ["competitor", "inspiration"], tone: "danger"  },
   { key: "innovation",  name: "创新类型", tagGroupKey: "innovation_types",   official: true,  multi: false, entities: ["inspiration"],              tone: "success" },
-  { key: "custom_tags", name: "自定义标签", tagGroupKey: "custom_tags",      official: true,  multi: true,  entities: ["competitor", "inspiration"], tone: "outline" },
 ];
 
 function normalizeFields(fieldsOrGroups, fallbackGroups = [], options = {}) {
@@ -488,8 +546,13 @@ function normalizeFields(fieldsOrGroups, fallbackGroups = [], options = {}) {
     if (!field?.key || byKey.has(field.key)) return;
     byKey.set(field.key, field);
   };
-  if (source.some((item) => item?.options || item?.official !== undefined || item?.legacyKey)) {
-    source.map((field) => ({
+  const upsertField = (field) => {
+    if (!field?.key) return;
+    byKey.set(field.key, field);
+  };
+  const fieldLikeItems = source.filter((item) => item?.options || item?.official !== undefined || item?.legacyKey);
+  if (fieldLikeItems.length) {
+    fieldLikeItems.map((field) => ({
       key: field.key,
       name: field.name || field.key,
       tagGroupKey: field.legacyKey || field.key,
@@ -499,24 +562,34 @@ function normalizeFields(fieldsOrGroups, fallbackGroups = [], options = {}) {
       entities: Array.isArray(field.entities) ? field.entities : ["competitor"],
       tone: field.tone || "outline",
       options: Array.isArray(field.options) ? field.options : [],
-    })).forEach(addField);
-  } else {
-    const groups = source.length ? source : safeArray(fallbackGroups);
+    }))
+      .filter((field) => field.key !== "custom_tags" && field.legacyKey !== "custom_tags")
+      .map((field) => field.official && OFFICIAL_FIELD_OPTIONS[field.key]
+        ? { ...field, options: Array.from(new Set([...OFFICIAL_FIELD_OPTIONS[field.key], ...safeArray(field.options)])) }
+        : field)
+      .forEach(addField);
+  }
+  const groups = source.filter((item) => item?.tags || item?.field_key || item?.key);
+  const groupSource = groups.length ? groups : safeArray(fallbackGroups);
+  if (groupSource.length) {
     const officialGroupKeys = new Set(OFFICIAL_FIELD_DEFS.map((d) => d.tagGroupKey));
-    groups
-      .filter((g) => !officialGroupKeys.has(g.key))
+    groupSource
+      .filter((g) => g.key !== "custom_tags")
       .map((g) => ({
-        key: g.key,
+        key: g.field_key || OFFICIAL_FIELD_DEFS.find((field) => field.tagGroupKey === g.key)?.key || g.key,
         name: g.name || g.key,
         tagGroupKey: g.key,
         legacyKey: g.key,
-        official: false,
+        official: Boolean(g.official || officialGroupKeys.has(g.key)),
         multi: g.multi !== false,
-        entities: Array.isArray(g.entities) ? g.entities : ["competitor", "inspiration"],
+        entities: Array.isArray(g.entities) ? g.entities : (OFFICIAL_FIELD_DEFS.find((field) => field.tagGroupKey === g.key)?.entities || ["competitor", "inspiration"]),
         tone: g.tone || "outline",
         options: Array.isArray(g.tags) ? g.tags : [],
       }))
-      .forEach(addField);
+      .forEach((field) => {
+        const existing = byKey.get(field.key);
+        upsertField(existing ? { ...existing, ...field, options: Array.from(new Set([...safeArray(existing.options), ...safeArray(field.options)])) } : field);
+      });
   }
   if (includeDefaults) {
     const groups = safeArray(fallbackGroups);
@@ -528,7 +601,10 @@ function normalizeFields(fieldsOrGroups, fallbackGroups = [], options = {}) {
           legacyKey: field.tagGroupKey,
           name: group?.name || field.name,
           tone: group?.tone || field.tone,
-          options: Array.isArray(group?.tags) ? group.tags : [],
+          multi: group?.multi !== undefined ? group.multi !== false : field.multi,
+          options: Array.isArray(group?.tags) && group.tags.length
+            ? Array.from(new Set([...safeArray(OFFICIAL_FIELD_OPTIONS[field.key]), ...group.tags]))
+            : safeArray(OFFICIAL_FIELD_OPTIONS[field.key]),
         };
       })
       .forEach(addField);
@@ -706,6 +782,35 @@ function DemandSourceCard({ demand }) {
             <strong>{demandMetricValue(value)}</strong>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function DemandCommentsSection({ demand }) {
+  const comments = safeArray(demand?.visible_comments);
+  if (!comments.length) return null;
+  return (
+    <div className="detail-section demand-comments-section">
+      <div className="detail-section-label">采集评论 · {comments.length}</div>
+      <div className="demand-comments-list">
+        {comments.slice(0, 20).map((comment, index) => {
+          const meta = [
+            comment.posted_at_text,
+            comment.location && !String(comment.posted_at_text || "").includes(comment.location) ? comment.location : "",
+            Number(comment.like_count || 0) ? `${Number(comment.like_count || 0)} 赞` : "",
+            comment.is_reply ? "回复" : "",
+          ].filter(Boolean).join(" · ");
+          return (
+            <div className="demand-comment-row" key={comment.id || `${comment.user_name}-${index}`}>
+              <div className="demand-comment-head">
+                <span>{comment.user_name || "未知用户"}</span>
+                {meta && <em>{meta}</em>}
+              </div>
+              <div className="demand-comment-content">{comment.content}</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1029,10 +1134,14 @@ function LoginScreen({ onLogin, onDemoLogin, onFeishuLogin, error, providers = {
 
           {/* ① 飞书登录 — 主要入口，始终常驻 */}
           <button className="login-feishu-btn" type="button"
-            onClick={() => onFeishuLogin?.()} disabled={busy}>
+            onClick={() => feishuEnabled && onFeishuLogin?.()} disabled={busy || !feishuEnabled}
+            title={feishuEnabled ? "使用飞书登录" : "本地飞书登录未配置公网 HTTPS 回调，请使用账号密码登录本地镜像"}>
             <img src="/feishu.png" alt="" />
-            使用飞书登录
+            {feishuEnabled ? "使用飞书登录" : "本地飞书登录未配置"}
           </button>
+          {!feishuEnabled && (
+            <div className="login-provider-hint">本地调试请使用账号密码登录；Chrome 插件继续写入线上账号，本地数据库通过镜像同步查看。</div>
+          )}
 
           {/* ② 演示模式 — 次要入口 */}
           <button className="login-demo-btn" type="button"
@@ -1081,33 +1190,75 @@ function LoginScreen({ onLogin, onDemoLogin, onFeishuLogin, error, providers = {
 window.LoginScreen = LoginScreen;
 
 // ============ NEWS ============
-const DIGEST_MOCK = [
-  { id: "d1", kind: "launch", headline: "友商新品首次切入低价带，产品线明显下探", connection: "可对照你竞品库中追踪的同类竞品", sourceCount: 2 },
-  { id: "d2", kind: "trend", headline: "本周 AI 搜索相关报道密集，多家媒体集中发声", connection: "与需求雷达中 2 条关注的用户痛点关键词重叠", sourceCount: 5 },
-  { id: "d3", kind: "unknown_signal", headline: "新兴品牌获融资，专注你尚未追踪的细分赛道", connection: null, sourceCount: 1 },
-];
-
-function DailyDigestCard({ data }) {
+function DailyDigestCard({ data, api }) {
   const today = new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
   const hasLlm = Boolean(data.settings?.llm_configured);
+  const [digest, setDigest] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadDigest = async ({ force = false } = {}) => {
+    if (!api || !hasLlm) return;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api("/api/news/daily-digest", {
+        method: "POST",
+        body: JSON.stringify({ limit: 24, force }),
+      });
+      setDigest(result);
+    } catch (err) {
+      setError(err.message || "今日总结生成失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDigest().catch(() => {});
+  }, [api, hasLlm, data.newsCounts?.all]);
+
   if (!hasLlm) {
     return (
       <div className="briefing-card briefing-card-collapsed">
         <Icon name="sparkles" size={12} style={{ color: "var(--text-4)" }} />
-        <span className="briefing-collapsed-text">配置 LLM 后，每天自动生成行业摘要</span>
+        <span className="briefing-collapsed-text">配置 LLM 后，基于真实信息流生成今日总结</span>
       </div>
     );
   }
+  const insights = safeArray(digest?.insights);
   return (
     <div className="briefing-card">
       <div className="briefing-card-head">
         <Icon name="sparkles" size={13} style={{ color: "var(--accent)" }} />
         <span className="briefing-card-title">今日总结</span>
         <span className="briefing-card-date">{today}</span>
-        <Btn size="sm" variant="ghost" icon="sync" />
+        <Btn size="sm" variant="ghost" icon="sync" disabled={loading} onClick={() => loadDigest({ force: true })} />
       </div>
       <div className="briefing-card-body">
-        {DIGEST_MOCK.map((item) => <InsightItem key={item.id} item={item} />)}
+        {loading && !digest ? (
+          <div className="briefing-empty">
+            <Icon name="sparkles" size={16} style={{ color: "var(--accent)" }} />
+            <div className="briefing-empty-text">正在分析真实信息流...</div>
+          </div>
+        ) : error ? (
+          <div className="briefing-empty">
+            <div className="briefing-empty-text">{error}</div>
+            <Btn size="sm" variant="ghost" icon="sync" onClick={() => loadDigest({ force: true })}>重试</Btn>
+          </div>
+        ) : insights.length ? (
+          <>
+            {digest?.summary && <div className="briefing-summary">{digest.summary}</div>}
+            {insights.map((item, index) => <InsightItem key={item.id || index} item={item} />)}
+            <div className="briefing-footnote">
+              {digest?.cached ? "今日缓存" : "AI 分析"} · 基于最近 {digest?.item_count || 0} 条真实信息流
+            </div>
+          </>
+        ) : (
+          <div className="briefing-empty">
+            <div className="briefing-empty-text">{digest?.summary || "今天还没有可用于总结的信息流。"}</div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1347,7 +1498,7 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     <>
       <div className="news-layout">
         <div className="news-sidebar" style={{ width: sidebarWidth }}>
-          <DailyDigestCard data={data} />
+          <DailyDigestCard data={data} api={api} />
         </div>
 
         <div className="news-sidebar-resizer" onMouseDown={onResizerMouseDown}>
@@ -1574,7 +1725,9 @@ const SERP_ENGINE_OPTIONS = [
 // ============ PRODUCTS ============
 // Image upload slot for product (compact)
 function ProductImageSlot({ product, onChange }) {
+  const [failed, setFailed] = useState(false);
   const inputRef = React.useRef(null);
+  const image = product?.image || product?.thumbnail_url || "";
   const onPick = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1588,15 +1741,28 @@ function ProductImageSlot({ product, onChange }) {
       className="product-image-slot"
       title="点击上传产品图">
       
-      {product.image ?
-      <img src={product.image} alt="" /> :
+      {image && !failed ?
+      <img src={image} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> :
 
-      <span style={{ fontSize: 16 }}>{product.emoji}</span>
+      <span style={{ fontSize: 16 }}>{product?.emoji || "📦"}</span>
       }
       <span className="product-image-slot-overlay"><Icon name="plus" size={11} /></span>
       <input ref={inputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPick} />
     </div>);
 
+}
+
+function ProductThumb({ product, size = 36, fontSize = 18 }) {
+  const [failed, setFailed] = useState(false);
+  const image = product?.thumbnail_url || product?.image || product?.cover_image_url || "";
+  return (
+    <div className="products-thumb" style={{ width: size, height: size, fontSize }}>
+      {image && !failed ?
+        <img src={image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> :
+        <span>{product?.emoji || "📦"}</span>
+      }
+    </div>
+  );
 }
 
 // Compact text-input metric for platform card
@@ -1754,16 +1920,18 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const [selectedId, setSelectedId] = useState(products[0]?.id || null);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部");
+  const [viewMode, setViewMode] = useState("card");
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
   const [priceCcy, setPriceCcy] = useState("native"); // unused (toggle removed)
   const [addFieldOpen, setAddFieldOpen] = useState(false);
 
   useEffect(() => {
+    if (selectMode) return;
     if (!products.some((p) => p.id === selectedId)) {
       setSelectedId(products[0]?.id || null);
     }
-  }, [products, selectedId]);
+  }, [products, selectedId, selectMode]);
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => products.some((item) => item.id === id)));
   }, [products]);
@@ -1783,7 +1951,8 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
   const selectedProducts = products.filter((item) => selectedIds.includes(item.id));
   const updateSelectedPlatforms = (nextPlatforms) => updateSelected({ platforms: nextPlatforms });
   const updateSelectedPlatform = (index, patch) => {
-    const next = safeArray(selected?.platforms).map((platform, idx) => idx === index ? { ...platform, ...patch } : platform);
+    const normalizedPatch = patch.discount_price !== undefined ? { ...patch, price: patch.discount_price } : patch;
+    const next = safeArray(selected?.platforms).map((platform, idx) => idx === index ? { ...platform, ...normalizedPatch } : platform);
     updateSelectedPlatforms(next);
   };
   const removeSelectedPlatform = (index) => {
@@ -1877,34 +2046,46 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
           <div className="products-main">
             <div className="filter-bar">
               <div className="filter-bar-cluster">
-                <div className="products-toolbar-search">
-                  <Icon name="search" size={14} style={{ position: "absolute", left: 9, top: 8, color: "var(--text-3)" }} />
-                  <input className="input" placeholder="搜索竞品..." value={query} onChange={(e) => setQuery(e.target.value)}
-                  style={{ paddingLeft: 30, width: "100%" }} />
+                <div className="demand-filter-group" role="group" aria-label="竞品筛选">
+                  <div className="demand-filter-label">
+                    <Icon name="search" size={13} />
+                  </div>
+                  <input
+                    className="demand-filter-search"
+                    placeholder="搜索竞品..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  <select className="demand-filter-select" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                    {categories.map((c) =>
+                    <option key={c} value={c}>{c === "全部" ? "全部品类" : c}</option>
+                    )}
+                  </select>
                 </div>
-                <select className="input sm products-toolbar-filter" style={{ height: 30, paddingRight: 24 }}
-                value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-                  {categories.map((c) =>
-                  <option key={c} value={c}>{c === "全部" ? "全部品类" : c}</option>
-                  )}
-                </select>
+                <div className="demand-view-switch" role="tablist" aria-label="竞品视图">
+                  <button type="button" className={viewMode === "card" ? "active" : ""} onClick={() => setViewMode("card")}>卡片</button>
+                  <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>列表</button>
+                </div>
               </div>
               <div className="filter-bar-meta">
                 <span className="demand-match-count">匹配 {filtered.length} / {products.length}</span>
                 {filtered.length > 0 && !selectMode && (
-                  <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+                  <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => {
+                    setSelectMode(true);
+                    setSelectedId(null);
+                    setSelectedIds([]);
+                    setDetailCollapsed?.(true);
+                  }}>批量选择</Btn>
                 )}
               </div>
             </div>
         {notice && <div className="ai-block" style={{ margin: "0 12px 10px" }}>{notice}</div>}
-        {filtered.length > 0 &&
-          <div className={`bulk-toolbar products-selection-bar ${selectMode ? "" : "idle"}`} style={{ margin: "0 12px 10px" }}>
-            {selectMode ?
-            <>
+        {filtered.length > 0 && selectMode &&
+          <div className="bulk-toolbar products-selection-bar" style={{ margin: "0 12px 10px" }}>
                 <div className="bulk-left">
-                  <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
-                  <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>删除</Btn>
-                  <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+                  <Btn size="sm" variant="ghost" onClick={() => { setSelectMode(false); setSelectedIds([]); }}>取消</Btn>
+                  <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>删除 {selectedIds.length || ""}</Btn>
+                  <span className="muted text-sm">已选 {selectedIds.length} / {paged.items.length}</span>
                 </div>
                 <label className="bulk-check">
                   <input
@@ -1917,12 +2098,73 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                   />
                   <span>全选本页</span>
                 </label>
-              </> :
-            null
-            }
           </div>
         }
 
+        {viewMode === "card" ? (
+        <div className="demands-grid" style={{ padding: "0 12px" }}>
+          {paged.items.map((p) => {
+            const platforms = safeArray(p.platforms);
+            const main = platforms[0] || {};
+            const platformKey = main.platform || p.platform || p.source || "unknown";
+            return (
+              <div
+                className={`demand-card ${selectMode && selectedIds.includes(p.id) ? "is-selected" : ""}`}
+                key={p.id}
+                onClick={() => {
+                  if (selectMode) toggleSelect(p.id);
+                  else { setSelectedId(p.id); setDetailCollapsed?.(false); }
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                <div className="demand-thumb">
+                  {selectMode && <label className="demand-card-check">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(p.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleSelect(p.id)}
+                    />
+                  </label>}
+                  <ProductThumb product={p} size="100%" fontSize={28} />
+                  <div className="platform-badge">
+                    <Icon name="boxes" size={10} /> {p.category || "未分类"}
+                  </div>
+                </div>
+                <div className="demand-body">
+                  <div className="demand-title">{p.name || "未命名竞品"}</div>
+                  <div className="demand-summary">
+                    {p.ai_summary || safeArray(p.tags).slice(0, 4).join(" · ") || "暂无摘要"}
+                  </div>
+                  <div className="demand-tags">
+                    {platforms.slice(0, 3).map((pl, i) =>
+                      <span key={i} className={`platform-pill ${PLATFORM_KEY[pl.platform] || ""}`}>
+                        {PLATFORM_ICON[pl.platform] || PLATFORM_LABEL[pl.platform] || pl.platform}
+                      </span>
+                    )}
+                    {platforms.length === 0 && <Tag tone="outline">{PLATFORM_LABEL[platformKey] || platformKey}</Tag>}
+                    {p.status && <Tag tone={p.status === "跟踪中" ? "success" : p.status === "已归档" ? "outline" : "accent"}>{p.status}</Tag>}
+                  </div>
+                  <div className="demand-foot">
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>价格 {main.price || "—"}</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>评分 {main.rating ?? "—"}</span>
+                    <span>月销 {main.sales || "—"}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {filtered.length === 0 &&
+            <div style={{ gridColumn: "1 / -1" }}>
+              <EmptyState
+                icon="boxes"
+                title={products.length ? "没有匹配的竞品" : "还没有真实竞品"}>
+                请使用 Chrome 插件采集。
+              </EmptyState>
+            </div>
+          }
+        </div>
+        ) : (
         <div className="products-table-wrap">
           <table className="products-table">
             <thead>
@@ -1937,13 +2179,20 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
                 const main = platforms[0] || {};
                 const reviews = Number(main.reviews);
                 return (
-                  <tr key={p.id} className={selectedId === p.id ? "selected" : ""} onClick={() => { setSelectedId(p.id); setDetailCollapsed?.(false); }}>
+                  <tr
+                    key={p.id}
+                    className={`${selectedId === p.id ? "selected" : ""} ${selectMode && selectedIds.includes(p.id) ? "is-selected" : ""}`}
+                    onClick={() => {
+                      if (selectMode) toggleSelect(p.id);
+                      else { setSelectedId(p.id); setDetailCollapsed?.(false); }
+                    }}
+                  >
                     {selectMode && <td onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggleSelect(p.id)} />
                     </td>}
                     <td>
                       <div className="product-name">
-                        <div className="products-thumb">{p.emoji || "📦"}</div>
+                        <ProductThumb product={p} />
                         <div style={{ minWidth: 0 }}>
                           <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }}>{p.name || "未命名竞品"}</div>
                           <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}>
@@ -1992,12 +2241,13 @@ function ProductsScreen({ data, api, refreshData, detailCollapsed, setDetailColl
               }
             </tbody>
           </table>
-          {paged.total > pageSize && (
-            <div className="products-pagination-shell">
-              <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
-            </div>
-          )}
         </div>
+        )}
+        {paged.total > pageSize && (
+          <div className={viewMode === "table" ? "products-pagination-shell" : ""}>
+            <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条竞品" />
+          </div>
+        )}
       </div>
 
         </div>
@@ -2233,7 +2483,7 @@ function AddProductModal({ onClose, api, refreshData }) {
           <div className="col" style={{ gap: 14 }}>
               <div style={{ display: "flex", gap: 12 }}>
                 <div style={{ width: 96, height: 96 }}>
-                  <Placeholder label={"product\nimage"} />
+                  <ProductThumb product={preview} size={96} fontSize={28} />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>{preview?.name || "未命名竞品"}</div>
@@ -2291,7 +2541,7 @@ function AddProductModal({ onClose, api, refreshData }) {
 }
 
 // ============ DEMANDS ============
-function DemandsScreen({ data, api, refreshData, navTarget }) {
+function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
   const [demands, setDemands] = useState(safeArray(data.demands));
   useEffect(() => setDemands(safeArray(data.demands)), [data.demands]);
   const [filterScenario, setFilterScenario] = useState("");
@@ -2301,12 +2551,15 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectMode, setSelectMode] = useState(false);
   const [viewMode, setViewMode] = useState("card");
+  const [tab, setTab] = useState("voices");
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const selected = demands.find((d) => d.id === selectedId);
+  const feishuStatus = data.dashboard?.feishu_status || {};
+  const feishuConnected = Boolean(feishuStatus.connected || data.settings?.feishu_app_token || data.settings?.feishu_connected || data.workspace?.feishu_app_token);
 
   const filtered = demands.filter((d) =>
   (!filterScenario || safeArray(d.scenarios).includes(filterScenario)) && (
@@ -2321,7 +2574,7 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
     try {
       await api("/api/sync/feishu", { method: "POST", body: JSON.stringify({ kinds: ["demands"] }) });
       await refreshData?.();
-      setNotice("需求雷达已同步到飞书。");
+      setNotice("需求库已同步到飞书。");
     } catch (error) {
       setNotice(error.message);
     }
@@ -2398,11 +2651,11 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
       <div className="page page-fluid page-wide">
         <header className="page-head">
           <div className="page-head-left">
-            <div className="screen-icon-box"><Icon name="lightbulb" size={20} /></div>
+            <div className="screen-icon-box"><Icon name="bar-chart" size={20} /></div>
             <div>
-              <h1 className="h1" style={{ marginBottom: 2 }}>需求雷达</h1>
+              <h1 className="h1" style={{ marginBottom: 2 }}>需求库</h1>
               <div className="muted text-sm">
-                收集用户痛点和需求线索，AI 自动打标、聚类、关联到 PRD / MRD。
+                飞书多维表格镜像 · AI 语义搜索 · 品类分析视图。
               </div>
             </div>
           </div>
@@ -2427,7 +2680,103 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           }}>{notice}</div>
         )}
 
-        {hasAnyDemands ? (
+        <div className="demands-source-banner">
+          <Icon name="link" size={12} style={{ color: "var(--text-3)", flexShrink: 0 }} />
+          <span className="demands-source-text">
+            数据来源：<strong>飞书多维表格</strong>
+          </span>
+          {feishuConnected ? (
+            <Tag tone="success">
+              已接入{feishuStatus.last_sync_at ? ` · ${formatRelativeTime(feishuStatus.last_sync_at)}同步` : ""}
+            </Tag>
+          ) : (
+            <Tag tone="outline">未接入</Tag>
+          )}
+          {!feishuConnected && (
+            <button type="button" className="demands-source-cta" onClick={() => onNavigate?.("settings")}>
+              配置
+            </button>
+          )}
+        </div>
+
+        <div className="demands-tabs" role="tablist" aria-label="需求库视图">
+          {[
+            ["voices", "message-circle", "用户声音", demands.length],
+            ["requirements", "clipboard", "需求列表"],
+            ["analysis", "bar-chart", "品类分析"],
+            ["timeline", "calendar", "决策时间线"],
+          ].map(([key, icon, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              className={`demands-tab ${tab === key ? "active" : ""}`}
+              onClick={() => setTab(key)}
+            >
+              <Icon name={icon} size={12} />
+              <span>{label}</span>
+              {count != null && <span className="demands-tab-count">{count}</span>}
+            </button>
+          ))}
+        </div>
+
+        {tab === "requirements" && (
+          <div className="demands-tab-empty">
+            <Icon name="clipboard" size={28} style={{ color: "var(--text-4)" }} />
+            <div className="demands-tab-empty-title">需求列表（飞书镜像表）</div>
+            <div className="demands-tab-empty-desc">
+              接入飞书 Loom 标准模板后，这里会镜像团队需求表，并展示需求名称、品类、负责 PM、当前状态、优先级、周更新、决策状态、决策理由和关联竞品。
+            </div>
+            <div className="demands-tab-empty-fields">
+              <span>需求名称</span>
+              <span>品类</span>
+              <span>负责 PM</span>
+              <span>当前状态</span>
+              <span>优先级</span>
+              <span>周更新</span>
+              <span>决策状态</span>
+              <span>决策理由</span>
+              <span>关联竞品</span>
+            </div>
+            {!feishuConnected && (
+              <button type="button" className="btn primary" style={{ marginTop: 18 }} onClick={() => onNavigate?.("settings")}>
+                去配置飞书
+              </button>
+            )}
+          </div>
+        )}
+
+        {tab === "analysis" && (
+          <div className="demands-tab-empty">
+            <Icon name="bar-chart" size={28} style={{ color: "var(--text-4)" }} />
+            <div className="demands-tab-empty-title">品类分析视图</div>
+            <div className="demands-tab-empty-desc">
+              选定品类后，Loom 会汇总价格带、销量分布、重点需求和用户声音热词。完整分析需要飞书需求和竞品快照同时具备。
+            </div>
+            <div className="demands-tab-empty-bullets">
+              <div>价格带分布（基于竞品快照数据）</div>
+              <div>销量分布（电商抓取）</div>
+              <div>重点需求 TOP 5（按关联评论数排序）</div>
+              <div>用户呼声热词（评论 AI 聚类）</div>
+            </div>
+          </div>
+        )}
+
+        {tab === "timeline" && (
+          <div className="demands-tab-empty">
+            <Icon name="calendar" size={28} style={{ color: "var(--text-4)" }} />
+            <div className="demands-tab-empty-title">决策时间线</div>
+            <div className="demands-tab-empty-desc">
+              按时间顺序展示每条需求的状态变更与决策事件。AI 会从每周更新文本中抽取立项、暂缓、弃单、重启信号和原因。
+            </div>
+            <div className="demands-tab-empty-note">
+              团队全部动态在这里查看，工作台只显示和当前用户有关的部分。
+            </div>
+          </div>
+        )}
+
+        {tab === "voices" && hasAnyDemands ? (
           <div className="filter-bar">
             <div className="filter-bar-cluster">
               <div className="demand-filter-group" role="group" aria-label="需求筛选">
@@ -2452,13 +2801,13 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             <div className="filter-bar-meta">
               <span className="demand-match-count">匹配 {filtered.length} / {demands.length}</span>
               {filtered.length > 0 && !selectMode && (
-                <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
+                <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => { setSelectMode(true); setSelectedId(null); setSelectedIds([]); }}>批量选择</Btn>
               )}
             </div>
           </div>
         ) : null}
 
-        {filtered.length > 0 && selectMode &&
+        {tab === "voices" && filtered.length > 0 && selectMode &&
           <div className="bulk-toolbar" style={{
             marginBottom: 12,
             borderRadius: 14,
@@ -2466,9 +2815,9 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             boxShadow: "0 10px 30px rgba(0,0,0,.06)",
           }}>
             <div className="bulk-left">
-              <Btn size="sm" variant="ghost" onClick={() => setSelectMode(false)}>取消选择</Btn>
-              <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>批量删除</Btn>
-              <span className="muted text-sm">{selectedIds.length} 条已选择</span>
+              <Btn size="sm" variant="ghost" onClick={() => { setSelectMode(false); setSelectedIds([]); }}>取消</Btn>
+              <Btn size="sm" variant="ghost" icon="trash" disabled={!selectedIds.length} onClick={() => setShowBulkDeleteConfirm(true)}>删除 {selectedIds.length || ""}</Btn>
+              <span className="muted text-sm">已选 {selectedIds.length} / {paged.items.length}</span>
             </div>
             <label className="bulk-check">
               <input
@@ -2484,10 +2833,18 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           </div>
         }
 
-        {viewMode === "card" ?
+        {tab === "voices" && (viewMode === "card" ?
         <div className="demands-grid">
           {paged.items.map((d) =>
-          <div className="demand-card" key={d.id} onClick={() => setSelectedId(d.id)} style={{ cursor: "pointer" }}>
+          <div
+            className={`demand-card ${selectMode && selectedIds.includes(d.id) ? "is-selected" : ""}`}
+            key={d.id}
+            onClick={() => {
+              if (selectMode) toggleSelect(d.id);
+              else setSelectedId(d.id);
+            }}
+            style={{ cursor: "pointer" }}
+          >
               <div className="demand-thumb">
                 {selectMode && <label className="demand-card-check">
                   <input
@@ -2532,11 +2889,10 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
           {filtered.length === 0 && demands.length === 0 ? (
             <div style={{ gridColumn: "1 / -1" }}>
               <div className="empty-hero">
-                <Icon name="lightbulb" size={48} />
-                <h2>需求雷达还没有数据</h2>
+                <Icon name="bar-chart" size={48} />
+                <h2>需求库还没有数据</h2>
                 <p className="muted">
-                  在小红书 / Amazon / Kickstarter 等平台用 Chrome 插件采集，AI 会自动打标并归类到这里。
-                  也可以手动新建一条需求。
+                  配置飞书多维表格后自动同步需求，也可以手动新建。采集自小红书 / Amazon 等平台的用户声音会自动关联需求。
                 </p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <Btn variant="primary" icon="plus" onClick={() => setShowAdd(true)}>手动新建</Btn>
@@ -2568,7 +2924,14 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             </thead>
             <tbody>
               {paged.items.map((d) =>
-              <tr key={d.id} className={selectedId === d.id ? "selected" : ""} onClick={() => setSelectedId(d.id)}>
+              <tr
+                key={d.id}
+                className={`${selectedId === d.id ? "selected" : ""} ${selectMode && selectedIds.includes(d.id) ? "is-selected" : ""}`}
+                onClick={() => {
+                  if (selectMode) toggleSelect(d.id);
+                  else setSelectedId(d.id);
+                }}
+              >
                   {selectMode &&
                   <td onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} />
@@ -2590,8 +2953,8 @@ function DemandsScreen({ data, api, refreshData, navTarget }) {
             </tbody>
           </table>
         </div>
-        }
-        <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条灵感" />
+        )}
+        {tab === "voices" && <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="条需求" />}
       </div>
 
       {selected && <DemandDetailDrawer demand={selected} api={api} refreshData={refreshData} fields={data.settings?.fields} tagGroups={data.settings?.tag_groups} onCreateTagOption={createTagOption} onClose={() => setSelectedId(null)} onRequestDelete={openDeleteConfirm} />}
@@ -2645,6 +3008,8 @@ function DemandDetailDrawer({ demand, onClose, api, refreshData, onRequestDelete
             onBlur={(e) => save({ original_content: e.target.value, summary: e.target.value })}
             style={{ width: "100%", minHeight: 70, lineHeight: 1.6, resize: "vertical", fontSize: 12.5 }} />
           </div>
+
+          <DemandCommentsSection demand={demand} />
 
           {(() => {
             const normalizedFields = normalizeFields(fields, tagGroups, { includeDefaults: true });
@@ -3033,7 +3398,7 @@ function ResearchScreen({ data, api, refreshData }) {
             <div className="screen-icon-box"><Icon name="compass" size={20} /></div>
             <div>
               <h1 className="h1" style={{ marginBottom: 2 }}>调研工坊</h1>
-              <div className="muted text-sm">从竞品库与需求雷达中匹配数据，AI 生成结构化分析报告。</div>
+              <div className="muted text-sm">从竞品库与需求库中匹配数据，AI 生成结构化分析报告。</div>
             </div>
           </div>
           <div className="page-head-actions">
@@ -3074,6 +3439,9 @@ function ResearchScreen({ data, api, refreshData }) {
                   关联 {safeArray(r.products).length} 个竞品 · {safeArray(r.demands).length} 条需求 · 创建于 {r.date}
                 </div>
               </div>
+              {r.feishu_project_idea &&
+                <Tag tone="accent">飞书想法</Tag>
+              }
               <Tag tone={r.status === "已完成" ? "success" : r.status === "分析中" ? "warn" : "default"}>
                 {r.status === "已完成" && "✓ "}
                 {r.status === "分析中" && "⏳ "}
@@ -4545,10 +4913,14 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const [productIds, setProductIds] = useState(safeArray(research.products));
   const [demandIds, setDemandIds] = useState(safeArray(research.demands));
   const [picker, setPicker] = useState(null); // 'product' | 'demand' | null
+  const [showFeishuIdeaPicker, setShowFeishuIdeaPicker] = useState(false);
   const [detailTarget, setDetailTarget] = useState(null); // { type, id } | null
   const [busy, setBusy] = useState(false);
+  const [feishuPreviewBusy, setFeishuPreviewBusy] = useState(false);
+  const [feishuPreview, setFeishuPreview] = useState(null);
   const [notice, setNotice] = useState("");
   const [status, setStatus] = useState(research.status || "草稿");
+  const linkedFeishuIdea = research.feishu_project_idea || null;
   const products = productIds.map((id) => safeArray(data.products).find((p) => p.id === id)).filter(Boolean);
   const demands = demandIds.map((id) => safeArray(data.demands).find((d) => d.id === id)).filter(Boolean);
   const detailProduct = detailTarget?.type === "product" ? safeArray(data.products).find((p) => p.id === detailTarget.id) : null;
@@ -4582,6 +4954,21 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
       setBusy(false);
     }
   };
+  const exportCsv = () => {
+    const url = `/api/research/${encodeURIComponent(research.id)}/export.csv`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+  const previewFeishuProjectIdea = async () => {
+    setFeishuPreviewBusy(true);setNotice("");
+    try {
+      const draft = await api(`/api/research/${research.id}/feishu-project-idea/preview`, { method: "POST", body: JSON.stringify({}) });
+      setFeishuPreview(draft);
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setFeishuPreviewBusy(false);
+    }
+  };
 
   return (
     <div className="viewport">
@@ -4591,7 +4978,8 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
           <div className="grow" />
           <div className="page-actions">
             <Btn icon="sync" onClick={analyze} disabled={busy}>{busy ? "分析中..." : "重新分析"}</Btn>
-            <Btn variant="primary" icon="external">导出报告</Btn>
+            <Btn icon="external" onClick={previewFeishuProjectIdea} disabled={feishuPreviewBusy}>{feishuPreviewBusy ? "检查中..." : "提交到飞书产品想法登记"}</Btn>
+            <Btn variant="primary" icon="external" onClick={exportCsv}>导出整理数据</Btn>
           </div>
         </div>
 
@@ -4609,12 +4997,39 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
               </div>
             </Section>
 
+            <Section
+              icon="link"
+              label="飞书产品想法"
+              action={<button className="btn sm ghost" onClick={() => setShowFeishuIdeaPicker(true)}><Icon name="link" size={12} /> {linkedFeishuIdea ? "更换绑定" : "绑定飞书想法"}</button>}
+            >
+              <div className={`research-detail-box research-feishu-idea-box ${linkedFeishuIdea ? "" : "is-empty"}`}>
+                {linkedFeishuIdea ?
+                  <div className="research-feishu-idea-card">
+                    <div className="research-feishu-idea-main">
+                      <div className="research-feishu-idea-title">{linkedFeishuIdea.name}</div>
+                      <div className="research-feishu-idea-meta">
+                        {linkedFeishuIdea.work_item_type_name || "产品想法登记"} · {linkedFeishuIdea.current_node_name || linkedFeishuIdea.status_name || "未同步状态"} · #{linkedFeishuIdea.work_item_id}
+                      </div>
+                    </div>
+                    {linkedFeishuIdea.source_url &&
+                      <a className="research-feishu-idea-open" href={linkedFeishuIdea.source_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                        <Icon name="external" size={13} />
+                      </a>
+                    }
+                  </div> :
+                  <button className="research-empty-add" onClick={() => setShowFeishuIdeaPicker(true)}>
+                    <Icon name="link" size={12} /> 从镜像想法列表选择
+                  </button>
+                }
+              </div>
+            </Section>
+
             <Section icon="boxes" label={`关联竞品 · ${products.length}`}
             action={<button className="btn sm ghost" onClick={() => setPicker("product")}><Icon name="plus" size={12} /> 添加竞品</button>}>
               <div className={`research-detail-box research-products-box ${products.length === 0 ? "is-empty" : ""}`}>
                 {products.map((p) =>
                 <div className="card research-linked-card research-product-card" key={p.id} onClick={() => setDetailTarget({ type: "product", id: p.id })} style={{ padding: 12, display: "flex", gap: 10, position: "relative" }}>
-                    <div className="products-thumb" style={{ width: 36, height: 36, fontSize: 18 }}>{p.emoji}</div>
+                    <ProductThumb product={p} />
                     <div className="research-product-card-body" style={{ minWidth: 0, flex: 1 }}>
                       <div className="research-product-card-title" style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                       <div className="row" style={{ marginTop: 3, fontSize: 11.5 }}>
@@ -4670,7 +5085,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
                 {demands.length === 0 &&
                 <button className="research-empty-add"
                 onClick={() => setPicker("demand")}>
-                    <Icon name="plus" size={12} /> 从需求雷达添加
+                    <Icon name="plus" size={12} /> 从需求库添加
                   </button>
                 }
               </div>
@@ -4714,7 +5129,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
         onPick={(id) => {const next = [...productIds, id];setProductIds(next);setPicker(null);saveLinks(next, demandIds);}}
         renderItem={(p) =>
         <>
-                <div className="products-thumb" style={{ width: 32, height: 32, fontSize: 16 }}>{p.emoji}</div>
+                <ProductThumb product={p} size={32} fontSize={16} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                   <div style={{ fontSize: 11, color: "var(--text-3)" }}>{p.category || "未分类"} · {safeArray(p.platforms)[0]?.price || "—"} · {safeArray(p.platforms)[0]?.rating ?? "—"}★</div>
@@ -4740,11 +5155,87 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
         }
         searchKey={(d) => d.title + " " + d.innovation + " " + safeArray(d.scenarios).join(" ") + " " + safeArray(d.painpoints).join(" ")} />
         }
+        {showFeishuIdeaPicker &&
+          <FeishuProjectIdeaPickerModal
+            api={api}
+            linkedIdea={linkedFeishuIdea}
+            onClose={() => setShowFeishuIdeaPicker(false)}
+            onPick={async (idea) => {
+              await api(`/api/research/${research.id}/feishu-project-idea`, {
+                method: "POST",
+                body: JSON.stringify({
+                  project_key: idea.project_key,
+                  work_item_id: idea.work_item_id,
+                  work_item_type_key: idea.work_item_type_key,
+                  work_item_type_name: idea.work_item_type_name,
+                  name: idea.name,
+                  status_name: idea.status_name,
+                  current_node_name: idea.current_node_name,
+                  source_url: idea.source_url,
+                }),
+              });
+              await refreshData?.();
+              setShowFeishuIdeaPicker(false);
+            }}
+          />
+        }
         {detailProduct &&
         <ProductDetailDrawer product={detailProduct} api={api} refreshData={refreshData} onClose={() => setDetailTarget(null)} />
         }
         {detailDemand &&
         <DemandDetailDrawer demand={detailDemand} api={api} refreshData={refreshData} onClose={() => setDetailTarget(null)} />
+        }
+        {feishuPreview &&
+        <div className="modal-backdrop" onClick={() => setFeishuPreview(null)}>
+          <div className="modal" style={{ width: 720, maxWidth: "calc(100vw - 28px)" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <Icon name="external" size={15} />
+              <h3>飞书产品想法登记预览</h3>
+              <Tag tone={feishuPreview.ready ? "success" : "warn"}>{feishuPreview.ready ? "可提交" : "需补齐"}</Tag>
+              <Btn variant="ghost" icon="x" onClick={() => setFeishuPreview(null)} />
+            </div>
+            <div className="modal-body" style={{ display: "grid", gap: 14 }}>
+              {safeArray(feishuPreview.missing_required).length > 0 &&
+              <div className="ai-block">
+                <strong>提交前缺口</strong>
+                <div className="col" style={{ gap: 6, marginTop: 8 }}>
+                  {safeArray(feishuPreview.missing_required).map((item) =>
+                  <div key={`${item.type}:${item.key}`} className="row" style={{ justifyContent: "space-between", gap: 12 }}>
+                    <span>{item.label}</span>
+                    <span className="muted text-sm">{item.type === "role" ? "角色" : "字段"}</span>
+                  </div>
+                  )}
+                </div>
+              </div>
+              }
+              {safeArray(feishuPreview.warnings).length > 0 &&
+              <div className="ai-block">
+                <strong>注意事项</strong>
+                <div className="col" style={{ gap: 6, marginTop: 8 }}>
+                  {safeArray(feishuPreview.warnings).map((item) =>
+                  <div key={item.key} className="muted text-sm">{item.message}</div>
+                  )}
+                </div>
+              </div>
+              }
+              <div className="settings-grid" style={{ gridTemplateColumns: "1fr", gap: 10 }}>
+                {Object.entries(feishuPreview.fields || {}).map(([key, value]) =>
+                <div className="settings-card" key={key}>
+                  <div className="settings-card-title">{key}</div>
+                  <div className="desc" style={{ whiteSpace: "pre-wrap" }}>{String(value || "")}</div>
+                </div>
+                )}
+                <div className="settings-card">
+                  <div className="settings-card-title">roles</div>
+                  <div className="desc" style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(feishuPreview.roles || {}, null, 2)}</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <Btn variant="ghost" onClick={() => setFeishuPreview(null)}>关闭</Btn>
+            </div>
+          </div>
+        </div>
         }
 
         <div className="research-analysis-block">
@@ -4781,6 +5272,98 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
       </div>
     </div>);
 
+}
+
+function FeishuProjectIdeaPickerModal({ api, linkedIdea, onClose, onPick }) {
+  const [q, setQ] = useState("");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams({ type: "idea", limit: "80" });
+        if (q.trim()) params.set("q", q.trim());
+        const result = await api(`/api/feishu-project/items?${params.toString()}`);
+        if (!cancelled) setItems(safeArray(result));
+      } catch (err) {
+        if (!cancelled) setError(err.message || "读取飞书项目镜像失败");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    const timer = setTimeout(load, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [api, q]);
+
+  const select = async (item) => {
+    setBusyId(item.id);
+    try {
+      await onPick(item);
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal research-feishu-picker-modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <Icon name="link" size={14} />
+          <h3>绑定飞书产品想法</h3>
+          <Btn variant="ghost" icon="x" onClick={onClose} />
+        </div>
+        <div style={{ padding: "12px 16px 0" }}>
+          <input
+            className="input lg"
+            autoFocus
+            style={{ width: "100%" }}
+            placeholder="搜索镜像想法标题或 work item id"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <div className="modal-body research-feishu-picker-body">
+          {error && <div className="ai-block">{error}</div>}
+          {loading && <div className="empty">正在读取飞书项目镜像...</div>}
+          {!loading && !error && items.length === 0 &&
+            <EmptyState icon="link" title="还没有镜像想法">
+              先同步/测试飞书项目 MCP。
+            </EmptyState>
+          }
+          {!loading && !error && items.length > 0 &&
+            <div className="research-feishu-picker-list">
+              {items.map((item) => {
+                const active = linkedIdea?.project_key === item.project_key && linkedIdea?.work_item_id === item.work_item_id;
+                return (
+                  <button
+                    key={item.id}
+                    className={`research-feishu-picker-item ${active ? "is-active" : ""}`}
+                    disabled={Boolean(busyId)}
+                    onClick={() => select(item)}
+                  >
+                    <div className="research-feishu-picker-title">{item.name}</div>
+                    <div className="research-feishu-picker-meta">
+                      {item.work_item_type_name || "产品想法登记"} · {item.current_node_name || item.status_name || "未同步状态"} · #{item.work_item_id}
+                    </div>
+                    <Icon name={active ? "check" : "plus"} size={14} />
+                  </button>
+                );
+              })}
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Section({ icon, label, children, action }) {
@@ -4907,9 +5490,16 @@ function SettingsScreen({ data, api, refreshData }) {
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [deleteSourceTarget, setDeleteSourceTarget] = useState(null);
   const [deleteSourceBusy, setDeleteSourceBusy] = useState(false);
+  const editingSettingsRef = useRef(false);
   useEffect(() => setSources(data.rssSources), [data.rssSources]);
   useEffect(() => setOfficialSources(data.officialRssSources || []), [data.officialRssSources]);
-  useEffect(() => setSettings(data.settings || {}), [data.settings]);
+  useEffect(() => {
+    if (!editingSettingsRef.current) setSettings(data.settings || {});
+  }, [data.settings]);
+  const updateSetting = (key, value) => {
+    editingSettingsRef.current = true;
+    setSettings((current) => ({ ...current, [key]: value }));
+  };
   useEffect(() => {
     if (!api) return;
     api("/api/news/sources/status").then((statusList) => {
@@ -4922,6 +5512,7 @@ function SettingsScreen({ data, api, refreshData }) {
     setNotice("");
     try {
       const saved = await api("/api/settings", { method: "PATCH", body: JSON.stringify(patch) });
+      editingSettingsRef.current = false;
       setSettings(saved);
       await refreshData?.();
       setNotice("设置已保存。");
@@ -4933,8 +5524,14 @@ function SettingsScreen({ data, api, refreshData }) {
     setNotice(`${label}测试中...`);
     try {
       await saveSettings(settings);
-      await api(path, { method: "POST" });
-      setNotice(`${label}测试成功。`);
+      const result = await api(path, { method: "POST" });
+      if (path.includes("test-feishu-project-mcp")) {
+        const projectName = result?.project?.name || result?.project?.key || "项目空间";
+        const typeText = result?.workItemTypeCount ? `，识别 ${result.workItemTypeCount} 个工作项类型` : "";
+        setNotice(`${label}测试成功：${projectName}${typeText}。`);
+      } else {
+        setNotice(`${label}测试成功。`);
+      }
       await refreshData?.();
     } catch (error) {
       setNotice(error.message);
@@ -5236,25 +5833,25 @@ function SettingsScreen({ data, api, refreshData }) {
             <Icon name="folder-open" size={14} style={{ color: "var(--accent)" }} />
             <div>
               <h3>飞书项目 MCP <Tag tone="accent">Beta</Tag></h3>
-              <div className="desc">通过飞书 MCP Server 自动同步项目、任务、需求池到 LOOM。配好后「飞书项目」页会出现真实数据。</div>
+              <div className="desc">通过飞书项目 MCP 读取产品想法、立项和项目集。Token 只保存在服务端设置里。</div>
             </div>
           </div>
           <div className="settings-section-body">
             <div className="settings-row">
-              <div className="label">MCP Server URL</div>
-              <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_url || ""} onChange={(e) => setSettings({ ...settings, feishu_mcp_url: e.target.value })} placeholder="例如：https://mcp.example.com/feishu" />
+              <div className="label">MCP Endpoint</div>
+              <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_url || ""} onChange={(e) => updateSetting("feishu_mcp_url", e.target.value)} placeholder="可不填，默认 https://project.feishu.cn/mcp_server/v1" />
             </div>
             <div className="settings-row">
-              <div className="label">Access Token</div>
-              <input className="input" style={{ width: "100%" }} type="password" value={settings.feishu_mcp_token || ""} onChange={(e) => setSettings({ ...settings, feishu_mcp_token: e.target.value })} placeholder="飞书项目 API token" />
+              <div className="label">X-Mcp-Token</div>
+              <input className="input" style={{ width: "100%" }} type="password" value={settings.feishu_mcp_token || ""} onChange={(e) => updateSetting("feishu_mcp_token", e.target.value)} placeholder="只填写 token 值，不需要填写 X-Mcp-Token 这个 header 名" />
             </div>
             <div className="settings-row">
               <div className="label">项目空间 ID</div>
-              <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_key || ""} onChange={(e) => setSettings({ ...settings, feishu_mcp_project_key: e.target.value })} placeholder="项目空间 project_key" />
+              <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_key || ""} onChange={(e) => updateSetting("feishu_mcp_project_key", e.target.value)} placeholder="项目空间 project_key" />
             </div>
             <div className="settings-row">
               <div className="label">同步频率</div>
-              <select className="input" style={{ maxWidth: 200 }} value={settings.feishu_mcp_interval || "manual"} onChange={(e) => setSettings({ ...settings, feishu_mcp_interval: e.target.value })}>
+              <select className="input" style={{ maxWidth: 200 }} value={settings.feishu_mcp_interval || "manual"} onChange={(e) => updateSetting("feishu_mcp_interval", e.target.value)}>
                 <option value="manual">仅手动</option>
                 <option value="15m">每 15 分钟</option>
                 <option value="1h">每小时</option>
@@ -5265,9 +5862,9 @@ function SettingsScreen({ data, api, refreshData }) {
             <div className="settings-row">
               <div className="label">&nbsp;</div>
               <div className="row">
-                <Btn icon="check" onClick={() => setNotice("飞书 MCP 接入即将上线，已保存配置。")}>测试连接</Btn>
+                <Btn icon="check" onClick={() => test("/api/settings/test-feishu-project-mcp", "飞书项目 MCP")}>测试连接</Btn>
                 <Btn variant="primary" icon="sync" onClick={() => setNotice("飞书 MCP 接入即将上线，已保存配置。")}>立即同步</Btn>
-                <span className="muted text-sm" style={{ marginLeft: 4 }}>当前 mock 数据，接入后自动替换</span>
+                {settings.last_feishu_project_mcp_test_at && <span className="muted text-sm" style={{ marginLeft: 4 }}>上次:{settings.last_feishu_project_mcp_test_at}</span>}
               </div>
             </div>
           </div>
@@ -5396,7 +5993,7 @@ function SettingsScreen({ data, api, refreshData }) {
           <div className="settings-section">
             <div className="settings-section-head">
               <Icon name="tag" size={14} style={{ color: "var(--accent)" }} />
-              <div><h3>标签与字段</h3><div className="desc">账号字段库默认为空。需要使用字段时，先在这里新建，再到竞品或灵感详情里按需添加。</div></div>
+              <div><h3>标签与字段</h3><div className="desc">系统字段提供基础结构；品牌、主机和品类使用标准词表，场景与痛点从采集内容中逐步推荐。</div></div>
             </div>
             <div className="settings-section-body">
               <FieldSystemEditor settings={settings} setSettings={setSettings} saveSettings={saveSettings} />
@@ -5444,11 +6041,11 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
   };
 
   const TAB_GROUPS = {
-    common: ["competitor_brands", "camera_brands", "custom_tags"],
+    common: ["competitor_brands", "camera_brands"],
     news: ["competitor_brands", "camera_brands"],
     products: ["competitor_brands", "camera_brands", "product_categories"],
-    demands: ["scenarios", "painpoints", "innovation_types", "custom_tags"],
-    research: ["competitor_brands", "camera_brands", "product_categories", "scenarios", "painpoints", "innovation_types", "custom_tags"],
+    demands: ["scenarios", "painpoints", "innovation_types"],
+    research: ["competitor_brands", "camera_brands", "product_categories", "scenarios", "painpoints", "innovation_types"],
   };
 
   // TagSystemEditor kept for reference but replaced by FieldSystemEditor above
@@ -5514,13 +6111,14 @@ function TagSystemEditor({ settings, setSettings, saveSettings }) {
 
 // ===== New Field System Components =====
 
-function FieldCard({ field, onOptionsChange, onEntitiesChange, onDelete, onRename }) {
+function FieldCard({ field, onOptionsChange, onEntitiesChange, onDelete, onRename, onMultiChange }) {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameInput, setNameInput] = useState(field.name);
 
   const addOption = () => {
+    if (!onOptionsChange) { setEditing(false); setDraft(""); return; }
     const v = draft.trim();
     if (!v) { setEditing(false); return; }
     if (!field.options.includes(v)) onOptionsChange?.([...field.options, v]);
@@ -5531,6 +6129,7 @@ function FieldCard({ field, onOptionsChange, onEntitiesChange, onDelete, onRenam
   const removeOption = (opt) => onOptionsChange?.(field.options.filter((o) => o !== opt));
 
   const toggleEntity = (entity) => {
+    if (!onEntitiesChange) return;
     const curr = field.entities;
     if (curr.includes(entity)) {
       if (curr.length <= 1) return;
@@ -5564,7 +6163,23 @@ function FieldCard({ field, onOptionsChange, onEntitiesChange, onDelete, onRenam
           ) : (
             <span className="field-card-name">{field.name}</span>
           )}
-          <span className="tag outline" style={{ fontSize: 10.5, padding: "0 6px", height: 18, lineHeight: "18px" }}>{field.multi ? "多选" : "单选"}</span>
+          {onMultiChange ? (
+            <span className="segment-control compact" style={{ height: 22 }}>
+              {[{ v: true, label: "多选" }, { v: false, label: "单选" }].map(({ v, label }) => (
+                <button
+                  key={label}
+                  type="button"
+                  className={`segment-item ${field.multi === v ? "active" : ""}`}
+                  style={{ height: 20, padding: "0 8px", fontSize: 11 }}
+                  onClick={() => onMultiChange(v)}
+                >
+                  {label}
+                </button>
+              ))}
+            </span>
+          ) : (
+            <span className="tag outline" style={{ fontSize: 10.5, padding: "0 6px", height: 18, lineHeight: "18px" }}>{field.multi ? "多选" : "单选"}</span>
+          )}
           {!field.official && <span className="field-custom-chip">自定义</span>}
         </div>
         <div className="field-card-actions">
@@ -5579,6 +6194,7 @@ function FieldCard({ field, onOptionsChange, onEntitiesChange, onDelete, onRenam
             <input
               type="checkbox"
               checked={field.entities.includes(e.key)}
+              disabled={!onEntitiesChange}
               onChange={() => toggleEntity(e.key)}
             />
             {e.label}
@@ -5589,7 +6205,7 @@ function FieldCard({ field, onOptionsChange, onEntitiesChange, onDelete, onRenam
         {field.options.map((opt) => (
           <span key={opt} className={`tag ${field.tone}`} style={{ paddingRight: 4, gap: 3, cursor: "default" }}>
             {opt}
-            <Icon name="x" size={11} style={{ cursor: "pointer", opacity: 0.6 }} onClick={() => removeOption(opt)} />
+            {onOptionsChange && <Icon name="x" size={11} style={{ cursor: "pointer", opacity: 0.6 }} onClick={() => removeOption(opt)} />}
           </span>
         ))}
         {editing ? (
@@ -5603,7 +6219,7 @@ function FieldCard({ field, onOptionsChange, onEntitiesChange, onDelete, onRenam
             onKeyDown={(e) => { if (e.key === "Enter") addOption(); if (e.key === "Escape") { setEditing(false); setDraft(""); } }}
             onBlur={addOption}
           />
-        ) : (
+        ) : onOptionsChange ? (
           <button
             className="tag"
             style={{ background: "transparent", border: "1px dashed var(--border)", color: "var(--text-3)", cursor: "pointer", gap: 3 }}
@@ -5611,7 +6227,9 @@ function FieldCard({ field, onOptionsChange, onEntitiesChange, onDelete, onRenam
           >
             <Icon name="plus" size={10} /> 添加
           </button>
-        )}
+        ) : field.options.length === 0 ? (
+          <span className="muted text-sm">采集时由 AI 推荐，确认后进入标签库</span>
+        ) : null}
       </div>
     </div>
   );
@@ -5703,12 +6321,12 @@ function NewFieldModal({ onClose, onCreate }) {
 }
 
 function FieldSystemEditor({ settings, setSettings, saveSettings }) {
-  const [fieldsState, setFieldsState] = useState(normalizeFields(settings.fields, settings.tag_groups));
+  const [fieldsState, setFieldsState] = useState(normalizeFields(settings.fields, settings.tag_groups, { includeDefaults: true }));
   const [fieldTab, setFieldTab] = useState("competitor");
   const [showNewField, setShowNewField] = useState(false);
   const [notice, setNotice] = useState("");
 
-  useEffect(() => setFieldsState(normalizeFields(settings.fields, settings.tag_groups)), [settings.fields, settings.tag_groups]);
+  useEffect(() => setFieldsState(normalizeFields(settings.fields, settings.tag_groups, { includeDefaults: true })), [settings.fields, settings.tag_groups]);
 
   const visibleFields = fieldTab === "all" ? fieldsState : fieldsState.filter((f) => f.entities.includes(fieldTab));
 
@@ -5757,9 +6375,10 @@ function FieldSystemEditor({ settings, setSettings, saveSettings }) {
           <FieldCard
             key={field.key}
             field={field}
-            onOptionsChange={(options) => updateField(field.key, { options })}
-            onEntitiesChange={(entities) => updateField(field.key, { entities })}
+            onOptionsChange={!field.official ? (options) => updateField(field.key, { options }) : undefined}
+            onEntitiesChange={!field.official ? (entities) => updateField(field.key, { entities }) : undefined}
             onRename={!field.official ? (name) => updateField(field.key, { name }) : undefined}
+            onMultiChange={(multi) => updateField(field.key, { multi })}
             onDelete={!field.official ? () => deleteCustomField(field.key) : undefined}
           />
         ))}

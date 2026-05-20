@@ -146,7 +146,10 @@ async function load() {
   document.getElementById("api-base").value = data.loom_api_base || DEFAULTS.loom_api_base;
   syncWebLinks(data.loom_api_base || DEFAULTS.loom_api_base);
   document.getElementById("default-mode").value = data.loom_default_mode || "auto";
-  document.getElementById("ai-before-save").value = accountSettings.extension_ai_before_save === false ? "false" : "true";
+  const aiBeforeSave = accountSettings.extension_ai_before_save !== undefined
+    ? accountSettings.extension_ai_before_save !== false
+    : data.loom_ai_before_save !== false;
+  document.getElementById("ai-before-save").value = aiBeforeSave ? "true" : "false";
   document.querySelectorAll("[data-platform]").forEach((input) => {
     input.checked = data.loom_platforms?.[input.dataset.platform] !== false;
   });
@@ -167,8 +170,12 @@ async function refreshAccountExtensionSettings(localSettings = null) {
     const settings = await authedFetch("/api/settings");
     if (settings?.extension_ai_before_save !== undefined) {
       await chrome.storage.local.set({ loom_ai_before_save: settings.extension_ai_before_save !== false });
+      return settings || {};
     }
-    return settings || {};
+    return {
+      ...(settings || {}),
+      extension_ai_before_save: localSettings?.loom_ai_before_save,
+    };
   } catch {
     return {
       extension_ai_before_save: localSettings?.loom_ai_before_save,

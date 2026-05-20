@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_PATH = ":memory:";
@@ -66,6 +66,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   if (!server) return;
   await new Promise((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
@@ -300,6 +301,226 @@ describe("signal evidence APIs", () => {
     const missingBody = await missingResponse.json();
     expect(missingResponse.status).toBe(400);
     expect(missingBody.error).toContain("signal not found");
+  });
+});
+
+describe("AI organize pipeline", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("queues Xiaohongshu demand organize work when inline parsing exceeds the wait budget", async () => {
+    const { cookie, body: loginBody } = await login();
+    repo.updateSettings(loginBody.user.id, {
+      llm_api_url: "https://llm.test/v1",
+      llm_model: "gpt-test",
+      llm_api_key: "secret",
+    });
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (url, options) => {
+      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
+      return new Promise(() => {});
+    });
+
+    const response = await fetch(`${baseUrl}/api/demands/parse-raw`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: "xiaohongshu",
+        wait_ms: 1,
+        data: {
+          title: "Pocket3 夜拍补光",
+          url: "https://www.xiaohongshu.com/explore/pipeline",
+          content: "想给 Pocket3 找一个轻便补光方案",
+          thumbnail_url: "https://img.test/cover.jpg",
+        },
+      }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body).toMatchObject({
+      status: "queued",
+      queued: true,
+      mode: "demand",
+      platform: "xiaohongshu",
+    });
+    expect(body.job_id).toBeTruthy();
+    const job = dbModule.db.prepare("SELECT * FROM app_data WHERE key = ?").get(`ai_organize_job:${body.job_id}`);
+    expect(job).toBeTruthy();
+    const payload = JSON.parse(job.value);
+    expect(["pending", "running"]).toContain(payload.status);
+    expect(payload.input.data.title).toBe("Pocket3 夜拍补光");
+  });
+
+  it("queues background organize work when extension saves raw demand without AI", async () => {
+    const { cookie } = await login();
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (url, options) => {
+      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
+      return new Promise(() => {});
+    });
+    const response = await fetch(`${baseUrl}/api/demands`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Pocket3 手持补光",
+        source: "xiaohongshu",
+        source_platform: "xiaohongshu",
+        source_url: "https://www.xiaohongshu.com/explore/raw-save",
+        import_method: "chrome_extension",
+        __loom_ai_processed: false,
+      }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.id).toBeTruthy();
+    const jobs = dbModule.db.prepare("SELECT key, value FROM app_data WHERE key LIKE 'ai_organize_job:%'").all();
+    expect(jobs.some((row) => {
+      const payload = JSON.parse(row.value);
+      return payload.reason === "saved_without_ai" && payload.input.target_id === body.id;
+    })).toBe(true);
+  });
+});
+
+describe("research CSV export", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("exports linked products and demands with comments, image urls, evidence and tag metadata", async () => {
+    const { cookie, body } = await login();
+    const userId = body.user.id;
+    const product = repo.createProduct(userId, {
+      id: "p_export",
+      name: "Pocket 3 fill light",
+      brand: "Ulanzi",
+      host: "Osmo Pocket 3",
+      category: "补光灯",
+      thumbnail_url: "/uploads/remote-media/p.webp",
+      selling_points: ["轻便", "磁吸"],
+      evidence_status: "current",
+      platforms: [{ platform: "amazon", url: "https://amazon.test/p", price: "$39", rating: 4.6, reviews: 20, sales: "100" }],
+    });
+    const demand = repo.createDemand(userId, {
+      id: "d_export",
+      title: "Pocket 3 夜拍太暗",
+      source: "xiaohongshu",
+      source_url: "https://www.xiaohongshu.com/explore/export",
+      thumbnail_url: "/uploads/remote-media/d.webp",
+      summary: "用户希望夜拍补光",
+      host: "Osmo Pocket 3",
+      tag_values: { host: ["Osmo Pocket 3"], scenarios: ["vlog 自拍"] },
+      visible_comments: [{ user_name: "A", content: "希望能轻一点" }],
+      evidence_status: "current",
+    });
+    const research = repo.createResearch(userId, {
+      id: "r_export",
+      title: "Pocket 3 补光调研",
+      desc: "测试导出",
+      products: [product.id],
+      demands: [demand.id],
+    });
+
+    const response = await fetch(`${baseUrl}/api/research/${research.id}/export.csv`, {
+      headers: { Cookie: cookie },
+    });
+    const csv = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/csv");
+    expect(csv).toContain("research_title");
+    expect(csv).toContain("Pocket 3 fill light");
+    expect(csv).toContain("Pocket 3 夜拍太暗");
+    expect(csv).toContain("Osmo Pocket 3");
+    expect(csv).toContain("希望能轻一点");
+    expect(csv).toContain("/uploads/remote-media/p.webp");
+    expect(csv).toContain("current");
+  });
+
+  it("keeps research rows and missing references in the export", async () => {
+    const { cookie, body } = await login();
+    const userId = body.user.id;
+    repo.createResearch(userId, {
+      id: "r_missing_refs",
+      title: "断链调研",
+      desc: "test",
+      products: ["missing-product"],
+      demands: ["missing-demand"],
+    });
+    const response = await fetch(`${baseUrl}/api/research/r_missing_refs/export.csv`, {
+      headers: { Cookie: cookie },
+    });
+    const csv = await response.text();
+    expect(response.status).toBe(200);
+    expect(csv).toContain("entity_type");
+    expect(csv).toContain("research");
+    expect(csv).toContain("missing_product");
+    expect(csv).toContain("missing_demand");
+    expect(csv).toContain("断链调研");
+  });
+});
+
+describe("research Feishu project idea preview", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("returns a draft checklist without creating a Feishu work item", async () => {
+    const { cookie, body } = await login();
+    const userId = body.user.id;
+    const research = repo.createResearch(userId, {
+      id: "r_feishu_preview",
+      title: "智能相机电池仓",
+      desc: "用户长时间拍摄需要快速换电。",
+    });
+
+    const response = await fetch(`${baseUrl}/api/research/${research.id}/feishu-project-idea/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        current_user_mapping: { meego_user_key: "meego-user-a" },
+        defaults: {
+          feishu_project_default_product_group: "智能影像",
+          feishu_project_default_idea_source: "专题调研",
+        },
+        evidences: [{ title: "竞品页面", url: "https://example.test/product", image_url: "https://img.test/product.jpg" }],
+      }),
+    });
+    const draft = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(draft.mode).toBe("preview");
+    expect(draft.fields.name).toBe("智能相机电池仓");
+    expect(draft.fields.field_f4db36).toBe("智能影像");
+    expect(draft.fields.field_96241e).toBe("https://img.test/product.jpg");
+    expect(draft.roles).toEqual({ "想法提出人": ["meego-user-a"] });
+    expect(draft.missing_required).toEqual([]);
   });
 });
 
@@ -1302,6 +1523,194 @@ describe("knowledge project and document APIs", () => {
   });
 });
 
+describe("news daily digest", () => {
+  async function login() {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: process.env.APP_USERNAME,
+        password: process.env.APP_PASSWORD,
+      }),
+    });
+    return { cookie: extractCookie(response.headers), body: await response.json() };
+  }
+
+  it("generates today's stream digest with the configured LLM", async () => {
+    const { cookie, body } = await login();
+    repo.updateSettings(body.user.id, {
+      llm_api_url: "https://llm.test/v1",
+      llm_model: "digest-model",
+      llm_api_key: "digest-key",
+    });
+    dbModule.db.prepare(`
+      INSERT INTO news_items (
+        id, user_id, source_id, source_name, original_title, original_url,
+        original_summary, original_content, title_zh, summary_zh, content_zh, type,
+        is_kept, is_read, is_starred, published_at, llm_processed, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "digest-news-1",
+      body.user.id,
+      "source-digest",
+      "WeChat",
+      "SmallRig launches new light",
+      "https://example.com/digest-news-1",
+      "SmallRig 新灯进入低价带",
+      "SmallRig 发布面向创作者的便携补光灯。",
+      "SmallRig 发布便携补光灯",
+      "低价带补光灯新品",
+      "面向 vlog 创作者，强调轻便和价格。",
+      "新品发布",
+      1,
+      0,
+      0,
+      "2026-05-19T08:00:00.000Z",
+      1,
+      "2026-05-19T08:00:00.000Z",
+      "2026-05-19T08:00:00.000Z",
+    );
+
+    const calls = [];
+    const originalFetch = global.fetch;
+    vi.stubGlobal("fetch", async (url, options = {}) => {
+      if (String(url).startsWith("https://llm.test")) {
+        const payload = JSON.parse(options.body);
+        calls.push(payload);
+        expect(payload.model).toBe("digest-model");
+        expect(payload.messages[1].content).toContain("SmallRig 发布便携补光灯");
+        return new Response(JSON.stringify({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                summary: "低价带补光灯新品值得关注。",
+                insights: [{
+                  kind: "launch",
+                  headline: "友商补光灯切入低价带",
+                  connection: "可对照现有灯光类产品线价格带。",
+                  source_count: 1,
+                  source_indexes: [1],
+                }],
+              }),
+            },
+          }],
+          usage: { total_tokens: 88 },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return originalFetch(url, options);
+    });
+
+    const response = await fetch(`${baseUrl}/api/news/daily-digest`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 10 }),
+    });
+    const digest = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(digest.mode).toBe("ai");
+    expect(digest.summary).toBe("低价带补光灯新品值得关注。");
+    expect(digest.insights[0]).toMatchObject({
+      kind: "launch",
+      headline: "友商补光灯切入低价带",
+      sourceCount: 1,
+      sourceIndexes: [1],
+    });
+  });
+
+  it("serves the same user's daily digest from cache unless force refresh is requested", async () => {
+    const { cookie, body } = await login();
+    repo.updateSettings(body.user.id, {
+      llm_api_url: "https://llm.test/v1",
+      llm_model: "digest-model",
+      llm_api_key: "digest-key",
+    });
+    dbModule.db.prepare(`
+      INSERT INTO news_items (
+        id, user_id, source_id, source_name, original_title, original_url,
+        original_summary, original_content, title_zh, summary_zh, content_zh, type,
+        is_kept, is_read, is_starred, published_at, llm_processed, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "digest-cache-news-1",
+      body.user.id,
+      "source-digest-cache",
+      "WeChat",
+      "Cacheable news",
+      "https://example.com/digest-cache-news-1",
+      "缓存测试摘要",
+      "缓存测试正文。",
+      "缓存测试标题",
+      "缓存测试摘要",
+      "缓存测试正文。",
+      "行业趋势",
+      1,
+      0,
+      0,
+      "2026-05-19T08:00:00.000Z",
+      1,
+      "2026-05-19T08:00:00.000Z",
+      "2026-05-19T08:00:00.000Z",
+    );
+
+    let calls = 0;
+    const originalFetch = global.fetch;
+    vi.stubGlobal("fetch", async (url, options = {}) => {
+      if (String(url).startsWith("https://llm.test")) {
+        calls += 1;
+        return new Response(JSON.stringify({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                summary: `缓存摘要 ${calls}`,
+                insights: [{
+                  kind: "trend",
+                  headline: `缓存判断 ${calls}`,
+                  connection: "用于证明同日缓存复用。",
+                  source_count: 1,
+                  source_indexes: [1],
+                }],
+              }),
+            },
+          }],
+          usage: { total_tokens: 42 },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return originalFetch(url, options);
+    });
+
+    const first = await fetch(`${baseUrl}/api/news/daily-digest`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 10 }),
+    });
+    const firstBody = await first.json();
+    const second = await fetch(`${baseUrl}/api/news/daily-digest`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 10 }),
+    });
+    const secondBody = await second.json();
+    const refreshed = await fetch(`${baseUrl}/api/news/daily-digest`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 10, force: true }),
+    });
+    const refreshedBody = await refreshed.json();
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(refreshed.status).toBe(200);
+    expect(calls).toBe(2);
+    expect(firstBody.summary).toBe("缓存摘要 1");
+    expect(secondBody.summary).toBe("缓存摘要 1");
+    expect(secondBody.cached).toBe(true);
+    expect(refreshedBody.summary).toBe("缓存摘要 2");
+    expect(refreshedBody.cached).toBe(false);
+  });
+});
+
 describe("admin users", () => {
   async function login(username = process.env.APP_USERNAME, password = process.env.APP_PASSWORD) {
     const response = await fetch(`${baseUrl}/api/auth/login`, {
@@ -1390,6 +1799,36 @@ describe("admin users", () => {
     expect(loginResult.response.status).toBe(200);
     expect(loginResult.body.user.name).toBe("collins");
     expect(loginResult.body.user.role_code).toBe("member");
+  });
+
+  it("can map local password login to a mirrored production user outside production", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousMappedUserId = process.env.LOOM_PASSWORD_USER_ID;
+    try {
+      process.env.NODE_ENV = "development";
+      process.env.LOOM_PASSWORD_USER_ID = "feishu-prod-user";
+      repo.ensureLocalUser({
+        id: "feishu-prod-user",
+        email: "prod@example.com",
+        name: "Prod Feishu User",
+        auth_provider: "feishu",
+        feishu_open_id: "ou_prod",
+      });
+
+      const loginResult = await login();
+
+      expect(loginResult.response.status).toBe(200);
+      expect(loginResult.body.user.id).toBe("feishu-prod-user");
+      expect(loginResult.body.user.auth_provider).toBe("feishu");
+      expect(loginResult.body.user.name).toBe("Prod Feishu User");
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      if (previousMappedUserId === undefined) {
+        delete process.env.LOOM_PASSWORD_USER_ID;
+      } else {
+        process.env.LOOM_PASSWORD_USER_ID = previousMappedUserId;
+      }
+    }
   });
 
   it("exposes the default workspace in bootstrap", async () => {

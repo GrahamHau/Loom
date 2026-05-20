@@ -235,7 +235,7 @@ export async function callRoutedLLM({
   }
 
   if (!isVisionLLMConfigured(userId)) {
-    return callLLM({ userId, purpose: `${purpose}:vision_fallback`, system, user, imageUrls: images, responseFormat, temperature, maxTokens });
+    return callLLM({ userId, purpose: `${purpose}:vision_skipped`, system, user, responseFormat, temperature, maxTokens });
   }
 
   const visionResult = await callVisionLLM({

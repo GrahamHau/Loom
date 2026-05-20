@@ -4,6 +4,7 @@ process.env.DATABASE_PATH = ":memory:";
 
 const dbModule = await import("./db.js");
 const aiService = await import("./ai-service.js");
+const repo = await import("./repository.js");
 
 beforeEach(() => {
   dbModule.migrate();
@@ -86,6 +87,35 @@ describe("ai-service routing", () => {
     const log = dbModule.db.prepare("SELECT kind, purpose, status FROM llm_call_logs").get();
     expect(log.kind).toBe("text");
     expect(log.status).toBe("ok");
+  });
+
+  it("skips image payloads when no vision model is configured", async () => {
+    const userId = dbModule.getLegacyUserId();
+    repo.updateSettings(userId, {
+      llm_vision_api_url: "",
+      llm_vision_model: "",
+      llm_vision_api_key: "",
+    });
+    const calls = [];
+    vi.stubGlobal("fetch", async (_url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push(body);
+      expect(body.model).toBe("text-model");
+      expect(body.messages[1].content).toBe("text user");
+      return mockResponse({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+    });
+
+    await aiService.callRoutedLLM({
+      userId,
+      system: "text system",
+      user: "text user",
+      imageUrls: ["https://img.test/a.jpg", "https://img.test/b.jpg"],
+    });
+
+    expect(calls).toHaveLength(1);
+    const logs = dbModule.db.prepare("SELECT kind, purpose, status FROM llm_call_logs").all();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ kind: "text", status: "ok" });
   });
 
   it("records failed LLM calls without storing prompt content", async () => {

@@ -9,10 +9,22 @@ const { matchFieldKey, matchFieldOption, matchFieldOptionInText, normalizeTagVal
 
 beforeEach(() => {
   dbModule.migrate();
+  for (const table of [
+    "feishu_project_idea_links",
+    "feishu_project_item_fields",
+    "feishu_project_fields",
+    "feishu_project_op_records",
+    "feishu_project_nodes",
+    "feishu_project_items",
+  ]) {
+    const exists = dbModule.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+    if (exists) dbModule.db.prepare(`DELETE FROM ${table}`).run();
+  }
   dbModule.db.prepare("DELETE FROM news_items").run();
   dbModule.db.prepare("DELETE FROM news_sources").run();
   dbModule.db.prepare("DELETE FROM users").run();
   dbModule.db.prepare("DELETE FROM app_data").run();
+  dbModule.db.prepare("DELETE FROM feishu_project_users").run();
   dbModule.ensureSeed({
     user: { name: "Graham", role: "管理员", initials: "GR" },
     products: [],
@@ -43,6 +55,115 @@ beforeEach(() => {
 });
 
 describe("repository", () => {
+  it("upserts Feishu project items idempotently and filters by work item type", () => {
+    const first = repo.upsertFeishuProjectItem({
+      workspace_id: "ws-a",
+      project_key: "idea-project",
+      work_item_id: "item-1",
+      work_item_type_key: "idea",
+      work_item_type_name: "产品想法登记",
+      name: "智能相机电池仓",
+      status_key: "registered",
+      raw: { nested: { ok: true } },
+    });
+    const second = repo.upsertFeishuProjectItem({
+      workspace_id: "ws-a",
+      project_key: "idea-project",
+      work_item_id: "item-1",
+      work_item_type_key: "idea",
+      work_item_type_name: "产品想法登记",
+      name: "智能相机电池仓 V2",
+      current_node_key: "review",
+      current_owners: [{ user_key: "u1" }],
+      raw_json: "{broken json",
+    });
+    repo.upsertFeishuProjectItem({
+      workspace_id: "ws-a",
+      project_key: "launch-project",
+      work_item_id: "item-2",
+      work_item_type_key: "project",
+      name: "正式立项",
+    });
+
+    expect(first.work_item_id).toBe("item-1");
+    expect(second.name).toBe("智能相机电池仓 V2");
+    expect(second.raw).toEqual({});
+    expect(second.current_owners).toEqual([{ user_key: "u1" }]);
+    expect(repo.listFeishuProjectItems("ws-a", { work_item_type_key: "idea" })).toHaveLength(1);
+    expect(repo.getFeishuProjectItem("ws-a", "idea-project", "item-1")?.current_node_key).toBe("review");
+  });
+
+  it("stores Feishu project field configs and item field values with safe JSON", () => {
+    repo.upsertFeishuProjectItem({
+      workspace_id: "ws-a",
+      project_key: "idea-project",
+      work_item_id: "item-1",
+      work_item_type_key: "idea",
+      name: "智能相机电池仓",
+    });
+    repo.upsertFeishuProjectFieldConfig({
+      workspace_id: "ws-a",
+      project_key: "idea-project",
+      work_item_type_key: "idea",
+      field_key: "region",
+      field_name: "区域",
+      field_type: "select",
+      options: [{ key: "us", label: "美国" }],
+    });
+    repo.upsertFeishuProjectItemField({
+      workspace_id: "ws-a",
+      project_key: "idea-project",
+      work_item_id: "item-1",
+      field_key: "region",
+      field_name: "区域",
+      field_type: "select",
+      value: { key: "us", label: "美国" },
+      value_text: "美国",
+    });
+    repo.upsertFeishuProjectItemField({
+      workspace_id: "ws-a",
+      project_key: "idea-project",
+      work_item_id: "item-1",
+      field_key: "broken",
+      value_json: "{not json",
+    });
+
+    expect(repo.listFeishuProjectFields("ws-a", "idea-project", "idea")[0].options).toEqual([{ key: "us", label: "美国" }]);
+    const item = repo.getFeishuProjectItem("ws-a", "idea-project", "item-1");
+    expect(item.fields.region.value).toEqual({ key: "us", label: "美国" });
+    expect(item.fields.broken.value).toEqual({});
+  });
+
+  it("keeps Feishu project idea links unique and isolated by workspace", () => {
+    const first = repo.upsertFeishuProjectIdeaLink({
+      workspace_id: "ws-a",
+      project_key: "idea-project",
+      work_item_id: "item-1",
+      research_id: "research-1",
+      link_status: "imported",
+    });
+    const second = repo.upsertFeishuProjectIdeaLink({
+      workspace_id: "ws-a",
+      project_key: "idea-project",
+      work_item_id: "item-1",
+      research_id: "research-2",
+      link_status: "linked",
+    });
+    repo.upsertFeishuProjectIdeaLink({
+      workspace_id: "ws-b",
+      project_key: "idea-project",
+      work_item_id: "item-1",
+      research_id: "research-other",
+      link_status: "imported",
+    });
+
+    expect(first.research_id).toBe("research-1");
+    expect(second.research_id).toBe("research-2");
+    expect(repo.listFeishuProjectIdeaLinks("ws-a")).toHaveLength(1);
+    expect(repo.listFeishuProjectIdeaLinks("ws-b")).toHaveLength(1);
+    expect(repo.getFeishuProjectIdeaLink("ws-a", "idea-project", "item-1")?.research_id).toBe("research-2");
+  });
+
   it("migrates older news tables before creating workspace indexes", () => {
     dbModule.db.exec(`
       DROP INDEX IF EXISTS idx_news_items_workspace_date;
@@ -125,6 +246,108 @@ describe("repository", () => {
 
     expect(first).toBe(second);
     expect(resolved).toBe(legacyUserId);
+  });
+
+  it("upserts Feishu project user mappings with cleaned identity fields", () => {
+    const mapping = repo.upsertFeishuProjectUserMapping({
+      workspace_id: " ws-company ",
+      loom_user_id: " user-a ",
+      project_key: " project-1 ",
+      meego_user_key: " meego-a ",
+      feishu_union_id: " union-a ",
+      feishu_open_id: " open-a ",
+      lark_user_id: " lark-a ",
+      name: " Graham ",
+      email: " GRAHAM@example.COM ",
+      avatar_url: " https://avatar.test/a.png ",
+      source: "mcp_current_user",
+      last_verified_at: "2026-05-20T01:00:00.000Z",
+      token: "must-not-be-saved",
+    });
+
+    expect(mapping).toMatchObject({
+      workspace_id: "ws-company",
+      loom_user_id: "user-a",
+      project_key: "project-1",
+      meego_user_key: "meego-a",
+      feishu_union_id: "union-a",
+      feishu_open_id: "open-a",
+      lark_user_id: "lark-a",
+      name: "Graham",
+      email: "graham@example.com",
+      avatar_url: "https://avatar.test/a.png",
+      source: "mcp_current_user",
+      last_verified_at: "2026-05-20T01:00:00.000Z",
+    });
+
+    const columns = dbModule.db.prepare("PRAGMA table_info(feishu_project_users)").all().map((column) => column.name);
+    expect(columns).not.toContain("token");
+  });
+
+  it("updates Feishu project user mappings by workspace user and project key", () => {
+    repo.upsertFeishuProjectUserMapping({
+      workspace_id: "ws-company",
+      loom_user_id: "user-a",
+      project_key: "project-1",
+      meego_user_key: "meego-a",
+      name: "Old Name",
+      source: "mcp_current_user",
+      last_verified_at: "2026-05-20T01:00:00.000Z",
+    });
+
+    const updated = repo.upsertFeishuProjectUserMapping({
+      workspace_id: "ws-company",
+      loom_user_id: "user-a",
+      project_key: "project-1",
+      meego_user_key: "meego-a2",
+      name: "New Name",
+      source: "unknown-source",
+      last_verified_at: "2026-05-20T02:00:00.000Z",
+    });
+
+    expect(updated?.meego_user_key).toBe("meego-a2");
+    expect(updated?.name).toBe("New Name");
+    expect(updated?.source).toBe("manual");
+    expect(repo.listFeishuProjectUserMappings("ws-company", "project-1")).toHaveLength(1);
+  });
+
+  it("isolates Feishu project user mappings by workspace and project", () => {
+    repo.upsertFeishuProjectUserMapping({
+      workspace_id: "ws-company",
+      loom_user_id: "user-a",
+      project_key: "project-1",
+      meego_user_key: "meego-a",
+    });
+    repo.upsertFeishuProjectUserMapping({
+      workspace_id: "ws-company",
+      loom_user_id: "user-b",
+      project_key: "project-2",
+      meego_user_key: "meego-b",
+    });
+    repo.upsertFeishuProjectUserMapping({
+      workspace_id: "ws-other",
+      loom_user_id: "user-c",
+      project_key: "project-1",
+      meego_user_key: "meego-c",
+    });
+
+    expect(repo.getFeishuProjectUserMapping("ws-company", "user-a", "project-1")?.meego_user_key).toBe("meego-a");
+    expect(repo.getFeishuProjectUserMapping("ws-company", "user-a", "project-2")).toBeNull();
+    expect(repo.listFeishuProjectUserMappings("ws-company").map((item) => item.loom_user_id).sort()).toEqual(["user-a", "user-b"]);
+    expect(repo.listFeishuProjectUserMappings("ws-company", "project-1").map((item) => item.loom_user_id)).toEqual(["user-a"]);
+  });
+
+  it("requires key fields for Feishu project user mappings", () => {
+    expect(() => repo.upsertFeishuProjectUserMapping({
+      workspace_id: "ws-company",
+      loom_user_id: "user-a",
+      project_key: "project-1",
+    })).toThrow("feishu_project_user_mapping_missing_required:meego_user_key");
+    expect(() => repo.upsertFeishuProjectUserMapping({
+      workspace_id: "ws-company",
+      project_key: "project-1",
+      meego_user_key: "meego-a",
+    })).toThrow("feishu_project_user_mapping_missing_required:loom_user_id");
   });
 
   it("keeps the first collected product cover when later auto updates include another image", () => {
@@ -769,6 +992,33 @@ describe("repository", () => {
     expect(state.officialRssSources).toEqual([]);
   });
 
+  it("returns dashboard contract from real workspace state", () => {
+    const user = repo.ensureLocalUser({ id: "dashboard-user", name: "Dash User", auth_provider: "password" });
+    const demand = repo.createDemand(user.id, {
+      title: "Tripod demand",
+      tags: ["脚架"],
+      scenarios: ["户外拍摄"],
+      status: "暂缓",
+      note: "卡在模具成本",
+    });
+    repo.createResearch(user.id, { title: "Pocket 3 follow-up", status: "doing", demands: [demand.id] });
+    repo.updateSettings(user.id, {
+      feishu_app_id: "cli_x",
+      feishu_app_secret: "secret",
+      feishu_base_token: "base_x",
+      feishu_demands_table_id: "tbl_demands",
+    });
+    const state = repo.bootstrap(user.id);
+
+    expect(state.dashboard.feishu_status.connected).toBe(true);
+    expect(state.dashboard.feishu_status.configured_tables).toContain("demands");
+    expect(state.dashboard.my_demands_count).toBe(1);
+    expect(state.dashboard.active_research.map((item) => item.title)).toContain("Pocket 3 follow-up");
+    expect(state.dashboard.hot_keywords.map((item) => item.word)).toEqual(expect.arrayContaining(["脚架", "户外拍摄"]));
+    expect(state.dashboard.recent_decisions[0]).toMatchObject({ id: demand.id, title: "Tripod demand" });
+    expect(state.dashboard.abnormal_items[0]).toMatchObject({ id: demand.id, title: "Tripod demand" });
+  });
+
   it("hides untranslated news from bootstrap", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.upsertNews(legacyUserId, [{
@@ -997,11 +1247,11 @@ describe("repository", () => {
 
     expect(JSON.parse(fieldOptionsText(state.settings.fields, "brand"))).toEqual(expect.arrayContaining(["Ulanzi"]));
     expect(JSON.parse(fieldOptionsText(state.settings.fields, "host"))).toEqual(expect.arrayContaining(["Osmo Pocket 3"]));
-    expect(JSON.parse(fieldOptionsText(state.settings.fields, "category"))).toEqual(expect.arrayContaining(["灯光"]));
+    expect(JSON.parse(fieldOptionsText(state.settings.fields, "category"))).toEqual(expect.arrayContaining(["L灯光类"]));
     expect(JSON.parse(fieldOptionsText(state.settings.fields, "brands"))).toEqual([]);
   });
 
-  it("does not persist official default fields into account settings", () => {
+  it("stores official field overrides as controlled tag groups instead of custom fields", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.updateSettings(legacyUserId, {
       fields: [
@@ -1020,8 +1270,39 @@ describe("repository", () => {
 
     const state = repo.bootstrap(legacyUserId);
     expect(state.settings.fields).toEqual([]);
-    expect(state.settings.tag_groups).toEqual([]);
+    expect(state.settings.tag_groups.find((group) => group.field_key === "host")).toMatchObject({
+      key: "camera_brands",
+      field_key: "host",
+      official: true,
+      multi: false,
+    });
     expect(JSON.parse(fieldOptionsText(state.settings.fields, "host"))).toEqual(expect.arrayContaining(["Osmo Pocket 3"]));
+  });
+
+  it("keeps official field multiplicity overrides in account tag groups", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    repo.updateSettings(legacyUserId, {
+      fields: [
+        {
+          key: "host",
+          legacyKey: "camera_brands",
+          name: "主机",
+          tone: "outline",
+          multi: false,
+          official: true,
+          entities: ["competitor"],
+          options: ["Osmo Pocket 3"],
+        },
+      ],
+    });
+
+    const state = repo.bootstrap(legacyUserId);
+    expect(state.settings.fields).toEqual([]);
+    expect(state.settings.tag_groups.find((group) => group.field_key === "host")).toMatchObject({
+      key: "camera_brands",
+      multi: false,
+      field_key: "host",
+    });
   });
 
   it("fuzzy matches field keys and tag options", () => {
@@ -1030,10 +1311,10 @@ describe("repository", () => {
     expect(matchFieldKey("适配设备型号", fields)?.field.key).toBe("host");
     expect(matchFieldOption("pocket3", fields.find((field) => field.key === "host"))?.value).toBe("Osmo Pocket 3");
     expect(matchFieldOptionInText("Insta360 GO 3S 复古套装发布", fields.find((field) => field.key === "host"))?.value).toBe("Insta360 GO 3S");
-    expect(matchFieldOption("vlog 自拍", fields.find((field) => field.key === "scenarios"))?.value).toBe("Vlog/自拍");
+    expect(matchFieldOption("vlog 自拍", fields.find((field) => field.key === "scenarios"))?.value).toBe("vlog 自拍");
     expect(normalizeTagValues({ 主机: ["DJI Pocket 3"], 场景: ["vlog 自拍"] }, fields)).toEqual({
       host: ["Osmo Pocket 3"],
-      scenarios: ["Vlog/自拍"],
+      scenarios: ["vlog 自拍"],
     });
   });
 
@@ -1043,16 +1324,15 @@ describe("repository", () => {
       name: "Pocket handle",
       tag_values: {
         主机: ["pocket3"],
-        品类: ["三脚架"],
-        custom_tags: ["小巧"],
+        品类: ["T脚架类"],
       },
     });
 
     expect(product.tag_values.host).toEqual(["Osmo Pocket 3"]);
     expect(product.host).toBe("Osmo Pocket 3");
-    expect(product.tag_values.category).toEqual(["三脚架"]);
-    expect(product.category).toBe("三脚架");
-    expect(product.tags).toEqual(["小巧"]);
+    expect(product.tag_values.category).toEqual(["T脚架类"]);
+    expect(product.category).toBe("T脚架类");
+    expect(product.tags).toEqual([]);
   });
 
   it("normalizes fuzzy demand tag values before saving", () => {
@@ -1063,10 +1343,10 @@ describe("repository", () => {
       painpoints: ["太贵"],
     });
 
-    expect(demand.tag_values.scenarios).toEqual(["Vlog/自拍"]);
-    expect(demand.scenarios).toEqual(["Vlog/自拍"]);
-    expect(demand.tag_values.painpoints).toEqual(["价格过高/性价比低"]);
-    expect(demand.painpoints).toEqual(["价格过高/性价比低"]);
+    expect(demand.tag_values.scenarios).toEqual(["vlog 自拍"]);
+    expect(demand.scenarios).toEqual(["vlog 自拍"]);
+    expect(demand.tag_values.painpoints).toEqual(["太贵"]);
+    expect(demand.painpoints).toEqual(["太贵"]);
   });
 
   it("dual-writes product tag_values and legacy fields", () => {
@@ -1076,15 +1356,14 @@ describe("repository", () => {
       tag_values: {
         brand: ["DJI"],
         host: ["DJI Osmo Pocket 3"],
-        category: ["稳定器"],
-        custom_tags: ["便携"],
+        category: ["T脚架类"],
       },
     });
 
     expect(product.brand).toBe("DJI");
     expect(product.host).toBe("Osmo Pocket 3");
-    expect(product.category).toBe("稳定器");
-    expect(product.tags).toEqual(["便携"]);
+    expect(product.category).toBe("T脚架类");
+    expect(product.tags).toEqual([]);
 
     const updated = repo.updateProduct(legacyUserId, product.id, { brand: "Ulanzi / SmallRig" });
     expect(updated.tag_values.brand).toEqual(["Ulanzi", "SmallRig"]);
@@ -1097,17 +1376,17 @@ describe("repository", () => {
       tag_values: {
         品牌名: ["Ulanzi"],
         适配主机: ["DJI Pocket 3"],
-        产品品类: ["三脚架"],
+        产品品类: ["T脚架类"],
       },
     });
 
     expect(product.brand).toBe("Ulanzi");
     expect(product.host).toBe("Osmo Pocket 3");
-    expect(product.category).toBe("三脚架");
+    expect(product.category).toBe("T脚架类");
     expect(product.tag_values).toMatchObject({
       brand: ["Ulanzi"],
       host: ["Osmo Pocket 3"],
-      category: ["三脚架"],
+      category: ["T脚架类"],
     });
   });
 

@@ -47,10 +47,10 @@ describe("parsers account fields", () => {
     mockLlmJson({
       name: "Osmo light",
       brand: "DJI",
-      category: "灯光",
+      category: "L灯光类",
       tag_values: {
         brand: ["DJI"],
-        category: ["灯光"],
+        category: ["L灯光类"],
       },
       selling_points: ["轻便"],
       negative_keywords: [],
@@ -63,10 +63,10 @@ describe("parsers account fields", () => {
     });
 
     expect(result.brand).toBe("DJI");
-    expect(result.category).toBe("灯光");
+    expect(result.category).toBe("L灯光类");
     expect(result.tag_values).toEqual({
       brand: ["DJI"],
-      category: ["灯光"],
+      category: ["L灯光类"],
     });
     expect(result.field_suggestions).toEqual([]);
   });
@@ -114,12 +114,12 @@ describe("parsers account fields", () => {
       key: "category",
       name: "品类",
       entities: ["competitor"],
-      options: ["灯光"],
+      options: ["L灯光类"],
     });
     mockLlmJson({
       name: "DJI light",
       brand: "DJI",
-      category: "灯光",
+      category: "L灯光类",
       selling_points: ["便携"],
       negative_keywords: [],
       ai_summary: "便携补光灯",
@@ -132,7 +132,7 @@ describe("parsers account fields", () => {
 
     expect(result.tag_values).toEqual({
       brand: ["DJI"],
-      category: ["灯光"],
+      category: ["L灯光类"],
     });
     expect(result.field_suggestions).toEqual([]);
   });
@@ -155,7 +155,6 @@ describe("parsers account fields", () => {
       tags_scenario: ["露营"],
       tags_painpoint: [],
       tags_innovation: "结构创新",
-      tags_custom: [],
     });
 
     const result = await parsers.parseDemandRaw(userId, {
@@ -184,7 +183,6 @@ describe("parsers account fields", () => {
       tags_scenario: ["露营"],
       tags_painpoint: [],
       tags_innovation: "结构创新",
-      tags_custom: [],
     });
 
     const result = await parsers.parseDemandRaw(userId, {
@@ -206,7 +204,6 @@ describe("parsers account fields", () => {
       tags_scenario: ["vlog 自拍"],
       tags_painpoint: ["太重"],
       tags_innovation: "形态创新",
-      tags_custom: ["便携"],
     });
 
     const result = await parsers.parseDemandRaw(dbModule.getLegacyUserId(), {
@@ -215,11 +212,70 @@ describe("parsers account fields", () => {
     });
 
     expect(result.tag_values).toEqual({
-      scenarios: ["Vlog/自拍"],
-      painpoints: ["携带不便/太重"],
+      scenarios: ["vlog 自拍"],
+      painpoints: ["太重"],
       innovation: ["形态创新"],
-      custom_tags: ["便携"],
     });
     expect(result.field_suggestions).toEqual([]);
+  });
+
+  it("routes Xiaohongshu demand images through vision and comments through text finalize", async () => {
+    const userId = dbModule.getLegacyUserId();
+    repo.updateSettings(userId, {
+      llm_vision_api_url: "https://vision.test/v1",
+      llm_vision_model: "vision-test",
+      llm_vision_api_key: "vision-secret",
+    });
+    const calls = [];
+    vi.stubGlobal("fetch", async (_url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push(body);
+      if (calls.length === 1) {
+        expect(body.model).toBe("vision-test");
+        expect(body.messages[1].content.filter((part) => part.type === "image_url")).toHaveLength(3);
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: JSON.stringify({ image_summary: "图里是 Pocket 3 的补光配件" }) } }] }),
+        };
+      }
+      expect(body.model).toBe("gpt-test");
+      expect(String(body.messages[1].content)).toContain("视觉模型提取结果");
+      expect(String(body.messages[1].content)).toContain("评论A：希望适配 Pocket3");
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify({
+          title: "Pocket 3 补光配件需求",
+          summary: "用户希望 Pocket 3 低光拍摄有更便携补光方案",
+          host: "DJI Pocket 3",
+          tags_scenario: ["vlog 自拍"],
+          tags_painpoint: ["太重"],
+          tags_innovation: "形态创新",
+        }) } }] }),
+      };
+    });
+
+    const result = await parsers.parseDemandRaw(userId, {
+      platform: "xiaohongshu",
+      data: {
+        title: "夜拍补光",
+        content: "Pocket3 夜间拍摄太暗",
+        thumbnail_url: "https://img.test/cover.jpg",
+        image_urls: ["https://img.test/cover.jpg", "https://img.test/two.jpg", "https://img.test/three.jpg"],
+        visible_comments: [
+          { user_name: "评论A", content: "希望适配 Pocket3" },
+          { user_name: "评论B", content: "别太重" },
+        ],
+      },
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(result.host).toBe("Osmo Pocket 3");
+    expect(result.host_match).toMatchObject({
+      raw_name: "DJI Pocket 3",
+      canonical_name: "Osmo Pocket 3",
+      matched_by: "fuzzy",
+    });
+    expect(result.tag_values.host).toEqual(["Osmo Pocket 3"]);
+    expect(result.ai_summary).toBe("用户希望 Pocket 3 低光拍摄有更便携补光方案");
   });
 });

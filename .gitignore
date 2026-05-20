@@ -31,6 +31,11 @@ README_LOCAL.md
 
 deploy/
 docs/*
+!docs/README.md
+!docs/architecture-at-a-glance.md
+!docs/competition-roadmap.md
+!docs/decision-chain.md
+!docs/ui-architecture.md
 !docs/superpowers/
 docs/superpowers/*
 !docs/superpowers/specs/

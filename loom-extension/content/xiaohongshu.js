@@ -864,6 +864,32 @@
       if (bgThumb.url && !isBadImage(bgThumb.url)) return { url: bgThumb.url, source: "note-background", debug };
       return { url: "", source: "none", debug };
     };
+    const pickImageUrls = () => {
+      const urls = [];
+      const push = (url) => {
+        const normalized = normalizeImageUrl(url);
+        if (normalized && !isBadImage(normalized) && !urls.includes(normalized)) urls.push(normalized);
+      };
+      const roots = [detailRoot, mediaFrame, noteRoot, currentNoteCard].filter(Boolean);
+      for (const root of roots) {
+        const candidates = Array.from(root.querySelectorAll("img, video[poster], [style*='background-image']"));
+        for (const node of candidates) {
+          if (!(node instanceof Element) || isIrrelevantNode(node)) continue;
+          if (node.tagName === "IMG") {
+            push(node.currentSrc || node.src || node.getAttribute("src") || node.getAttribute("data-src") || node.getAttribute("data-original") || urlFromSrcset(node.getAttribute("srcset")));
+          } else if (node.tagName === "VIDEO") {
+            push(node.getAttribute("poster") || node.getAttribute("data-poster") || node.getAttribute("x5-video-poster"));
+          } else {
+            push(cssImageUrl(node.style?.backgroundImage) || cssImageUrl(window.getComputedStyle(node).backgroundImage));
+          }
+          if (urls.length >= 12) break;
+        }
+        if (urls.length >= 12) break;
+      }
+      const active = pickThumbnail();
+      push(active.url);
+      return urls.slice(0, 12);
+    };
     const parseCount = (value) => {
       const cleaned = String(value || "").trim();
       if (cleaned.includes("万")) return Math.round((Number.parseFloat(cleaned) || 0) * 10000);
@@ -1299,6 +1325,7 @@
     const content = extractDetailContent();
     const thumbnailResult = pickThumbnail();
     const thumbnail = thumbnailResult.url || "";
+    const imageUrls = pickImageUrls();
     const debug = {
       note_id: currentNoteId,
       canonical_path: currentPath,
@@ -1326,6 +1353,7 @@
       comments: pickMetricCount("comments", ["[class*='chat-wrapper'] [class*='count']", ".comment-count", ".chat-wrapper .count"]),
       visible_comments: pickVisibleComments(),
       thumbnail_url: thumbnail,
+      image_urls: imageUrls.length ? imageUrls : [thumbnail].filter(Boolean),
       author: scopedText(["[class*='username']", ".author-name", "a[href*='/user/profile/']"], detailRoot) || text("[class*='username']") || text(".author-name"),
       debug,
     };

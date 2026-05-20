@@ -21,47 +21,35 @@ const TweakToggle = globalThis.TweakToggle;
 const { useEffect, useMemo, useRef, useState } = React;
 
 const NAV = [
-  { group: "采集", items: [
-    { key: "news", label: "资讯流", icon: "newspaper" },
-    { key: "products", label: "竞品库", icon: "boxes" },
-    { key: "demands", label: "需求雷达", icon: "lightbulb" },
-  ] },
-  { group: "调研", items: [
-    { key: "research", label: "调研工坊", icon: "compass" },
-  ] },
-  { group: "文档", items: [
-    { key: "mrd", label: "市场分析", icon: "bar-chart" },
-    { key: "prd", label: "产品定义", icon: "clipboard" },
-    { key: "feishu_space", label: "飞书项目", icon: "folder-open" },
-  ] },
-  { group: "知识", items: [
-    { key: "library", label: "资料库", icon: "file-text" },
-    { key: "standards", label: "标准库", icon: "shield" },
-    { key: "knowledge", label: "知识工作台", icon: "network" },
-    { key: "ask", label: "智能问答", icon: "bot" },
-  ] },
+  { key: "home", label: "工作台", icon: "home" },
+  { key: "news", label: "资讯流", icon: "newspaper" },
+  { key: "demands", label: "需求库", icon: "bar-chart" },
+  { key: "products", label: "竞品库", icon: "boxes" },
+  { key: "research", label: "调研工坊", icon: "compass" },
+  { key: "library", label: "知识库", icon: "file-text" },
 ];
 
 const TITLES = {
-  news: { label: "资讯流", subLabel: "官方源与行业动态" },
-  products: { label: "竞品库", subLabel: "产品与平台采集" },
-  demands: { label: "需求雷达", subLabel: "用户痛点与机会" },
-  library: { label: "资料库", subLabel: "知识中台" },
-  "library-import": { label: "资料库", subLabel: "导入资料" },
-  knowledge: { label: "知识工作台", subLabel: "导入、索引、图谱、问答与文档生成" },
-  standards: { label: "标准库", subLabel: "PRD / MRD / 字段标准" },
-  ask: { label: "智能问答", subLabel: "基于资料库的 AI 问答" },
+  home: { label: "工作台", subLabel: "团队研究枢纽" },
+  news: { label: "资讯流", subLabel: "行业资讯 · RSS 订阅" },
+  products: { label: "竞品库", subLabel: "快照 · 评论 · 标注" },
+  demands: { label: "需求库", subLabel: "飞书镜像 + 用户声音" },
+  library: { label: "知识库", subLabel: "PRD / MRD · 向量检索" },
+  "library-import": { label: "知识库", subLabel: "导入资料" },
   mrd: { label: "市场分析", subLabel: "MRD · 市场需求文档" },
   prd: { label: "产品定义", subLabel: "PRD · 产品需求文档" },
-  research: { label: "调研工坊", subLabel: "结构化分析报告" },
-  settings: { label: "设置", subLabel: "系统设置" },
-  feishu_space: { label: "飞书项目", subLabel: "项目自动同步" },
+  knowledge: { label: "知识库", subLabel: "历史入口" },
+  ask: { label: "知识库", subLabel: "历史入口" },
+  standards: { label: "知识库", subLabel: "历史入口" },
+  research: { label: "调研工坊", subLabel: "发起 · 沉淀 · 导出" },
+  settings: { label: "设置", subLabel: "集成 · 数据源 · 团队" },
+  feishu_space: { label: "工作台", subLabel: "历史入口" },
 };
 
 const SEARCH_ICON = {
   news: "newspaper",
   products: "boxes",
-  demands: "lightbulb",
+  demands: "bar-chart",
   research: "compass",
 };
 
@@ -136,7 +124,7 @@ function GlobalSearchModal({ data, onClose, onPick }) {
             style={{ width: "100%" }}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索需求雷达、竞品库、资讯流、调研工坊..."
+            placeholder="搜索需求库、竞品库、资讯流、调研工坊..."
           />
         </div>
         <div className="modal-body" style={{ paddingTop: 10, maxHeight: 420 }}>
@@ -184,7 +172,7 @@ function DemoModeIntroModal({ onClose, onExit }) {
         </div>
         <div className="modal-body demo-mode-modal-body">
           <p>
-            这里展示的是一套可直接体验的示例工作区，用来让你快速感受资讯流、竞品库、需求雷达和调研工坊的完整效果。
+            这里展示的是一套可直接体验的示例工作区，用来让你快速感受资讯流、竞品库、需求库和调研工坊的完整效果。
           </p>
           <p>
             如果你想回到自己的真实工作区，可以使用右上角的 <strong>退出演示模式</strong> 按钮。
@@ -314,7 +302,7 @@ const MRD_SECTIONS = [
   { key: "pain", label: "场景与痛点", desc: "把用户任务拆成具体场景，沉淀高频痛点、未满足需求和现有替代方案。", tags: ["任务链路", "痛点", "替代方案"] },
   { key: "competitors", label: "竞品地图", desc: "对比主要竞品的定位、价格、卖点和口碑短板，形成可复用竞品地图。", tags: ["竞品库", "价格带", "差异点"] },
   { key: "price", label: "价格带分析", desc: "梳理主流价格段、成本约束、溢价理由和用户可接受区间。", tags: ["价格带", "成本", "溢价"] },
-  { key: "demand", label: "需求热力", desc: "汇总资讯流、需求雷达和社媒信号，判断哪些需求在近期升温。", tags: ["需求雷达", "热力", "信号"] },
+  { key: "demand", label: "需求热力", desc: "汇总资讯流、需求库和社媒信号，判断哪些需求在近期升温。", tags: ["需求库", "热力", "信号"] },
   { key: "opportunity", label: "机会判断", desc: "结合用户痛点与竞品空位，提炼最值得投入的机会方向。", tags: ["机会点", "优先级", "判断"] },
   { key: "risk", label: "风险判断", desc: "列出市场、供应链、认证、成本和需求不确定性，避免只看乐观面。", tags: ["风险", "待验证", "边界"] },
   { key: "questions", label: "待确认问题", desc: "把缺证据、缺数据或需要团队判断的问题集中放在这里。", tags: ["待确认", "下一步", "负责人"], warn: true },
@@ -802,7 +790,7 @@ function FeishuProjectsScreen({ sampleWorkspace = false }) {
             <div>
               <h1 className="h1" style={{ marginBottom: 2 }}>飞书项目</h1>
               <div className="muted text-sm">
-                自动同步飞书项目的开发任务、需求池与文档；与 PRD / MRD / 需求雷达双向关联。
+                自动同步飞书项目的开发任务、需求池与文档；与 PRD / MRD / 需求库双向关联。
                 <span style={{ marginLeft: 6 }}>
                   接入方式见 <a href="?screen=settings" style={{ color: 'var(--accent)' }}>设置 → 飞书项目 MCP</a>。
                 </span>
@@ -841,7 +829,7 @@ function FeishuProjectsScreen({ sampleWorkspace = false }) {
             <h2>还没有飞书项目</h2>
             <p className="muted">
               在「设置 → 飞书项目 MCP」配置 token 后，会自动拉取项目列表、任务、需求池。
-              <br />接入前可继续在竞品库 / 需求雷达 / PRD 里手动录入。
+              <br />接入前可继续在竞品库 / 需求库 / PRD 里手动录入。
             </p>
             <Btn variant="primary" icon="settings" onClick={() => { window.location.search = "?screen=settings"; }}>
               去配置 MCP
@@ -891,16 +879,234 @@ function FeishuProjectsScreen({ sampleWorkspace = false }) {
   );
 }
 
+function formatAgo(value) {
+  if (!value) return "";
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return "";
+  const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
+  if (seconds < 60) return `${seconds} 秒前`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} 小时前`;
+  return `${Math.round(seconds / 86400)} 天前`;
+}
+
+function HomeScreen({ data, onNavigate }) {
+  const dashboard = data.dashboard || {};
+  const research = data.research || [];
+  const demands = data.demands || [];
+  const products = data.products || [];
+  const news = data.news || [];
+  const activeResearch = dashboard.active_research || research.filter((item) => item.status !== "done" && item.status !== "archived").slice(0, 5);
+  const myDemandsCount = dashboard.my_demands_count ?? demands.length;
+  const decisionEvents = dashboard.recent_decisions || [];
+  const abnormalItems = dashboard.abnormal_items || [];
+  const hotKeywords = dashboard.hot_keywords || [];
+  const recentNews = news.filter((item) => item.titleZh || item.original_title).slice(0, 5);
+  const feishuStatus = dashboard.feishu_status || {};
+  const feishuConnected = Boolean(feishuStatus.connected);
+  const currentUser = data.user?.name || "";
+  const hour = new Date().getHours();
+  const greet = hour < 6 ? "夜深了" : hour < 12 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好";
+  const actionItems = [];
+  if (dashboard.action_summary) actionItems.push(dashboard.action_summary);
+  if (activeResearch.length) actionItems.push(`${activeResearch.length} 个调研进行中`);
+
+  return (
+    <div className="viewport">
+      <div className="page page-home">
+        <div className="home-hello">
+          <div className="home-hello-title">{greet}，{currentUser || "visitor"}</div>
+          <div className="home-hello-sub">
+            {actionItems.length ? actionItems.join(" · ") : feishuConnected ? "没有待处理事项，看看本周行业资讯。" : "先把飞书多维表格接入，工作台才能告诉你今天该做什么。"}
+          </div>
+        </div>
+
+        <div className="home-kpi-strip">
+          <button className="home-kpi-card" onClick={() => onNavigate("research")}>
+            <div className="home-kpi-num">{activeResearch.length}</div>
+            <div className="home-kpi-label">我的进行中调研</div>
+          </button>
+          <button className="home-kpi-card" onClick={() => onNavigate("demands")}>
+            <div className="home-kpi-num">{myDemandsCount}</div>
+            <div className="home-kpi-label">{dashboard.demands_scope_label || "需求库 · 共追踪"}</div>
+          </button>
+          <button className="home-kpi-card" onClick={() => onNavigate("products")}>
+            <div className="home-kpi-num">{products.length}</div>
+            <div className="home-kpi-label">竞品快照</div>
+          </button>
+          <button className={`home-kpi-card ${feishuConnected ? "" : "home-kpi-card-pending"}`} onClick={() => feishuConnected ? onNavigate("demands") : onNavigate("settings")}>
+            <div className="home-kpi-num">{feishuConnected ? decisionEvents.length : ""}</div>
+            <div className="home-kpi-label">{feishuConnected ? "近 7 天决策" : "近 7 天决策 · 待接入飞书"}</div>
+          </button>
+        </div>
+
+        {!feishuConnected && (
+          <div className="home-connect-banner">
+            <div className="home-connect-banner-icon">
+              <Icon name="feishu" size={16} />
+            </div>
+            <div className="home-connect-banner-body">
+              <div className="home-connect-banner-title">接入飞书多维表格，工作台才能告诉你今天该做什么</div>
+              <div className="home-connect-banner-desc">
+                Loom 从你每周五更新的单元格里自动抽取决策。无需新增动作，按现有节奏写更新即可。
+              </div>
+            </div>
+            <button className="home-connect-banner-cta" onClick={() => onNavigate("settings")}>去配置</button>
+          </div>
+        )}
+
+        <div className="home-grid">
+          <div className="home-main-stack">
+            <section className="home-section home-section-main">
+              <div className="home-section-head">
+                <h2 className="home-section-title">我的近期动态</h2>
+                {feishuConnected && feishuStatus.last_sync_at ? (
+                  <span className="home-sync-badge home-sync-ok">
+                    <Icon name="check" size={10} />
+                    飞书 · {formatAgo(feishuStatus.last_sync_at)}同步
+                  </span>
+                ) : (
+                  <span className="home-sync-badge home-sync-pending">待接入飞书</span>
+                )}
+              </div>
+              {decisionEvents.length ? (
+                <div className="home-decision-list">
+                  {decisionEvents.slice(0, 6).map((item) => (
+                    <button key={item.id} className="home-decision-row" onClick={() => onNavigate("demands")}>
+                      <span className={`home-pending-status home-status-${item.status_key || "review"}`}>{item.status || "更新"}</span>
+                      <span className="home-pending-name">{item.title || "未命名需求"}</span>
+                      <span className="home-pending-meta">{item.owner || "PM"} · {formatAgo(item.updated_at) || "最近"}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : feishuConnected ? (
+                <div className="home-empty-state">
+                  <Icon name="check" size={18} style={{ color: "var(--success)" }} />
+                  <div>近 7 天暂无你的决策或状态变更</div>
+                </div>
+              ) : (
+                <div className="home-pending-card">
+                  <div className="home-pending-explain">接入飞书后，每周五你写完更新单元格，这里会自动出现你的决策摘要：</div>
+                  <ul className="home-pending-bullets">
+                    <li><span className="home-pending-bullet-dot" />你做出的决策（暂缓 / 立项 / 放弃）</li>
+                    <li><span className="home-pending-bullet-dot" />决策理由（从单元格自然语言抽取）</li>
+                    <li><span className="home-pending-bullet-dot" />重启暗示（例如“等模具降到 18 万再说”）</li>
+                  </ul>
+                  <div className="home-pending-note-2">
+                    团队全部动态见 <button className="home-link-btn home-link-inline" onClick={() => onNavigate("demands")}>需求库 · 决策时间线</button>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {hotKeywords.length > 0 && (
+              <section className="home-section">
+                <div className="home-section-head">
+                  <h2 className="home-section-title">本周用户声音热词</h2>
+                  <span className="home-section-meta">来自 {demands.length} 条用户反馈聚合</span>
+                </div>
+                <div className="home-keywords">
+                  {hotKeywords.map((item) => (
+                    <button key={item.word} type="button" className="home-keyword-pill" onClick={() => onNavigate("demands")}>
+                      <span className="home-keyword-word">{item.word}</span>
+                      <span className="home-keyword-count">{item.count}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="home-keywords-foot">
+                  <button className="home-link-btn home-link-inline" onClick={() => onNavigate("demands")}>去需求库逐条查看</button>
+                </div>
+              </section>
+            )}
+          </div>
+
+          <div className="home-side-stack">
+            <section className="home-section home-section-side">
+              <div className="home-section-head">
+                <h2 className="home-section-title">我的进行中调研</h2>
+                <button className="home-section-link" onClick={() => onNavigate("research")}>全部 <Icon name="chevron-right" size={11} /></button>
+              </div>
+              {activeResearch.length ? (
+                <div className="home-research-list">
+                  {activeResearch.slice(0, 5).map((item) => (
+                    <button key={item.id} className="home-research-row" onClick={() => onNavigate("research")}>
+                      <Icon name="compass" size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                      <span className="home-research-title">{item.title || "未命名调研"}</span>
+                      <Tag tone="outline">{item.status || "进行中"}</Tag>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="home-empty-state small">
+                  <Icon name="compass" size={16} style={{ color: "var(--text-4)" }} />
+                  <div style={{ color: "var(--text-3)", fontSize: 13 }}>还没有进行中的调研</div>
+                  <button className="home-link-btn" onClick={() => onNavigate("research")}>新建调研任务</button>
+                </div>
+              )}
+            </section>
+
+            <section className="home-section home-section-side">
+              <div className="home-section-head">
+                <h2 className="home-section-title">本周行业资讯</h2>
+                <button className="home-section-link" onClick={() => onNavigate("news")}>全部 {news.length ? `(${news.length})` : ""} <Icon name="chevron-right" size={11} /></button>
+              </div>
+              {recentNews.length ? (
+                <div className="home-news-list">
+                  {recentNews.map((item) => (
+                    <button key={item.id} className="home-news-row" onClick={() => onNavigate("news")}>
+                      <Icon name="newspaper" size={12} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 3 }} />
+                      <div className="home-news-body">
+                        <div className="home-news-title">{item.titleZh || item.original_title}</div>
+                        <div className="home-news-meta">
+                          {item.source ? <span>{item.source}</span> : null}
+                          {item.published_at ? <span>{formatAgo(item.published_at)}</span> : null}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="home-empty-state small">
+                  <Icon name="newspaper" size={16} style={{ color: "var(--text-4)" }} />
+                  <div style={{ color: "var(--text-3)", fontSize: 13 }}>暂无资讯</div>
+                  <button className="home-link-btn" onClick={() => onNavigate("settings")}>配置 RSS 源</button>
+                </div>
+              )}
+            </section>
+
+            {feishuConnected && (
+              <section className="home-section home-section-side">
+                <div className="home-section-head">
+                  <h2 className="home-section-title">异常监测</h2>
+                  <span className="home-section-meta">卡 3 周 / 暂停 4 周以上</span>
+                </div>
+                {abnormalItems.length ? (
+                  <div className="home-research-list">
+                    {abnormalItems.slice(0, 5).map((item) => (
+                      <button key={item.id} className="home-research-row" onClick={() => onNavigate("demands")}>
+                        <Icon name="calendar" size={13} style={{ color: "var(--warn)", flexShrink: 0 }} />
+                        <span className="home-research-title">{item.title}</span>
+                        <Tag tone="outline">{item.reason}</Tag>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="home-empty-state small">
+                    <Icon name="check" size={16} style={{ color: "var(--success)" }} />
+                    <div style={{ color: "var(--text-3)", fontSize: 13 }}>暂无需关注的卡顿项</div>
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Sidebar({ active, onNav, data, onLogout, onFeedback, isAdmin, collapsed, onToggleCollapsed }) {
   const [accountOpen, setAccountOpen] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState(() => {
-    try {
-      if (typeof localStorage === "undefined") return {};
-      return JSON.parse(localStorage.getItem("loom.sidebarGroupsCollapsed") || "{}");
-    } catch (err) {
-      return {};
-    }
-  });
   const accountRef = useRef(null);
   const counts = {
     news: data.newsCounts?.all || data.news.length,
@@ -927,15 +1133,6 @@ function Sidebar({ active, onNav, data, onLogout, onFeedback, isAdmin, collapsed
     };
   }, [accountOpen]);
 
-  useEffect(() => {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem("loom.sidebarGroupsCollapsed", JSON.stringify(collapsedGroups));
-  }, [collapsedGroups]);
-
-  const toggleGroup = (groupName) => {
-    setCollapsedGroups((current) => ({ ...current, [groupName]: !current[groupName] }));
-  };
-
   return (
     <aside className="sidebar" data-screen-label="sidebar">
       <button
@@ -954,35 +1151,17 @@ function Sidebar({ active, onNav, data, onLogout, onFeedback, isAdmin, collapsed
         </div>
       </div>
 
-      {NAV.map((group) => {
-        const groupActive = group.items.some((item) => item.key === activeNavKey);
-        const groupCollapsed = Boolean(collapsedGroups[group.group]) && !groupActive;
-        return (
-        <div key={group.group} className={`sb-group ${groupCollapsed ? "is-collapsed" : ""} ${groupActive ? "has-active" : ""}`}>
-          <button
-            type="button"
-            className="sb-group-label"
-            onClick={() => toggleGroup(group.group)}
-            aria-expanded={!groupCollapsed}
-          >
-            <span>{group.group}</span>
-            <Icon name={groupCollapsed ? "chevron-right" : "chevron-down"} size={11} />
-          </button>
-          <div className="sb-group-items">
-          {(collapsed || !groupCollapsed) && group.items.map((item) => (
-            <div key={item.key} className={`sb-item ${activeNavKey === item.key ? "active" : ""}`} onClick={() => onNav(item.key)}>
-              <Icon name={item.icon} size={15} className="ico" />
-              <span className="sb-item-label">
-                <span className="sb-item-main">{item.label}</span>
-                {item.subLabel && <span className="sb-item-sub">{item.subLabel}</span>}
-              </span>
-              {counts[item.key] != null && <span className="badge">{counts[item.key]}</span>}
-            </div>
-          ))}
+      <div className="sb-nav">
+        {NAV.map((item) => (
+          <div key={item.key} className={`sb-item ${activeNavKey === item.key ? "active" : ""}`} onClick={() => onNav(item.key)}>
+            <Icon name={item.icon} size={15} className="ico" />
+            <span className="sb-item-label">
+              <span className="sb-item-main">{item.label}</span>
+            </span>
+            {counts[item.key] != null && counts[item.key] > 0 && <span className="badge">{counts[item.key]}</span>}
           </div>
-        </div>
-        );
-      })}
+        ))}
+      </div>
 
       <div className="sb-spacer" />
       <button type="button" className="sb-item sb-item-button sb-feedback" onClick={onFeedback}>
@@ -1140,12 +1319,16 @@ function App() {
   const initialScreen = (() => {
     const params = new URLSearchParams(window.location.search);
     const legacyScreens = {
-      "knowledge-import": "knowledge",
-      "knowledge-query": "ask",
-      "knowledge-draft": "mrd",
+      "knowledge-import": "library",
+      "knowledge-query": "library",
+      "knowledge-draft": "library",
+      "knowledge": "library",
+      "ask": "library",
+      "standards": "library",
+      "feishu_space": "home",
     };
     const screen = legacyScreens[params.get("screen")] || params.get("screen");
-    return ["news", "products", "demands", "research", "library", "library-import", "knowledge", "ask", "mrd", "prd", "standards", "feishu_space", "settings"].includes(screen) ? screen : "news";
+    return ["home", "news", "products", "demands", "research", "library", "library-import", "mrd", "prd", "settings"].includes(screen) ? screen : "home";
   })();
   const [active, setActive] = useState(initialScreen);
   const [me, setMe] = useState(null);
@@ -1167,6 +1350,18 @@ function App() {
   const prevUserIdRef = useRef("");
   const meRef = useRef(null);
   const dataRef = useRef(null);
+
+  const navigateScreen = (screen, options = {}) => {
+    if (!screen) return;
+    setActive(screen);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("screen", screen);
+    if (options.docId) params.set("docId", options.docId);
+    else if (options.clearDocId) params.delete("docId");
+    const nextUrl = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+    window.history.replaceState({}, "", nextUrl);
+  };
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", t.theme);
@@ -1291,7 +1486,7 @@ function App() {
   const finishSampleWorkspace = async () => {
     const next = await api("/api/onboarding/finish-sample", { method: "POST" });
     setData(normalizeData(next));
-    setActive("news");
+    navigateScreen("news", { clearDocId: true });
   };
 
   const login = async ({ username, password }) => {
@@ -1366,68 +1561,24 @@ function App() {
     );
   }
 
-  const screenProps = { data, api, refreshData, navTarget, onNavigate: setActive, onOpenDocumentModal: setDocumentModalMode };
+  const screenProps = { data, api, refreshData, navTarget, onNavigate: navigateScreen, onOpenDocumentModal: setDocumentModalMode };
   const isAdmin = Boolean(me?.is_admin || data?.user?.is_admin || data?.user?.is_owner);
   const sampleWorkspace = Boolean(data.onboarding?.sampleWorkspace);
   const canExitSample = Boolean(data.onboarding?.canExitSample);
   const liveNewsReady = Boolean(data.onboarding?.liveNewsReady);
   const latestNewsAt = data.onboarding?.latestNewsAt || data.onboarding?.latestFetchedAt || "";
     const screen = {
+      home: <HomeScreen data={data} onNavigate={(screen) => navigateScreen(screen, { clearDocId: true })} />,
       news: <NewsScreen {...screenProps} />,
       products: <ProductsScreen {...screenProps} detailCollapsed={detailCollapsed} setDetailCollapsed={setDetailCollapsed} />,
       demands: <DemandsScreen {...screenProps} />,
       research: <ResearchScreen {...screenProps} />,
-      library: <LibraryScreen {...screenProps} reloadKey={libraryReloadKey} onNavigate={setActive} onOpenDocumentModal={setDocumentModalMode} />,
+      library: <LibraryScreen {...screenProps} reloadKey={libraryReloadKey} onNavigate={navigateScreen} onOpenDocumentModal={setDocumentModalMode} />,
       "library-import": <LibraryImportScreen onOpenDocumentModal={setDocumentModalMode} />,
-      knowledge: <KnowledgeScreen {...screenProps} onNavigate={setActive} initialAction="ask" initialDocType="prd" />,
-      ask: (
-      <div className="viewport">
-        <div className="page page-fluid page-narrow">
-          <div className="screen-header">
-            <div className="screen-header-left">
-              <div className="screen-icon-box"><Icon name="bot" size={20} /></div>
-              <div>
-                <h1 className="h1" style={{ marginBottom: 2 }}>Ask</h1>
-                <div className="muted text-sm">基于公司知识库的智能问答，每个回答都带来源引用</div>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <Tag tone="outline">0 个知识片段</Tag>
-            </div>
-          </div>
-          <div className="ask-container">
-            <div className="ask-empty">
-              <div className="ask-empty-icon"><Icon name="bot" size={36} /></div>
-              <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Ask Loom</div>
-              <div style={{ fontSize: 13.5, color: "var(--text-3)", lineHeight: 1.7, maxWidth: 400 }}>
-                向知识库提问，获得带证据引用的答案。问答会自动识别权限边界——对内答全量，对客户只答可对外口径。
-              </div>
-              <div className="ask-example-questions">
-                <div className="ask-example-q"><Icon name="chevron-right" size={12} />这个产品和大疆某款有什么差异？</div>
-                <div className="ask-example-q"><Icon name="chevron-right" size={12} />客户问发热问题怎么回答？</div>
-                <div className="ask-example-q"><Icon name="chevron-right" size={12} />这个需求最近热不热？</div>
-                <div className="ask-example-q"><Icon name="chevron-right" size={12} />有没有 MRD 支持这个方向？</div>
-              </div>
-            </div>
-            <div className="ask-input-bar">
-              <Icon name="bot" size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
-              <input className="ask-input" placeholder="输入问题，按 Enter 发送…" disabled />
-              <div className="ask-audience-toggle">
-                <button className="ask-audience active">内部</button>
-                <button className="ask-audience">供应商</button>
-                <button className="ask-audience">销售</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    ),
-    mrd: <DocumentStudio screenType="mrd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={setActive} />,
-    prd: <DocumentStudio screenType="prd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={setActive} />,
-    standards: <StandardsScreen data={data} api={api} />,
+    mrd: <DocumentStudio screenType="mrd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={navigateScreen} />,
+    prd: <DocumentStudio screenType="prd" data={data} api={api} onOpenDocumentModal={setDocumentModalMode} onNavigate={navigateScreen} />,
     settings: <SettingsScreen {...screenProps} />,
-    feishu_space: <FeishuProjectsScreen sampleWorkspace={sampleWorkspace} />,
-  }[active];
+  }[active] ?? <HomeScreen data={data} onNavigate={(screen) => navigateScreen(screen, { clearDocId: true })} />;
   const notifications = [
     { id: "n1", label: "系统", text: "全局搜索已经接通，可用 ⌘K 快速打开。", tone: "outline" },
     { id: "n2", label: "News", text: `${data.newsCounts?.all || data.news.length} 条资讯已载入。`, tone: "outline" },
@@ -1437,7 +1588,7 @@ function App() {
     <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <Sidebar
         active={active}
-        onNav={setActive}
+        onNav={(screen) => navigateScreen(screen, { clearDocId: true })}
         data={data}
         onLogout={logout}
         onFeedback={() => setFeedbackOpen(true)}
@@ -1449,12 +1600,12 @@ function App() {
         <div className="topbar">
           <div className="topbar-title">
             {TITLES[active]?.label || active}
-            {TITLES[active]?.subLabel && <span className="topbar-title-sub"> {TITLES[active].subLabel}</span>}
+            {TITLES[active]?.subLabel && <span className="topbar-title-sub"> · {TITLES[active].subLabel}</span>}
           </div>
-          {active === "products" && <span className="topbar-crumb">· {data.products.length} 条记录</span>}
-          {active === "news" && <span className="topbar-crumb">· 插件采集 · {data.newsCounts?.all || data.news.length} 条资讯</span>}
-          {active === "demands" && <span className="topbar-crumb">· {data.demands.length} 条需求</span>}
-          {active === "research" && <span className="topbar-crumb">· {data.research.length} 个项目</span>}
+          {active === "products" && <span className="topbar-crumb">· {data.products.length} 条</span>}
+          {active === "news" && <span className="topbar-crumb">· {data.newsCounts?.all || data.news.length} 条</span>}
+          {active === "demands" && <span className="topbar-crumb">· {data.demands.length} 条</span>}
+          {active === "research" && <span className="topbar-crumb">· {data.research.length} 个</span>}
           <div className="topbar-actions">
             {sampleWorkspace && (
               <span className="topbar-sample-chip" title={latestNewsAt ? `示例数据 · 更新 ${formatSampleDate(latestNewsAt)}` : "示例数据"}>
@@ -1515,12 +1666,6 @@ function App() {
             >
               <Icon name={t.mode === "dark" ? "sun" : "moon"} size={14} />
             </button>
-            <Btn
-              variant="ghost"
-              icon="panel-open"
-              size="sm"
-              onClick={() => setDetailCollapsed((value) => !value)}
-            />
           </div>
         </div>
         {screen}
@@ -1530,7 +1675,7 @@ function App() {
           data={data}
           onClose={() => setSearchOpen(false)}
           onPick={(item) => {
-            setActive(item.screen);
+            navigateScreen(item.screen, { clearDocId: true });
             setNavTarget({ screen: item.screen, id: item.entityId, at: Date.now() });
             setSearchOpen(false);
           }}
@@ -1561,7 +1706,7 @@ function App() {
               params.set("docId", createdDocument.id);
               window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
             }
-            setActive(nextType);
+            navigateScreen(nextType, createdDocument?.id ? { docId: createdDocument.id } : { clearDocId: true });
           }}
         />
       )}

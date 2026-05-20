@@ -14,6 +14,7 @@ const TOKEN_KEY = "loom_token";
 const USER_KEY = "loom_user";
 const DEFAULT_MODE_KEY = "loom_default_mode";
 const AI_BEFORE_SAVE_KEY = "loom_ai_before_save";
+const AI_ORGANIZE_WAIT_MS = 12000;
 const LLM_NOTICE_DISMISSED_KEY = "loom_llm_notice_dismissed";
 const DRAFT_STATE_KEY = "loom_sidepanel_draft_state_v1";
 const URL_WATCH_INTERVAL_MS = 650;
@@ -49,20 +50,18 @@ const PLATFORM_WAITING_COPY = {
 const DEFAULT_TAG_GROUPS = [
   { key: "competitor_brands", name: "竞品品牌", tone: "outline", tags: ["Ulanzi", "DJI", "Insta360", "SmallRig", "NEEWER", "Tilta", "K&F CONCEPT", "Godox", "Nanlite", "Zhiyun", "智云", "Aputure", "Rode", "RODE"] },
   { key: "camera_brands", name: "主机", tone: "outline", tags: ["Osmo Pocket 3", "Osmo Action 5 Pro", "Osmo Action 4", "Osmo Mobile 7P", "Osmo Mobile 7", "DJI Mini 4 Pro", "DJI Air 3S", "DJI Flip", "DJI Neo", "Insta360 Ace Pro 2", "Insta360 Ace Pro", "Insta360 X5", "Insta360 GO 3", "Insta360 GO 3S", "Insta360 X4", "Insta360 Flow 2 Pro", "Insta360 Flow 2", "Insta360 Flow Pro"] },
-  { key: "product_categories", name: "产品品类", tone: "default", tags: ["灯光", "稳定器", "三脚架", "镜头", "麦克风", "相机配件", "运动相机", "无人机"] },
-  { key: "scenarios", name: "使用场景", tone: "accent", tags: ["Vlog/自拍", "直播/带货", "短视频创作", "户外旅拍", "室内棚拍", "桌面俯拍", "运动/极限拍摄", "会议/活动记录", "产品摄影", "延时/慢动作", "街拍/纪实", "教育/网课"] },
-  { key: "painpoints", name: "用户痛点", tone: "danger", tags: ["携带不便/太重", "续航不足", "操作复杂/学习成本高", "画质不够", "防抖不足", "散热过热", "噪音大", "兼容性差", "配件缺失/需另购", "安装固定麻烦", "调光/调色不精准", "无线连接不稳定", "收纳困难", "价格过高/性价比低", "做工质感差"] },
-  { key: "innovation_types", name: "创新类型", tone: "success", tags: ["技术创新", "使用方式创新", "形态创新", "场景拓展", "生态整合", "性价比创新"] },
-  { key: "custom_tags", name: "自定义标签", tone: "outline", tags: ["便携", "高显色", "模块化", "磁吸", "手机摄影"] },
+  { key: "product_categories", name: "产品品类", tone: "default", tags: ["A音视频类", "B箱包带类", "C配件类", "E供电类", "L灯光类", "T脚架类", "S支架类", "I智能工作室", "X其他类"] },
+  { key: "scenarios", name: "使用场景", tone: "accent", tags: [] },
+  { key: "painpoints", name: "用户痛点", tone: "danger", tags: [] },
+  { key: "innovation_types", name: "创新类型", tone: "success", tags: [] },
 ];
 const DEFAULT_FIELDS = [
   { key: "brand", legacyKey: "competitor_brands", name: "品牌", tone: "outline", multi: true, official: true, entities: ["competitor"] },
-  { key: "host", legacyKey: "camera_brands", name: "主机", tone: "outline", multi: false, official: true, entities: ["competitor"] },
+  { key: "host", legacyKey: "camera_brands", name: "主机", tone: "outline", multi: true, official: true, entities: ["competitor"] },
   { key: "category", legacyKey: "product_categories", name: "品类", tone: "default", multi: true, official: true, entities: ["competitor"] },
   { key: "scenarios", legacyKey: "scenarios", name: "使用场景", tone: "accent", multi: true, official: true, entities: ["competitor", "inspiration"] },
   { key: "painpoints", legacyKey: "painpoints", name: "用户痛点", tone: "danger", multi: true, official: true, entities: ["competitor", "inspiration"] },
   { key: "innovation", legacyKey: "innovation_types", name: "创新类型", tone: "success", multi: false, official: true, entities: ["inspiration"] },
-  { key: "custom_tags", legacyKey: "custom_tags", name: "自定义标签", tone: "outline", multi: true, official: true, entities: ["competitor", "inspiration"] },
 ];
 
 function normalizeApiBase(value) {
@@ -149,7 +148,12 @@ function uniqueList(value) {
   return Array.from(new Set(safeArray(value).map((item) => cleanText(item)).filter(Boolean)));
 }
 
+function isSupportedFieldEntity(entity) {
+  return ["competitor", "inspiration", "product", "sku", "category", "demand"].includes(entity);
+}
+
 function fieldFromTagGroup(group) {
+  if (group?.key === "custom_tags" || group?.field_key === "custom_tags") return null;
   const defaultField = DEFAULT_FIELDS.find((field) => field.legacyKey === group?.key || field.key === group?.field_key);
   const key = cleanText(group?.field_key || defaultField?.key || group?.key);
   if (!key) return null;
@@ -158,10 +162,10 @@ function fieldFromTagGroup(group) {
     legacyKey: cleanText(group?.key || defaultField?.legacyKey || key, key),
     name: cleanText(group?.name, defaultField?.name || key),
     tone: cleanText(group?.tone, defaultField?.tone || "outline"),
-    multi: group?.multi !== false && defaultField?.multi !== false,
+    multi: group?.multi !== undefined ? group.multi !== false : defaultField?.multi !== false,
     official: group?.official !== undefined ? Boolean(group.official) : Boolean(defaultField?.official),
-    entities: uniqueList(group?.entities).filter((item) => item === "competitor" || item === "inspiration").length
-      ? uniqueList(group.entities).filter((item) => item === "competitor" || item === "inspiration")
+    entities: uniqueList(group?.entities).filter(isSupportedFieldEntity).length
+      ? uniqueList(group.entities).filter(isSupportedFieldEntity)
       : safeArray(defaultField?.entities).length ? defaultField.entities : ["competitor"],
     options: uniqueList(group?.tags),
   };
@@ -171,9 +175,7 @@ function normalizeFieldList(fields = [], tagGroups = [], options = {}) {
   const useDefaults = options.useDefaults === true;
   const groups = safeArray(tagGroups);
   const groupByLegacy = new Map(groups.map((group) => [group.key, group]));
-  const source = safeArray(fields).length
-    ? safeArray(fields)
-    : groups.map(fieldFromTagGroup).filter(Boolean);
+  const source = [...safeArray(fields), ...groups.map(fieldFromTagGroup).filter(Boolean)];
   const normalized = [];
   const seen = new Set();
   for (const item of source) {
@@ -189,10 +191,12 @@ function normalizeFieldList(fields = [], tagGroups = [], options = {}) {
       legacyKey,
       name: cleanText(item.name, defaultField?.name || group?.name || key),
       tone: cleanText(item.tone || group?.tone, defaultField?.tone || "outline"),
-      multi: item.multi !== undefined ? item.multi !== false : defaultField?.multi !== false,
+      multi: group?.multi !== undefined
+        ? group.multi !== false
+        : item.multi !== undefined ? item.multi !== false : defaultField?.multi !== false,
       official: item.official !== undefined ? Boolean(item.official) : Boolean(defaultField?.official),
-      entities: uniqueList(item.entities).filter((entity) => entity === "competitor" || entity === "inspiration").length
-        ? uniqueList(item.entities).filter((entity) => entity === "competitor" || entity === "inspiration")
+      entities: uniqueList(item.entities).filter(isSupportedFieldEntity).length
+        ? uniqueList(item.entities).filter(isSupportedFieldEntity)
         : safeArray(defaultField?.entities).length ? defaultField.entities : ["competitor"],
       options: uniqueList(item.options || item.tags || group?.tags || defaultField?.options),
     });
@@ -697,8 +701,17 @@ async function processRaw() {
   try {
     const data = await api(endpoint, {
       method: "POST",
-      body: JSON.stringify({ platform: state.page.platform, data: state.page.data }),
+      body: JSON.stringify({ platform: state.page.platform, data: state.page.data, wait_ms: AI_ORGANIZE_WAIT_MS }),
     });
+    if (data?.queued) {
+      state.processed = { ...state.page.data, __loom_ai_processed: false, __loom_ai_job_id: data.job_id };
+      state.form = buildDraft(state.mode, state.processed);
+      state.activeTagFields = activeTagFieldsForDraft(state.mode, state.form, state.processed);
+      state.formDirty = false;
+      state.message = data.message || "AI 整理耗时较长，已进入后端队列；可以先保存继续采集。";
+      debugEvent("parse-raw:queued", { endpoint, jobId: data.job_id || "" });
+      return;
+    }
     state.processed = { ...state.page.data, ...data, __loom_ai_processed: true };
     state.form = buildDraft(state.mode, state.processed);
     state.activeTagFields = activeTagFieldsForDraft(state.mode, state.form, state.processed);
@@ -1092,6 +1105,13 @@ async function runAiProcess(source = "manual") {
     return;
   }
   renderMain();
+}
+
+function maybeStartAutoCommentCollector() {
+  if (state.page?.platform !== "xiaohongshu") return;
+  if (state.mode !== "demand") return;
+  if (state.commentCollecting) return;
+  startCommentCollector();
 }
 
 async function applyExtensionSession(data, sessionCookie = "") {
@@ -1546,15 +1566,7 @@ const dismissNoticeButton = document.getElementById("dismiss-llm-notice");
   }
   const collectCommentsButton = document.getElementById("collect-comments-more");
   if (collectCommentsButton) {
-    collectCommentsButton.onclick = () => {
-      if (state.commentCollecting) {
-        stopCommentCollector();
-        state.message = "已停止监听评论。";
-        renderMain();
-        return;
-      }
-      startCommentCollector();
-    };
+    collectCommentsButton.onclick = () => collectVisibleComments({ silent: false });
   }
   const commentsToggleButton = document.getElementById("comments-toggle");
   if (commentsToggleButton) {
@@ -1566,6 +1578,7 @@ const dismissNoticeButton = document.getElementById("dismiss-llm-notice");
   schedulePersistDraftState();
   syncActionButtons();
   scheduleAutosizeTextareas();
+  maybeStartAutoCommentCollector();
 }
 
 function syncActionButtons() {
@@ -1742,6 +1755,8 @@ function buildDraft(mode, item) {
       category,
       tag_values: tagValues,
       price: cleanText(item?.price || item?.platforms?.[0]?.price, ""),
+      original_price: cleanText(item?.original_price || item?.platforms?.[0]?.original_price, ""),
+      discount_price: cleanText(item?.discount_price || item?.platforms?.[0]?.discount_price, ""),
       cost_estimate: cleanText(item?.cost_estimate, ""),
       rating: cleanText(item?.rating ?? item?.platforms?.[0]?.rating, ""),
       review_count: reviewCount,
@@ -2060,7 +2075,7 @@ function startCommentCollector() {
   if (state.page?.platform !== "xiaohongshu") return;
   state.commentCollecting = true;
   state.commentCollectStartedAt = Date.now();
-  state.message = "已开始监听可见评论。请在左侧小红书评论区慢慢滚动，期间不要关闭面板。";
+  state.message = "评论会随滚动自动补充。";
   void collectVisibleComments({ silent: true });
   if (commentCollectorTimer) clearInterval(commentCollectorTimer);
   commentCollectorTimer = setInterval(() => {
@@ -2252,15 +2267,13 @@ function commentsCaptureView(item) {
         <div class="comments-card-head">
           <div>
             <div class="cl-section-label">可见评论</div>
-            <div class="comments-sub">${comments.length ? `已采集 ${comments.length} 条` : "会自动读取当前已加载评论"}</div>
+            <div class="comments-sub">${comments.length ? `已采集 ${comments.length} 条` : "滚动评论区后自动补充"}</div>
           </div>
-          <button class="btn sm comments-more-btn" type="button" id="collect-comments-more">
-            ${state.commentCollecting ? "监听中" : "采集更多"}
-          </button>
+          <button class="btn sm comments-more-btn" type="button" id="collect-comments-more">刷新</button>
         </div>
-        ${state.commentCollecting ? `<div class="comments-tip">请在左侧小红书评论区慢慢滚动，插件会持续收集新出现的评论；不要关闭面板。</div>` : ""}
+        <div class="comments-tip">已开启自动评论采集，滚动加载更多评论。</div>
         <div class="comments-list ${preview.length ? "" : "empty"}">
-          ${preview.length ? preview.map(commentItemView).join("") : `<div class="comments-empty">当前页面还没有可见评论，滚到评论区后点“采集更多”。</div>`}
+          ${preview.length ? preview.map(commentItemView).join("") : `<div class="comments-empty">当前还没有读到评论，滚动评论区后会自动出现。</div>`}
         </div>
         ${comments.length > collapsedLimit ? `
           <button class="comments-toggle" type="button" id="comments-toggle">
@@ -2425,6 +2438,8 @@ function platformCardsHtml(item) {
     platform: state.page.platform,
     url: state.page.data?.url || "",
     price: item.price || "",
+    original_price: item.original_price || "",
+    discount_price: item.discount_price || "",
     creator: item.creator || "",
     pledged_amount: item.pledged_amount || "",
     goal_amount: item.goal_amount || "",
@@ -2442,6 +2457,8 @@ function platformCardsHtml(item) {
       <div class="platform-card-grid">
         ${pl.platform === "kickstarter"
           ? kickstarterPlatformMetrics(pl, item, index)
+          : pl.platform === "taobao"
+            ? taobaoPlatformMetrics(pl, item, index)
           : `
         ${metric("售价", `platforms.${index}.price`, pl.price || "", currencyPrefixForValue(pl.platform, pl.price || ""))}
         ${metric("参考成本", `platforms.${index}.cost`, pl.cost || item.cost_estimate || "", currencyPrefixForValue("cost", pl.cost || item.cost_estimate || ""))}
@@ -2461,6 +2478,15 @@ function kickstarterPlatformMetrics(platform, item, index) {
     ${metric("认缴金额", `platforms.${index}.pledged_amount`, platform.pledged_amount || item.pledged_amount || "", "")}
     ${metric("目标金额", `platforms.${index}.goal_amount`, platform.goal_amount || item.goal_amount || "", "")}
     ${metric("支持者", `platforms.${index}.backers`, platform.backers || item.backers || "", "")}
+  `;
+}
+
+function taobaoPlatformMetrics(platform, item, index) {
+  return `
+    ${metric("原价", `platforms.${index}.original_price`, platform.original_price || item.original_price || platform.price || "", currencyPrefixForValue(platform.platform, platform.original_price || item.original_price || platform.price || ""))}
+    ${metric("折扣价", `platforms.${index}.discount_price`, platform.discount_price || item.discount_price || platform.price || "", currencyPrefixForValue(platform.platform, platform.discount_price || item.discount_price || platform.price || ""))}
+    ${metric("参考成本", `platforms.${index}.cost`, platform.cost || item.cost_estimate || "", currencyPrefixForValue("cost", platform.cost || item.cost_estimate || ""))}
+    ${metric("已售", `platforms.${index}.sales`, platform.sales || item.monthly_sales || "", "")}
   `;
 }
 
@@ -2485,7 +2511,7 @@ function showMarketplaceRating(platform) {
 
 function metric(label, key, value, prefix, suffix = "") {
   return `
-    <label class="metric${label === "月销估算" ? " span-2" : ""}">
+    <label class="metric${label === "月销估算" || label === "已售" ? " span-2" : ""}">
       <div class="metric-label">${escapeHtml(label)}</div>
       <div class="metric-input-wrap">
         ${prefix ? `<span class="metric-prefix ${prefix === "★" ? "rating-star" : ""}">${escapeHtml(prefix)}</span>` : ""}
@@ -2755,8 +2781,8 @@ document.addEventListener("input", (event) => {
     platforms[index] = current;
     state.form = { ...(state.form || {}), platforms };
     state.formDirty = true;
-    if (index === 0 && ["price", "sales", "url", "creator", "pledged_amount", "goal_amount", "backers"].includes(field)) {
-      const linkedKey = field === "sales" ? "monthly_sales" : field;
+    if (index === 0 && ["price", "original_price", "discount_price", "sales", "url", "creator", "pledged_amount", "goal_amount", "backers"].includes(field)) {
+      const linkedKey = field === "sales" ? "monthly_sales" : field === "discount_price" ? "price" : field;
       state.form = { ...state.form, [linkedKey]: el.value };
       const summary = document.querySelector(field === "sales" ? "[data-sales-summary]" : "[data-price-summary]");
       if (summary && field !== "url") summary.textContent = el.value || "—";
@@ -2815,6 +2841,10 @@ function productPayload(item) {
     category,
     tag_values: tagValues,
     price: item.price || "",
+    original_price: item.original_price || "",
+    discount_price: item.discount_price || "",
+    __loom_ai_processed: Boolean(item.__loom_ai_processed),
+    __loom_ai_job_id: item.__loom_ai_job_id || "",
     cost_estimate: item.cost_estimate || "",
     rating: item.rating || null,
     review_count: Number(item.review_count || 0),
@@ -2832,6 +2862,8 @@ function productPayload(item) {
       platform: state.page.platform,
       url: item.url || state.page.data.url,
       price: item.price || "",
+      original_price: item.original_price || "",
+      discount_price: item.discount_price || "",
       cost: item.cost_estimate || "",
       creator: item.creator || "",
       pledged_amount: item.pledged_amount || "",
@@ -2873,6 +2905,8 @@ function demandPayload(item) {
     innovation,
     tags: customTags,
     tag_values: tagValues,
+    __loom_ai_processed: Boolean(item.__loom_ai_processed),
+    __loom_ai_job_id: item.__loom_ai_job_id || "",
     thumbnail_url: item.thumbnail_url || item.image || "",
     note: item.note || "",
     import_method: "chrome_extension",

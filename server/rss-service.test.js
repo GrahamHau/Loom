@@ -376,6 +376,7 @@ describe("rss-service classification", () => {
       settings: {},
     });
     const legacyUserId = dbModule.getLegacyUserId();
+    const recentPubDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toUTCString();
     repo.upsertNews(legacyUserId, [{
       source_id: "google-old",
       source: "主机新品 - Google News",
@@ -415,7 +416,7 @@ describe("rss-service classification", () => {
                 <item>
                   <title>Sony launches a7R VI camera</title>
                   <link>https://news.google.com/rss/articles/known-story</link>
-                  <pubDate>Fri, 15 May 2026 00:00:00 GMT</pubDate>
+                  <pubDate>${recentPubDate}</pubDate>
                   <description>New product launch.</description>
                 </item>
               </channel>

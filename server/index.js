@@ -7,7 +7,7 @@ import { timingSafeEqual } from "node:crypto";
 import signature from "cookie-signature";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureSeed } from "./db.js";
+import { ensureSeed, readJson, writeJson } from "./db.js";
 import { isAdmin, isOwner } from "./access-control.js";
 import adminRouter from "./admin-routes.js";
 import { AppError, isLLMConfigured, isVisionLLMConfigured, testLLM, testVisionLLM } from "./ai-service.js";
@@ -35,8 +35,12 @@ import {
 import { DEFAULT_FIELDS } from "./field-config.js";
 import { matchFieldKey, matchFieldOption, normalizeTagValues } from "./field-matcher.js";
 import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-service.js";
+import { generateDailyNewsDigest } from "./news-digest-service.js";
 import { analyzeResearch } from "./research-service.js";
+import { buildResearchExportCsv } from "./research-export-service.js";
+import { buildFeishuProjectIdeaDraft } from "./feishu-project-submit-service.js";
 import { submitFeedbackToFeishu, syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
+import { testFeishuProjectMcpForUser } from "./feishu-project-mcp-client.js";
 import {
   getDocumentImportResult,
   importFeishuDocument,
@@ -174,6 +178,7 @@ import {
   createField,
   createProduct,
   createResearch,
+  bindResearchFeishuProjectIdea,
   deleteDemand,
   deleteFeedDestination,
   deleteFeedGroup,
@@ -191,9 +196,11 @@ import {
   findUserByFeishuProfile,
   findUserById,
   finishSampleWorkspace,
+  getFeishuProjectUserMapping,
   importWechatExporterAccounts,
   listFields,
   listAllUsers,
+  listFeishuProjectItems,
   listNews,
   listNewsSources,
   markEntityEvidenceStatus,
@@ -230,6 +237,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const uploadsDir = process.env.UPLOADS_DIR || path.join(projectRoot, "uploads");
 const app = express();
 const port = Number(process.env.PORT || 3000);
+const host = process.env.HOST || "0.0.0.0";
 const SQLiteStore = SQLiteStoreFactory(session);
 const wechatExporterAccountsPath = process.env.WECHAT_EXPORTER_ACCOUNTS_PATH || path.join(projectRoot, "data", "wechat-exporter-accounts.json");
 const wechatExporterSourceIntervalMinutes = Number(process.env.WECHAT_EXPORTER_SOURCE_INTERVAL_MINUTES || 1440);
@@ -296,6 +304,113 @@ app.use((req, res, next) => {
 
 function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
+function boundedWaitMs(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(Math.max(Math.round(n), 1), 15000);
+}
+
+function aiOrganizeJobKey(id) {
+  return `ai_organize_job:${id}`;
+}
+
+function queueAiOrganizeJob({ userId, mode, platform, input, reason = "wait_budget_exceeded" }) {
+  const job = {
+    id: `aio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    user_id: userId,
+    mode,
+    platform,
+    status: "pending",
+    reason,
+    input,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  writeJson(aiOrganizeJobKey(job.id), job);
+  return job;
+}
+
+function runAiOrganizeJob(job, runner) {
+  setImmediate(async () => {
+    const running = { ...job, status: "running", updated_at: new Date().toISOString() };
+    writeJson(aiOrganizeJobKey(job.id), running);
+    try {
+      const result = await runner();
+      writeJson(aiOrganizeJobKey(job.id), {
+        ...running,
+        status: "done",
+        result,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (error) {
+      writeJson(aiOrganizeJobKey(job.id), {
+        ...running,
+        status: "failed",
+        error: error?.message || "ai_organize_failed",
+        updated_at: new Date().toISOString(),
+      });
+    }
+  });
+}
+
+function runSavedAiOrganizeJob({ job, userId, mode, platform, data, targetId }) {
+  runAiOrganizeJob(job, async () => {
+    if (mode === "product") {
+      const result = await parseProductRaw(userId, { platform, data });
+      return updateProduct(userId, targetId, { ...result, __loom_ai_processed: true });
+    }
+    const result = await parseDemandRaw(userId, { platform, data });
+    return updateDemand(userId, targetId, { ...result, __loom_ai_processed: true });
+  });
+}
+
+function respondWithAiPipeline({ req, res, userId, mode, platform, runner }) {
+  const waitMs = boundedWaitMs(req.body?.wait_ms ?? req.body?.waitMs);
+  if (!waitMs) return runner().then((result) => res.json(result));
+  let settled = false;
+  const task = runner();
+  task.then((result) => {
+    if (!settled) {
+      settled = true;
+      res.json(result);
+    }
+    return result;
+  }).catch((error) => {
+    if (!settled) {
+      settled = true;
+      throw error;
+    }
+  }).catch((error) => {
+    writeJson(`ai_organize_error:${Date.now()}`, {
+      user_id: userId,
+      mode,
+      platform,
+      error: error?.message || "ai_organize_failed",
+      created_at: new Date().toISOString(),
+    });
+  });
+  setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    const job = queueAiOrganizeJob({
+      userId,
+      mode,
+      platform,
+      input: req.body || {},
+    });
+    runAiOrganizeJob(job, () => task);
+    res.status(202).json({
+      status: "queued",
+      queued: true,
+      job_id: job.id,
+      mode,
+      platform,
+      message: "AI 整理耗时较长，已进入后端队列。",
+    });
+  }, waitMs);
+  return null;
 }
 
 function handleError(error, _req, res, _next) {
@@ -557,22 +672,32 @@ function passwordUserId(username) {
   return safe ? `password-${safe}` : `password-user`;
 }
 
+function localPasswordUserIdOverride() {
+  const userId = String(process.env.LOOM_PASSWORD_USER_ID || "").trim();
+  if (!userId) return "";
+  if (process.env.NODE_ENV === "production" && process.env.LOOM_ALLOW_PASSWORD_USER_ID_IN_PRODUCTION !== "true") {
+    return "";
+  }
+  return userId;
+}
+
 function ensurePasswordUser(account = getPasswordAuthConfig()) {
   const { username } = account;
   const normalizedEmail = String(username || "").trim().toLowerCase();
   const ownerEmail = String(process.env.LOOM_OWNER_EMAIL || "").trim().toLowerCase();
-  const existing = normalizedEmail ? findUserByEmail(normalizedEmail) : null;
+  const mappedUserId = localPasswordUserIdOverride();
+  const existing = (mappedUserId ? findUserById(mappedUserId) : null) || (normalizedEmail ? findUserByEmail(normalizedEmail) : null);
   const isConfiguredOwner = ownerEmail && normalizedEmail === ownerEmail;
   return ensureLocalUser({
     ...(existing || {}),
-    id: existing?.id || passwordUserId(username),
+    id: existing?.id || mappedUserId || passwordUserId(username),
     email: username.includes("@") ? username : existing?.email || "",
     name: existing?.name || username,
     initials: String(username || "L").trim().replace(/\s+/g, "").slice(0, 2).toUpperCase() || "L",
-    role: isConfiguredOwner ? "主理人" : existing?.role || "成员",
-    role_code: isConfiguredOwner ? "owner" : existing?.role_code || "member",
-    auth_provider: "password",
-    withDefaultWorkspace: isConfiguredOwner || normalizedEmail === String(process.env.APP_USERNAME || "").trim().toLowerCase(),
+    role: existing?.role || (isConfiguredOwner ? "主理人" : "成员"),
+    role_code: existing?.role_code || (isConfiguredOwner ? "owner" : "member"),
+    auth_provider: existing?.auth_provider || "password",
+    withDefaultWorkspace: !existing && (isConfiguredOwner || normalizedEmail === String(process.env.APP_USERNAME || "").trim().toLowerCase()),
   });
 }
 
@@ -684,9 +809,16 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.get("/api/auth/providers", (_req, res) => {
+  const feishuConfig = getFeishuOauthConfig();
   res.json({
     password: true,
-    feishu: getFeishuOauthConfig().enabled,
+    feishu: feishuConfig.enabled,
+    feishu_reason: feishuConfig.enabled
+      ? ""
+      : "feishu_oauth_not_configured",
+    feishu_message: feishuConfig.enabled
+      ? ""
+      : "本地飞书登录未配置公网 HTTPS 回调。请使用账号密码登录本地镜像，或配置 FEISHU_OAUTH_REDIRECT_URI。",
   });
 });
 
@@ -1624,8 +1756,21 @@ app.post("/api/evidences", requireAuth, (req, res, next) => {
 
 app.get("/api/products", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).products));
 app.post("/api/products", requireAuth, asyncHandler(async (req, res) => {
+  const userId = currentUserId(req);
+  const body = req.body || {};
   const payload = await withCachedImageFields(req.body || {});
-  res.status(201).json(createProduct(currentUserId(req), payload));
+  const product = createProduct(userId, payload);
+  if (body.import_method === "chrome_extension" && !body.__loom_ai_processed) {
+    const job = queueAiOrganizeJob({
+      userId,
+      mode: "product",
+      platform: body.platform || "",
+      input: { platform: body.platform || "", data: { ...body, id: product.id }, target_id: product.id },
+      reason: "saved_without_ai",
+    });
+    runSavedAiOrganizeJob({ job, userId, mode: "product", platform: body.platform || "", data: { ...body, id: product.id }, targetId: product.id });
+  }
+  res.status(201).json(product);
 }));
 app.get("/api/products/find-similar", requireAuth, (req, res) => {
   const name = String(req.query.name || "").trim().toLowerCase();
@@ -1688,13 +1833,40 @@ app.post("/api/products/parse-url", requireAuth, asyncHandler(async (req, res) =
   res.json(await parseProductUrl(currentUserId(req), req.body || {}));
 }));
 app.post("/api/products/parse-raw", requireAuth, asyncHandler(async (req, res) => {
-  res.json(await parseProductRaw(currentUserId(req), req.body || {}));
+  const userId = currentUserId(req);
+  return respondWithAiPipeline({
+    req,
+    res,
+    userId,
+    mode: "product",
+    platform: req.body?.platform || "",
+    runner: () => parseProductRaw(userId, req.body || {}),
+  });
 }));
 
 app.get("/api/demands", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).demands));
 app.post("/api/demands", requireAuth, asyncHandler(async (req, res) => {
+  const userId = currentUserId(req);
   const payload = await withCachedImageFields(req.body || {});
-  res.status(201).json(createDemand(currentUserId(req), payload));
+  const demand = createDemand(userId, payload);
+  if (payload.import_method === "chrome_extension" && !payload.__loom_ai_processed) {
+    const job = queueAiOrganizeJob({
+      userId,
+      mode: "demand",
+      platform: payload.source_platform || payload.source || "",
+      input: { platform: payload.source_platform || payload.source || "", data: { ...payload, id: demand.id }, target_id: demand.id },
+      reason: "saved_without_ai",
+    });
+    runSavedAiOrganizeJob({
+      job,
+      userId,
+      mode: "demand",
+      platform: payload.source_platform || payload.source || "",
+      data: { ...payload, id: demand.id },
+      targetId: demand.id,
+    });
+  }
+  res.status(201).json(demand);
 }));
 app.get("/api/demands/:id", requireAuth, (req, res) => {
   const workspaceId = requestWorkspaceId(req, "query");
@@ -1727,7 +1899,15 @@ app.post("/api/demands/parse-url", requireAuth, asyncHandler(async (req, res) =>
   res.json(await parseDemandUrl(currentUserId(req), req.body || {}));
 }));
 app.post("/api/demands/parse-raw", requireAuth, asyncHandler(async (req, res) => {
-  res.json(await parseDemandRaw(currentUserId(req), req.body || {}));
+  const userId = currentUserId(req);
+  return respondWithAiPipeline({
+    req,
+    res,
+    userId,
+    mode: "demand",
+    platform: req.body?.platform || "",
+    runner: () => parseDemandRaw(userId, req.body || {}),
+  });
 }));
 
 app.get("/api/demand-clusters", requireAuth, (req, res) => {
@@ -1831,6 +2011,14 @@ app.get("/api/news", requireAuth, (req, res) => {
   };
   res.json({ items: items.slice(offset, offset + limit), counts, page, limit });
 });
+
+app.post("/api/news/daily-digest", requireAuth, asyncHandler(async (req, res) => {
+  const limit = Math.min(30, Math.max(3, Number(req.body?.limit || 24)));
+  res.json(await generateDailyNewsDigest(currentUserId(req), {
+    limit,
+    force: Boolean(req.body?.force),
+  }));
+}));
 
 app.get("/api/news/:id", requireAuth, (req, res) => {
   const item = visibleNewsItems(currentUserId(req)).find((entry) => entry.id === req.params.id);
@@ -2011,6 +2199,14 @@ app.get("/api/feed-hub/public/groups/:slug.xml", (req, res) => {
 
 app.get("/api/research", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).research || []));
 app.post("/api/research", requireAuth, (req, res) => res.status(201).json(createResearch(currentUserId(req), req.body || {})));
+app.get("/api/feishu-project/items", requireAuth, (req, res) => {
+  res.json(listFeishuProjectItems({
+    workspace_id: requestWorkspaceId(req, "query"),
+    type: String(req.query.type || ""),
+    q: String(req.query.q || ""),
+    limit: req.query.limit,
+  }));
+});
 app.get("/api/research/:id", requireAuth, (req, res) => {
   const workspaceId = requestWorkspaceId(req, "query");
   const research = (rawState(currentUserId(req)).research || []).find((item) => item.id === req.params.id);
@@ -2033,6 +2229,43 @@ app.patch("/api/research/:id", requireAuth, (req, res) => {
   if (!item) return res.status(404).json({ error: "research_not_found" });
   res.json(item);
 });
+app.post("/api/research/:id/feishu-project-idea", requireAuth, (req, res) => {
+  const item = bindResearchFeishuProjectIdea(currentUserId(req), req.params.id, req.body || {}, {
+    workspace_id: requestWorkspaceId(req),
+  });
+  if (!item) return res.status(404).json({ error: "research_not_found" });
+  if (!item.feishu_project_idea) return res.status(400).json({ error: "invalid_feishu_project_idea" });
+  res.json(item);
+});
+app.post("/api/research/:id/feishu-project-idea/preview", requireAuth, (req, res) => {
+  const userId = currentUserId(req);
+  const workspaceId = requestWorkspaceId(req);
+  const state = rawState(userId);
+  const research = (state?.research || []).find((item) => item.id === req.params.id);
+  if (!research) return res.status(404).json({ error: "research_not_found" });
+  const projectKey = String(req.body?.project_key || state.settings?.feishu_project_key || state.settings?.feishu_project_default_project_key || "").trim();
+  const currentUserMapping = projectKey
+    ? getFeishuProjectUserMapping(workspaceId, userId, projectKey)
+    : null;
+  const evidences = listEvidencesForEntity({
+    workspace_id: workspaceId,
+    entity_type: "research",
+    entity_id: research.id,
+  });
+  res.json(buildFeishuProjectIdeaDraft({
+    research: {
+      ...research,
+      evidences: [
+        ...evidences,
+        ...(Array.isArray(req.body?.evidences) ? req.body.evidences : []),
+      ],
+      ...(req.body?.draft_overrides || {}),
+    },
+    currentUserMapping: currentUserMapping || req.body?.current_user_mapping || {},
+    settings: state.settings || {},
+    defaults: req.body?.defaults || {},
+  }));
+});
 app.delete("/api/research/:id", requireAuth, (req, res) => {
   if (!deleteResearch(currentUserId(req), req.params.id)) return res.status(404).json({ error: "research_not_found" });
   res.json({ ok: true });
@@ -2042,6 +2275,13 @@ app.post("/api/research/:id/analyze", requireAuth, asyncHandler(async (req, res)
   if (!item) return res.status(404).json({ error: "research_not_found" });
   res.json(item);
 }));
+app.get("/api/research/:id/export.csv", requireAuth, (req, res) => {
+  const result = buildResearchExportCsv(currentUserId(req), req.params.id);
+  if (!result) return res.status(404).json({ error: "research_not_found" });
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`);
+  res.send(`\uFEFF${result.csv}`);
+});
 
 app.get("/api/settings", requireAuth, (req, res) => res.json(bootstrap(currentUserId(req)).settings));
 app.patch("/api/settings", requireAuth, (req, res) => {
@@ -2102,6 +2342,7 @@ app.post("/api/settings/test-llm-route", requireAuth, (req, res) => {
   res.json(testModelRoute({ ...(req.body || {}), workspace_id: workspaceId, user_id: currentUserId(req) }));
 });
 app.post("/api/settings/test-feishu", requireAuth, asyncHandler(async (req, res) => res.json(await testFeishuForUser(currentUserId(req)))));
+app.post("/api/settings/test-feishu-project-mcp", requireAuth, asyncHandler(async (req, res) => res.json(await testFeishuProjectMcpForUser(currentUserId(req)))));
 app.post("/api/sync/feishu", requireAuth, asyncHandler(async (req, res) => res.json(await syncFeishuForUser(currentUserId(req), req.body || {}))));
 app.post("/api/feedback", requireAuth, asyncHandler(async (req, res) => {
   const user = currentUser(req);
@@ -2177,6 +2418,23 @@ function startWechatScheduler() {
   }, interval).unref();
 }
 
+const uploadsStaticOptions = process.env.NODE_ENV === "production"
+  ? {
+      index: false,
+      etag: true,
+      lastModified: true,
+      maxAge: "1y",
+      immutable: true,
+    }
+  : {
+      index: false,
+      etag: true,
+      lastModified: true,
+      maxAge: 0,
+    };
+
+app.use("/uploads", express.static(uploadsDir, uploadsStaticOptions));
+
 if (process.env.NODE_ENV === "production") {
   const appDistDir = path.join(projectRoot, "dist");
   const landingDistDir = path.join(projectRoot, "landing", "dist");
@@ -2211,7 +2469,6 @@ if (process.env.NODE_ENV === "production") {
   });
 
   app.use("/app/assets", express.static(path.join(appDistDir, "assets"), immutableStaticOptions));
-  app.use("/uploads", express.static(uploadsDir, immutableStaticOptions));
   app.get("/app", (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
   app.get("/app/", (_req, res) => sendFreshHtml(res, path.join(appDistDir, "index.html")));
   app.use("/app", express.static(appDistDir, noCacheHtmlOptions));
@@ -2232,8 +2489,8 @@ app.use("/api", (_req, res) => {
 app.use(handleError);
 
 if (process.env.NODE_ENV !== "test") {
-  app.listen(port, () => {
-    console.log(`LOOM listening on http://0.0.0.0:${port}`);
+  app.listen(port, host, () => {
+    console.log(`LOOM listening on http://${host}:${port}`);
   });
   if (process.env.NODE_ENV === "production") {
     startRssScheduler();

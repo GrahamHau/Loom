@@ -8,7 +8,7 @@
   },
   "scripts": {
     "check:node": "node scripts/ensure-node-version.js",
-    "dev": "npm run check:node && vite --host 0.0.0.0",
+    "dev": "npm run check:node && vite --host 127.0.0.1 --port 5173 --strictPort",
     "server:dev": "npm run check:node && NODE_ENV=development node server/index.js",
     "build": "npm run check:node && vite build",
     "start": "npm run check:node && NODE_ENV=production node server/index.js",
@@ -17,6 +17,8 @@
     "test": "npm run check:node && vitest run",
     "db:seed": "npm run check:node && node scripts/seed-db.js",
     "db:clear-demo": "npm run check:node && node scripts/clear-demo-state.js",
+    "db:pull-remote": "npm run check:node && node scripts/pull-remote-db.js",
+    "fields:normalize-tags": "npm run check:node && node scripts/normalize-field-tags.js",
     "stream:sync-official": "npm run check:node && node scripts/sync-official-stream-from-remote.js",
     "news:configure-sources": "npm run check:node && node scripts/configure-news-sources.js",
     "news:seed-sources": "npm run check:node && node scripts/seed-news-sources.js",

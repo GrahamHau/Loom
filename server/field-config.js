@@ -21,6 +21,7 @@ const HOST_OPTIONS = [
   "Insta360 Flow 2",
   "Insta360 Flow Pro",
 ];
+const CONTROLLED_TAG_GROUP_KEYS = new Set(["competitor_brands", "camera_brands", "product_categories"]);
 
 function tagsFor(key) {
   const group = DEFAULT_TAG_GROUPS.find((item) => item.key === key);
@@ -44,7 +45,7 @@ export const DEFAULT_FIELDS = [
     legacyKey: "camera_brands",
     name: "主机",
     tone: "outline",
-    multi: false,
+    multi: true,
     official: true,
     entities: ["competitor"],
     entity_level: "competitor",
@@ -93,17 +94,6 @@ export const DEFAULT_FIELDS = [
     entities: ["inspiration"],
     entity_level: "inspiration",
     options: tagsFor("innovation_types"),
-  },
-  {
-    key: "custom_tags",
-    legacyKey: "custom_tags",
-    name: "自定义标签",
-    tone: "outline",
-    multi: true,
-    official: true,
-    entities: ["competitor", "inspiration"],
-    entity_level: "competitor",
-    options: tagsFor("custom_tags"),
   },
   {
     key: "price",
@@ -255,12 +245,64 @@ export function normalizeFields(fields = [], tagGroups = [], options = {}) {
 }
 
 export function normalizeSettingsFields(settings = {}) {
-  const fields = normalizeFields(Array.isArray(settings.fields) ? settings.fields : [], [], { includeDefaults: false })
-    .filter((field) => !field.official);
+  const inputFields = Array.isArray(settings.fields) ? settings.fields : [];
+  const normalizedInputFields = normalizeFields(inputFields, [], { includeDefaults: false });
+  const fields = normalizedInputFields.filter((field) => !field.official);
+  const officialLegacyKeys = new Set(DEFAULT_FIELDS.map((field) => field.legacyKey));
+  const officialFieldsAsGroups = inputFields
+    .map((field) => {
+      if (!field || typeof field !== "object") return null;
+      const fallback = DEFAULT_FIELDS.find((item) => item.key === field.key || item.legacyKey === field.legacyKey);
+      const key = normalizeFieldKey(field.key, fallback?.key || "");
+      const legacyKey = normalizeFieldKey(field.legacyKey || fallback?.legacyKey || legacyKeyForField(key), legacyKeyForField(key));
+      if (!fallback || !CONTROLLED_TAG_GROUP_KEYS.has(legacyKey)) return null;
+      const tags = cleanOptions(field.options || field.tags);
+      const fallbackTags = cleanOptions(fallback.options);
+      const hasExtraTags = tags.some((tag) => !fallbackTags.includes(tag));
+      const hasMultiOverride = Object.prototype.hasOwnProperty.call(field, "multi") && (field.multi !== false) !== (fallback.multi !== false);
+      if (!hasExtraTags && !hasMultiOverride) return null;
+      return {
+        key: legacyKey,
+        name: cleanText(field.name, fallback.name),
+        tone: normalizeTone(field.tone, fallback.tone),
+        tags,
+        multi: field.multi !== false,
+        entities: cleanEntities(field.entities, fallback.entities || ["competitor"]),
+        entity_level: cleanText(field.entity_level, fallback.entity_level || "competitor"),
+        field_key: key,
+        official: true,
+      };
+    })
+    .filter(Boolean);
+  const officialTagGroupsFromSettings = Array.isArray(settings.tag_groups)
+    ? settings.tag_groups
+      .filter((group) => group && officialLegacyKeys.has(group.key) && CONTROLLED_TAG_GROUP_KEYS.has(group.key))
+      .map((group) => ({
+        key: normalizeFieldKey(group.key, group.key),
+        name: cleanText(group.name, group.key),
+        tone: normalizeTone(group.tone),
+        tags: cleanOptions(group.tags),
+        multi: group.multi !== false,
+        entities: cleanEntities(group.entities, ["competitor"]),
+        entity_level: cleanText(group.entity_level, "competitor"),
+        field_key: normalizeFieldKey(group.field_key || DEFAULT_FIELDS.find((field) => field.legacyKey === group.key)?.key || group.key, group.key),
+        official: true,
+      }))
+    : [];
+  const officialTagGroups = [
+    ...officialTagGroupsFromSettings,
+    ...officialFieldsAsGroups,
+  ].reduce((groups, group) => {
+    if (!groups.some((item) => item.key === group.key)) groups.push(group);
+    return groups;
+  }, []);
   return {
     ...settings,
     fields,
-    tag_groups: fieldsToTagGroups(fields),
+    tag_groups: [
+      ...officialTagGroups,
+      ...fieldsToTagGroups(fields),
+    ],
   };
 }
 

@@ -149,6 +149,101 @@ function onboardingMeta(state, news = []) {
   };
 }
 
+function dateValue(value) {
+  const time = new Date(value || 0).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function configuredFeishuTables(settings = {}) {
+  return [
+    settings.feishu_products_table_id ? "products" : "",
+    settings.feishu_demands_table_id ? "demands" : "",
+    settings.feishu_news_table_id ? "news" : "",
+  ].filter(Boolean);
+}
+
+function buildHotKeywords(demands = []) {
+  const counts = new Map();
+  for (const demand of demands) {
+    const words = [
+      ...cleanArray(demand.tags),
+      ...cleanArray(demand.scenarios),
+      ...cleanArray(demand.painpoints),
+      demand.innovation,
+    ];
+    for (const raw of words) {
+      const word = cleanText(String(raw || "").split(/[／/]/)[0]).trim();
+      if (!word || word === "待分类") continue;
+      counts.set(word, (counts.get(word) || 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hans-CN"))
+    .slice(0, 10)
+    .map(([word, count]) => ({ word, count }));
+}
+
+function demandStatusKey(status = "") {
+  const value = String(status || "").toLowerCase();
+  if (/暂停|暂缓|放弃|弃单|paused|drop|stop/.test(value)) return "paused";
+  if (/立项|推进|进行|active|doing|progress/.test(value)) return "active";
+  return "review";
+}
+
+function buildDashboard(state, news = []) {
+  const settings = state.settings || {};
+  const demands = state.demands || [];
+  const research = state.research || [];
+  const tables = configuredFeishuTables(settings);
+  const feishuConnected = Boolean(
+    settings.feishu_app_id &&
+    settings.feishu_base_token &&
+    (settings.feishu_app_secret || settings.feishu_mcp_token) &&
+    tables.length > 0
+  );
+  const lastSyncAt = [
+    settings.last_feishu_test_at,
+    ...demands.map((item) => item.synced_at),
+    ...(state.products || []).map((item) => item.synced_at),
+    ...news.map((item) => item.synced_at),
+  ].filter(Boolean).sort((a, b) => dateValue(b) - dateValue(a))[0] || null;
+  const activeResearch = research
+    .filter((item) => !["done", "archived", "已归档", "完成"].includes(String(item.status || "").toLowerCase()))
+    .sort((a, b) => dateValue(b.updated_at || b.created_at) - dateValue(a.updated_at || a.created_at))
+    .slice(0, 5);
+  const recentDemands = demands
+    .filter((item) => item.synced_at || item.updated_at || item.created_at || item.date)
+    .sort((a, b) => dateValue(b.synced_at || b.updated_at || b.created_at || b.date) - dateValue(a.synced_at || a.updated_at || a.created_at || a.date))
+    .slice(0, 6);
+  const recentDecisions = feishuConnected ? recentDemands.map((item) => ({
+    id: item.id,
+    title: item.title,
+    owner: item.owner || item.pm || state.user?.name || "PM",
+    status: item.decision_status || item.status || item.innovation || "更新",
+    status_key: demandStatusKey(item.decision_status || item.status || item.innovation),
+    updated_at: item.synced_at || item.updated_at || item.created_at || item.date,
+  })) : [];
+  const abnormalItems = feishuConnected ? demands
+    .filter((item) => /暂停|暂缓|卡|阻塞|blocked|paused/i.test([item.status, item.note, item.summary].filter(Boolean).join(" ")))
+    .slice(0, 5)
+    .map((item) => ({ id: item.id, title: item.title, reason: item.status || "需关注" }))
+    : [];
+  return {
+    feishu_status: {
+      connected: feishuConnected,
+      last_sync_at: lastSyncAt,
+      configured_tables: tables,
+    },
+    active_research: activeResearch,
+    my_demands_count: demands.length,
+    demands_scope_label: feishuConnected ? "我的需求库" : "需求库 · 共追踪",
+    recent_decisions: recentDecisions,
+    abnormal_items: abnormalItems,
+    hot_keywords: buildHotKeywords(demands),
+    action_summary: activeResearch.length ? `${activeResearch.length} 个调研进行中` : "",
+  };
+}
+
 function mapUserRow(row) {
   if (!row) return null;
   return {
@@ -323,6 +418,192 @@ function mapFeedExportRow(row) {
   };
 }
 
+function ensureFeishuProjectUsersSchema() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS feishu_project_users (
+      workspace_id TEXT NOT NULL,
+      loom_user_id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      meego_user_key TEXT NOT NULL,
+      feishu_union_id TEXT,
+      feishu_open_id TEXT,
+      lark_user_id TEXT,
+      name TEXT,
+      email TEXT,
+      avatar_url TEXT,
+      source TEXT NOT NULL,
+      last_verified_at TEXT,
+      PRIMARY KEY (workspace_id, loom_user_id, project_key)
+    );
+  `);
+
+  const columns = new Set(db.prepare("PRAGMA table_info(feishu_project_users)").all().map((column) => column.name));
+  const optionalColumns = {
+    feishu_union_id: "TEXT",
+    feishu_open_id: "TEXT",
+    lark_user_id: "TEXT",
+    name: "TEXT",
+    email: "TEXT",
+    avatar_url: "TEXT",
+    source: "TEXT NOT NULL DEFAULT 'manual'",
+    last_verified_at: "TEXT",
+  };
+  for (const [name, definition] of Object.entries(optionalColumns)) {
+    if (!columns.has(name)) {
+      db.exec(`ALTER TABLE feishu_project_users ADD COLUMN ${name} ${definition};`);
+    }
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_feishu_project_users_workspace_project ON feishu_project_users(workspace_id, project_key);");
+}
+
+function ensureFeishuProjectMirrorSchema() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS feishu_project_items (
+      workspace_id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      work_item_id TEXT NOT NULL,
+      work_item_type_key TEXT NOT NULL,
+      work_item_type_name TEXT,
+      name TEXT,
+      status_key TEXT,
+      status_name TEXT,
+      current_node_key TEXT,
+      current_node_name TEXT,
+      current_owners_json TEXT,
+      role_members_json TEXT,
+      created_by_json TEXT,
+      updated_by_json TEXT,
+      created_at TEXT,
+      updated_at TEXT,
+      source_url TEXT,
+      raw_json TEXT,
+      PRIMARY KEY (workspace_id, project_key, work_item_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS feishu_project_fields (
+      workspace_id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      work_item_type_key TEXT NOT NULL,
+      field_key TEXT NOT NULL,
+      field_name TEXT,
+      field_type TEXT,
+      options_json TEXT,
+      field_desc TEXT,
+      updated_at TEXT,
+      PRIMARY KEY (workspace_id, project_key, work_item_type_key, field_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS feishu_project_item_fields (
+      workspace_id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      work_item_id TEXT NOT NULL,
+      field_key TEXT NOT NULL,
+      field_name TEXT,
+      field_type TEXT,
+      value_json TEXT,
+      value_text TEXT,
+      updated_at TEXT,
+      PRIMARY KEY (workspace_id, project_key, work_item_id, field_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS feishu_project_nodes (
+      workspace_id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      work_item_id TEXT NOT NULL,
+      node_key TEXT NOT NULL,
+      node_name TEXT,
+      status TEXT,
+      owners_json TEXT,
+      role_assignees_json TEXT,
+      participants_json TEXT,
+      schedule_json TEXT,
+      sub_tasks_json TEXT,
+      form_items_json TEXT,
+      raw_json TEXT,
+      updated_at TEXT,
+      PRIMARY KEY (workspace_id, project_key, work_item_id, node_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS feishu_project_op_records (
+      workspace_id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      work_item_id TEXT NOT NULL,
+      operation_time INTEGER NOT NULL,
+      operation_type TEXT,
+      operator_type TEXT,
+      operator_key TEXT,
+      module TEXT,
+      contents_json TEXT,
+      raw_json TEXT,
+      PRIMARY KEY (workspace_id, project_key, work_item_id, operation_time, operation_type, module)
+    );
+
+    CREATE TABLE IF NOT EXISTS feishu_project_idea_links (
+      workspace_id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      work_item_id TEXT NOT NULL,
+      research_id TEXT,
+      link_status TEXT NOT NULL,
+      imported_at TEXT,
+      last_synced_at TEXT,
+      PRIMARY KEY (workspace_id, project_key, work_item_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_feishu_project_items_workspace_type
+      ON feishu_project_items(workspace_id, work_item_type_key);
+    CREATE INDEX IF NOT EXISTS idx_feishu_project_item_fields_item
+      ON feishu_project_item_fields(workspace_id, project_key, work_item_id);
+    CREATE INDEX IF NOT EXISTS idx_feishu_project_idea_links_research
+      ON feishu_project_idea_links(workspace_id, research_id);
+  `);
+}
+
+function cleanFeishuProjectUserMapping(input = {}) {
+  const mapping = {
+    workspace_id: cleanText(input.workspace_id || input.workspaceId).slice(0, 120),
+    loom_user_id: cleanText(input.loom_user_id || input.loomUserId || input.user_id || input.userId).slice(0, 120),
+    project_key: cleanText(input.project_key || input.projectKey).slice(0, 160),
+    meego_user_key: cleanText(input.meego_user_key || input.meegoUserKey || input.user_key || input.userKey).slice(0, 160),
+    feishu_union_id: cleanText(input.feishu_union_id || input.feishuUnionId || input.union_id).slice(0, 160),
+    feishu_open_id: cleanText(input.feishu_open_id || input.feishuOpenId || input.open_id).slice(0, 160),
+    lark_user_id: cleanText(input.lark_user_id || input.larkUserId).slice(0, 160),
+    name: cleanText(input.name).slice(0, 160),
+    email: cleanText(input.email).toLowerCase().slice(0, 254),
+    avatar_url: cleanText(input.avatar_url || input.avatarUrl).slice(0, 1000),
+    source: cleanText(input.source, "manual").slice(0, 80),
+    last_verified_at: cleanText(input.last_verified_at || input.lastVerifiedAt, nowIso()).slice(0, 80),
+  };
+  if (!["manual", "mcp_current_user"].includes(mapping.source)) {
+    mapping.source = "manual";
+  }
+  const missing = ["workspace_id", "loom_user_id", "project_key", "meego_user_key"].filter((key) => !mapping[key]);
+  if (missing.length) {
+    throw new Error(`feishu_project_user_mapping_missing_required:${missing.join(",")}`);
+  }
+  return mapping;
+}
+
+ensureFeishuProjectUsersSchema();
+ensureFeishuProjectMirrorSchema();
+
+function mapFeishuProjectUserRow(row) {
+  if (!row) return null;
+  return {
+    workspace_id: row.workspace_id,
+    loom_user_id: row.loom_user_id,
+    project_key: row.project_key,
+    meego_user_key: row.meego_user_key,
+    feishu_union_id: row.feishu_union_id || "",
+    feishu_open_id: row.feishu_open_id || "",
+    lark_user_id: row.lark_user_id || "",
+    name: row.name || "",
+    email: row.email || "",
+    avatar_url: row.avatar_url || "",
+    source: row.source || "manual",
+    last_verified_at: row.last_verified_at || null,
+  };
+}
+
 function clampFetchInterval(value) {
   const interval = Number(value || 60);
   return Math.min(1440, Math.max(30, Number.isFinite(interval) ? interval : 60));
@@ -337,6 +618,113 @@ function cleanText(value, fallback = "") {
 function cleanJsonObject(value, fallback = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
   return JSON.parse(JSON.stringify(value));
+}
+
+function safeJsonStringify(value, fallback = {}) {
+  if (typeof value === "string") {
+    try {
+      JSON.parse(value);
+      return value;
+    } catch {
+      return JSON.stringify(fallback);
+    }
+  }
+  try {
+    return JSON.stringify(value ?? fallback);
+  } catch {
+    return JSON.stringify(fallback);
+  }
+}
+
+function safeJsonParse(value, fallback = {}) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function cleanFeishuProjectScope(input = {}) {
+  const scope = {
+    workspace_id: cleanText(input.workspace_id || input.workspaceId).slice(0, 120),
+    project_key: cleanText(input.project_key || input.projectKey).slice(0, 160),
+  };
+  const missing = ["workspace_id", "project_key"].filter((key) => !scope[key]);
+  if (missing.length) throw new Error(`feishu_project_scope_missing_required:${missing.join(",")}`);
+  return scope;
+}
+
+function mapFeishuProjectItemRow(row, fields = []) {
+  if (!row) return null;
+  const fieldMap = {};
+  for (const field of fields) {
+    fieldMap[field.field_key] = mapFeishuProjectItemFieldRow(field);
+  }
+  return {
+    workspace_id: row.workspace_id,
+    project_key: row.project_key,
+    work_item_id: row.work_item_id,
+    work_item_type_key: row.work_item_type_key,
+    work_item_type_name: row.work_item_type_name || "",
+    name: row.name || "",
+    status_key: row.status_key || "",
+    status_name: row.status_name || "",
+    current_node_key: row.current_node_key || "",
+    current_node_name: row.current_node_name || "",
+    current_owners: safeJsonParse(row.current_owners_json, []),
+    role_members: safeJsonParse(row.role_members_json, []),
+    created_by: safeJsonParse(row.created_by_json, {}),
+    updated_by: safeJsonParse(row.updated_by_json, {}),
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    source_url: row.source_url || "",
+    raw: safeJsonParse(row.raw_json, {}),
+    fields: fieldMap,
+  };
+}
+
+function mapFeishuProjectFieldRow(row) {
+  if (!row) return null;
+  return {
+    workspace_id: row.workspace_id,
+    project_key: row.project_key,
+    work_item_type_key: row.work_item_type_key,
+    field_key: row.field_key,
+    field_name: row.field_name || "",
+    field_type: row.field_type || "",
+    options: safeJsonParse(row.options_json, []),
+    field_desc: row.field_desc || "",
+    updated_at: row.updated_at || null,
+  };
+}
+
+function mapFeishuProjectItemFieldRow(row) {
+  if (!row) return null;
+  return {
+    workspace_id: row.workspace_id,
+    project_key: row.project_key,
+    work_item_id: row.work_item_id,
+    field_key: row.field_key,
+    field_name: row.field_name || "",
+    field_type: row.field_type || "",
+    value: safeJsonParse(row.value_json, {}),
+    value_text: row.value_text || "",
+    updated_at: row.updated_at || null,
+  };
+}
+
+function mapFeishuProjectIdeaLinkRow(row) {
+  if (!row) return null;
+  return {
+    workspace_id: row.workspace_id,
+    project_key: row.project_key,
+    work_item_id: row.work_item_id,
+    research_id: row.research_id || "",
+    link_status: row.link_status || "imported",
+    imported_at: row.imported_at || null,
+    last_synced_at: row.last_synced_at || null,
+  };
 }
 
 function slugifyFeedName(value, fallback = "group") {
@@ -471,6 +859,8 @@ function cleanPlatformArray(value) {
     platform: cleanText(platform?.platform, "unknown"),
     url: cleanText(platform?.url || platform?.source_url),
     price: cleanText(platform?.price),
+    original_price: cleanText(platform?.original_price),
+    discount_price: cleanText(platform?.discount_price),
     cost: cleanText(platform?.cost),
     creator: cleanText(platform?.creator),
     pledged_amount: cleanText(platform?.pledged_amount),
@@ -709,6 +1099,7 @@ export function bootstrap(userId) {
   state.user = userSummaryFromState(state, findUserById(userId) || { id: userId });
   state.workspaces = workspaces;
   state.workspace = workspaces[0] || null;
+  state.dashboard = buildDashboard(state, news);
   if (state.settings) {
     const llmConfigured = Boolean(state.settings.llm_api_url && state.settings.llm_model && state.settings.llm_api_key);
     const llmVisionConfigured = Boolean(state.settings.llm_vision_api_url && state.settings.llm_vision_model && state.settings.llm_vision_api_key);
@@ -975,6 +1366,11 @@ export function createResearch(userId, input) {
       products: cleanRecordList(input.products || input.matched_products || []),
       demands: cleanRecordList(input.demands || input.matched_demands || []),
       analysis: Array.isArray(input.analysis) ? input.analysis.slice(0, 20) : input.analysis || null,
+      ...(input.feishu_project_idea ? { feishu_project_idea: cleanFeishuProjectIdea(input.feishu_project_idea) } : {}),
+      ...(input.source_type ? { source_type: cleanText(input.source_type) } : {}),
+      ...(input.source_project_key ? { source_project_key: cleanText(input.source_project_key) } : {}),
+      ...(input.source_work_item_id ? { source_work_item_id: cleanText(input.source_work_item_id) } : {}),
+      ...(input.source_type_key ? { source_type_key: cleanText(input.source_type_key) } : {}),
       sample: Boolean(input.sample),
       created_at: nowIso(),
       updated_at: nowIso(),
@@ -999,11 +1395,182 @@ export function updateResearch(userId, id, patch) {
       ...(patch.matched_products !== undefined && patch.products === undefined ? { products: cleanRecordList(patch.matched_products) } : {}),
       ...(patch.matched_demands !== undefined && patch.demands === undefined ? { demands: cleanRecordList(patch.matched_demands) } : {}),
       ...(patch.analysis !== undefined ? { analysis: Array.isArray(patch.analysis) ? patch.analysis.slice(0, 20) : patch.analysis } : {}),
+      ...(patch.feishu_project_idea !== undefined ? researchFeishuProjectIdeaPatch(patch.feishu_project_idea) : {}),
       updated_at: nowIso(),
     };
     Object.assign(item, next);
     return item;
   });
+}
+
+const FEISHU_PROJECT_IDEA_TYPE_KEY = "689428570bcc00818880dff1";
+
+function tableExists(tableName) {
+  return Boolean(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName));
+}
+
+function tableColumns(tableName) {
+  if (!tableExists(tableName)) return new Set();
+  return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((column) => column.name));
+}
+
+function parseJsonValue(value, fallback = null) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function cleanFeishuProjectIdea(input = {}) {
+  const projectKey = cleanText(input.project_key || input.projectKey);
+  const workItemId = cleanText(input.work_item_id || input.workItemId);
+  if (!projectKey || !workItemId) return null;
+  return {
+    project_key: projectKey,
+    work_item_id: workItemId,
+    work_item_type_key: cleanText(input.work_item_type_key || input.type_key || input.workItemTypeKey || FEISHU_PROJECT_IDEA_TYPE_KEY),
+    work_item_type_name: cleanText(input.work_item_type_name || input.type_name || input.workItemTypeName || "产品想法登记"),
+    name: cleanTitle(input.name || input.title, "未命名飞书产品想法"),
+    status_name: cleanText(input.status_name || input.status || ""),
+    current_node_name: cleanText(input.current_node_name || input.node_name || ""),
+    source_url: cleanText(input.source_url || input.url || ""),
+    linked_at: cleanText(input.linked_at) || nowIso(),
+  };
+}
+
+function researchFeishuProjectIdeaPatch(input) {
+  if (input === null) {
+    return {
+      feishu_project_idea: null,
+      source_type: "",
+      source_project_key: "",
+      source_work_item_id: "",
+      source_type_key: "",
+    };
+  }
+  const idea = cleanFeishuProjectIdea(input);
+  if (!idea) return {};
+  return {
+    feishu_project_idea: idea,
+    source_type: "feishu_project_idea",
+    source_project_key: idea.project_key,
+    source_work_item_id: idea.work_item_id,
+    source_type_key: idea.work_item_type_key,
+  };
+}
+
+function mapFeishuProjectItem(row, fieldRows = []) {
+  const raw = parseJsonValue(row.raw_json, {});
+  const fields = {};
+  fieldRows.forEach((field) => {
+    fields[field.field_key] = {
+      key: field.field_key,
+      name: field.field_name || field.field_key,
+      type: field.field_type || "",
+      value: parseJsonValue(field.value_json, field.value_text || ""),
+      text: field.value_text || "",
+    };
+  });
+  return {
+    id: `${row.project_key}:${row.work_item_id}`,
+    workspace_id: row.workspace_id,
+    project_key: row.project_key,
+    work_item_id: row.work_item_id,
+    work_item_type_key: row.work_item_type_key || raw.work_item_type_key || "",
+    work_item_type_name: row.work_item_type_name || raw.work_item_type_name || "",
+    name: row.name || raw.name || "未命名飞书工作项",
+    status_key: row.status_key || "",
+    status_name: row.status_name || raw.status_name || "",
+    current_node_key: row.current_node_key || "",
+    current_node_name: row.current_node_name || raw.current_node_name || "",
+    current_owners: parseJsonValue(row.current_owners_json, []),
+    role_members: parseJsonValue(row.role_members_json, []),
+    created_by: parseJsonValue(row.created_by_json, null),
+    updated_by: parseJsonValue(row.updated_by_json, null),
+    created_at: row.created_at || "",
+    updated_at: row.updated_at || "",
+    source_url: row.source_url || "",
+    fields,
+    raw,
+  };
+}
+
+export function listFeishuProjectItems(input = {}, filters = {}) {
+  const options = typeof input === "string"
+    ? { workspace_id: input, ...filters }
+    : { ...(input || {}) };
+  const {
+    workspace_id = "",
+    project_key = "",
+    projectKey = "",
+    work_item_type_key = "",
+    workItemTypeKey = "",
+    type = "",
+    q = "",
+    limit = 50,
+  } = options;
+  if (!tableExists("feishu_project_items")) return [];
+  const columns = tableColumns("feishu_project_items");
+  const clauses = [];
+  const params = [];
+  if (workspace_id && columns.has("workspace_id")) {
+    clauses.push("workspace_id = ?");
+    params.push(cleanText(workspace_id));
+  }
+  if (type === "idea") {
+    clauses.push("(work_item_type_key = ? OR work_item_type_name LIKE ?)");
+    params.push(FEISHU_PROJECT_IDEA_TYPE_KEY, "%产品想法%");
+  }
+  const projectFilter = cleanText(project_key || projectKey);
+  if (projectFilter && columns.has("project_key")) {
+    clauses.push("project_key = ?");
+    params.push(projectFilter);
+  }
+  const typeFilter = cleanText(work_item_type_key || workItemTypeKey);
+  if (typeFilter && columns.has("work_item_type_key")) {
+    clauses.push("work_item_type_key = ?");
+    params.push(typeFilter);
+  }
+  const keyword = cleanText(q).toLowerCase();
+  if (keyword) {
+    clauses.push("(lower(name) LIKE ? OR lower(work_item_id) LIKE ?)");
+    params.push(`%${keyword}%`, `%${keyword}%`);
+  }
+  const sql = `
+    SELECT * FROM feishu_project_items
+    ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
+    ORDER BY COALESCE(updated_at, created_at, '') DESC
+    LIMIT ?
+  `;
+  const rows = db.prepare(sql).all(...params, Math.min(Math.max(Number(limit) || 50, 1), 100));
+  if (!tableExists("feishu_project_item_fields")) return rows.map((row) => mapFeishuProjectItem(row));
+  const fieldStmt = db.prepare(`
+    SELECT * FROM feishu_project_item_fields
+    WHERE workspace_id = ? AND project_key = ? AND work_item_id = ?
+    ORDER BY field_name, field_key
+  `);
+  return rows.map((row) => mapFeishuProjectItem(row, fieldStmt.all(row.workspace_id, row.project_key, row.work_item_id)));
+}
+
+export function bindResearchFeishuProjectIdea(userId, researchId, input, { workspace_id = "" } = {}) {
+  const item = updateResearch(userId, researchId, { feishu_project_idea: input });
+  if (!item) return null;
+  const idea = item.feishu_project_idea;
+  if (idea && workspace_id && tableExists("feishu_project_idea_links")) {
+    db.prepare(`
+      INSERT INTO feishu_project_idea_links (
+        workspace_id, project_key, work_item_id, research_id, link_status, imported_at, last_synced_at
+      ) VALUES (?, ?, ?, ?, 'linked', ?, ?)
+      ON CONFLICT(workspace_id, project_key, work_item_id) DO UPDATE SET
+        research_id = excluded.research_id,
+        link_status = 'linked',
+        last_synced_at = excluded.last_synced_at
+    `).run(workspace_id, idea.project_key, idea.work_item_id, researchId, idea.linked_at, nowIso());
+  }
+  return item;
 }
 
 export function deleteResearch(userId, id) {
@@ -1054,6 +1621,11 @@ export function updateSettings(userId, patch) {
       "feishu_demands_table_id",
       "feishu_news_table_id",
       "feishu_table_token",
+      "feishu_mcp_url",
+      "feishu_mcp_token",
+      "feishu_mcp_project_key",
+      "feishu_mcp_interval",
+      "last_feishu_project_mcp_test_at",
       "official_news_enabled",
       "rss_collect_enabled",
       "rss_collect_interval_ms",
@@ -1063,7 +1635,7 @@ export function updateSettings(userId, patch) {
     for (const key of allowed) {
       if (patch[key] !== undefined) next[key] = patch[key];
     }
-    for (const key of ["llm_api_key", "llm_vision_api_key", "search_api_key", "search_tavily_api_key", "search_serpapi_api_key", "feishu_app_secret"]) {
+    for (const key of ["llm_api_key", "llm_vision_api_key", "search_api_key", "search_tavily_api_key", "search_serpapi_api_key", "feishu_app_secret", "feishu_mcp_token"]) {
       if (next[key] === "********" || next[key] === "") delete next[key];
     }
     state.settings = { ...(state.settings || {}), ...next };
@@ -2002,6 +2574,86 @@ export function findUserIdByFeedAccessToken(token, purpose = "feed") {
   return row.user_id;
 }
 
+export function upsertFeishuProjectUserMapping(input = {}) {
+  ensureFeishuProjectUsersSchema();
+  const mapping = cleanFeishuProjectUserMapping(input);
+  db.prepare(`
+    INSERT INTO feishu_project_users (
+      workspace_id,
+      loom_user_id,
+      project_key,
+      meego_user_key,
+      feishu_union_id,
+      feishu_open_id,
+      lark_user_id,
+      name,
+      email,
+      avatar_url,
+      source,
+      last_verified_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(workspace_id, loom_user_id, project_key) DO UPDATE SET
+      meego_user_key = excluded.meego_user_key,
+      feishu_union_id = excluded.feishu_union_id,
+      feishu_open_id = excluded.feishu_open_id,
+      lark_user_id = excluded.lark_user_id,
+      name = excluded.name,
+      email = excluded.email,
+      avatar_url = excluded.avatar_url,
+      source = excluded.source,
+      last_verified_at = excluded.last_verified_at
+  `).run(
+    mapping.workspace_id,
+    mapping.loom_user_id,
+    mapping.project_key,
+    mapping.meego_user_key,
+    mapping.feishu_union_id || null,
+    mapping.feishu_open_id || null,
+    mapping.lark_user_id || null,
+    mapping.name || null,
+    mapping.email || null,
+    mapping.avatar_url || null,
+    mapping.source,
+    mapping.last_verified_at || null
+  );
+  return getFeishuProjectUserMapping(mapping.workspace_id, mapping.loom_user_id, mapping.project_key);
+}
+
+export function getFeishuProjectUserMapping(workspaceId, loomUserId, projectKey) {
+  ensureFeishuProjectUsersSchema();
+  const row = db.prepare(`
+    SELECT *
+    FROM feishu_project_users
+    WHERE workspace_id = ? AND loom_user_id = ? AND project_key = ?
+  `).get(
+    cleanText(workspaceId).slice(0, 120),
+    cleanText(loomUserId).slice(0, 120),
+    cleanText(projectKey).slice(0, 160)
+  );
+  return mapFeishuProjectUserRow(row);
+}
+
+export function listFeishuProjectUserMappings(workspaceId, projectKey = "") {
+  ensureFeishuProjectUsersSchema();
+  const cleanWorkspaceId = cleanText(workspaceId).slice(0, 120);
+  const cleanProjectKey = cleanText(projectKey).slice(0, 160);
+  if (!cleanWorkspaceId) return [];
+  const rows = cleanProjectKey
+    ? db.prepare(`
+        SELECT *
+        FROM feishu_project_users
+        WHERE workspace_id = ? AND project_key = ?
+        ORDER BY name COLLATE NOCASE ASC, loom_user_id ASC
+      `).all(cleanWorkspaceId, cleanProjectKey)
+    : db.prepare(`
+        SELECT *
+        FROM feishu_project_users
+        WHERE workspace_id = ?
+        ORDER BY project_key ASC, name COLLATE NOCASE ASC, loom_user_id ASC
+      `).all(cleanWorkspaceId);
+  return rows.map(mapFeishuProjectUserRow);
+}
+
 export function listFeedExports(userId) {
   return db.prepare(`
     SELECT *
@@ -2034,6 +2686,200 @@ export function createFeedExport(userId, input = {}) {
     record.item_count, record.payload_json, record.created_at, record.updated_at
   );
   return listFeedExports(userId).find((item) => item.id === record.id) || null;
+}
+
+export function upsertFeishuProjectItem(input = {}) {
+  const scope = cleanFeishuProjectScope(input);
+  const workItemId = cleanText(input.work_item_id || input.workItemId).slice(0, 160);
+  const workItemTypeKey = cleanText(input.work_item_type_key || input.workItemTypeKey).slice(0, 160);
+  if (!workItemId || !workItemTypeKey) {
+    throw new Error("feishu_project_item_missing_required:work_item_id,work_item_type_key");
+  }
+  const updatedAt = cleanText(input.updated_at || input.updatedAt, nowIso());
+  db.prepare(`
+    INSERT INTO feishu_project_items (
+      workspace_id, project_key, work_item_id, work_item_type_key, work_item_type_name,
+      name, status_key, status_name, current_node_key, current_node_name,
+      current_owners_json, role_members_json, created_by_json, updated_by_json,
+      created_at, updated_at, source_url, raw_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(workspace_id, project_key, work_item_id) DO UPDATE SET
+      work_item_type_key = excluded.work_item_type_key,
+      work_item_type_name = excluded.work_item_type_name,
+      name = excluded.name,
+      status_key = excluded.status_key,
+      status_name = excluded.status_name,
+      current_node_key = excluded.current_node_key,
+      current_node_name = excluded.current_node_name,
+      current_owners_json = excluded.current_owners_json,
+      role_members_json = excluded.role_members_json,
+      created_by_json = excluded.created_by_json,
+      updated_by_json = excluded.updated_by_json,
+      created_at = COALESCE(excluded.created_at, feishu_project_items.created_at),
+      updated_at = excluded.updated_at,
+      source_url = excluded.source_url,
+      raw_json = excluded.raw_json
+  `).run(
+    scope.workspace_id,
+    scope.project_key,
+    workItemId,
+    workItemTypeKey,
+    cleanText(input.work_item_type_name || input.workItemTypeName).slice(0, 160),
+    cleanText(input.name || input.title).slice(0, 500),
+    cleanText(input.status_key || input.statusKey).slice(0, 120),
+    cleanText(input.status_name || input.statusName).slice(0, 160),
+    cleanText(input.current_node_key || input.currentNodeKey).slice(0, 160),
+    cleanText(input.current_node_name || input.currentNodeName).slice(0, 160),
+    safeJsonStringify(input.current_owners ?? input.currentOwners ?? input.current_owners_json, []),
+    safeJsonStringify(input.role_members ?? input.roleMembers ?? input.role_members_json, []),
+    safeJsonStringify(input.created_by ?? input.createdBy ?? input.created_by_json, {}),
+    safeJsonStringify(input.updated_by ?? input.updatedBy ?? input.updated_by_json, {}),
+    cleanText(input.created_at || input.createdAt) || null,
+    updatedAt,
+    cleanText(input.source_url || input.sourceUrl).slice(0, 1000),
+    safeJsonStringify(input.raw ?? input.raw_json, {})
+  );
+  return getFeishuProjectItem(scope.workspace_id, scope.project_key, workItemId);
+}
+
+export function getFeishuProjectItem(workspaceId, projectKey, workItemId) {
+  const row = db.prepare(`
+    SELECT *
+    FROM feishu_project_items
+    WHERE workspace_id = ? AND project_key = ? AND work_item_id = ?
+  `).get(cleanText(workspaceId), cleanText(projectKey), cleanText(workItemId));
+  if (!row) return null;
+  const fields = db.prepare(`
+    SELECT *
+    FROM feishu_project_item_fields
+    WHERE workspace_id = ? AND project_key = ? AND work_item_id = ?
+    ORDER BY field_name ASC, field_key ASC
+  `).all(row.workspace_id, row.project_key, row.work_item_id);
+  return mapFeishuProjectItemRow(row, fields);
+}
+
+export function upsertFeishuProjectFieldConfig(input = {}) {
+  const scope = cleanFeishuProjectScope(input);
+  const workItemTypeKey = cleanText(input.work_item_type_key || input.workItemTypeKey).slice(0, 160);
+  const fieldKey = cleanText(input.field_key || input.fieldKey).slice(0, 160);
+  if (!workItemTypeKey || !fieldKey) {
+    throw new Error("feishu_project_field_missing_required:work_item_type_key,field_key");
+  }
+  db.prepare(`
+    INSERT INTO feishu_project_fields (
+      workspace_id, project_key, work_item_type_key, field_key, field_name,
+      field_type, options_json, field_desc, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(workspace_id, project_key, work_item_type_key, field_key) DO UPDATE SET
+      field_name = excluded.field_name,
+      field_type = excluded.field_type,
+      options_json = excluded.options_json,
+      field_desc = excluded.field_desc,
+      updated_at = excluded.updated_at
+  `).run(
+    scope.workspace_id,
+    scope.project_key,
+    workItemTypeKey,
+    fieldKey,
+    cleanText(input.field_name || input.fieldName).slice(0, 160),
+    cleanText(input.field_type || input.fieldType).slice(0, 80),
+    safeJsonStringify(input.options ?? input.options_json, []),
+    cleanText(input.field_desc || input.fieldDesc).slice(0, 1000),
+    cleanText(input.updated_at || input.updatedAt, nowIso())
+  );
+  return listFeishuProjectFields(scope.workspace_id, scope.project_key, workItemTypeKey).find((field) => field.field_key === fieldKey) || null;
+}
+
+export function listFeishuProjectFields(workspaceId, projectKey, workItemTypeKey = "") {
+  return db.prepare(`
+    SELECT *
+    FROM feishu_project_fields
+    WHERE workspace_id = ?
+      AND project_key = ?
+      AND (? = '' OR work_item_type_key = ?)
+    ORDER BY field_name ASC, field_key ASC
+  `).all(cleanText(workspaceId), cleanText(projectKey), cleanText(workItemTypeKey), cleanText(workItemTypeKey)).map(mapFeishuProjectFieldRow);
+}
+
+export function upsertFeishuProjectItemField(input = {}) {
+  const scope = cleanFeishuProjectScope(input);
+  const workItemId = cleanText(input.work_item_id || input.workItemId).slice(0, 160);
+  const fieldKey = cleanText(input.field_key || input.fieldKey).slice(0, 160);
+  if (!workItemId || !fieldKey) {
+    throw new Error("feishu_project_item_field_missing_required:work_item_id,field_key");
+  }
+  db.prepare(`
+    INSERT INTO feishu_project_item_fields (
+      workspace_id, project_key, work_item_id, field_key, field_name,
+      field_type, value_json, value_text, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(workspace_id, project_key, work_item_id, field_key) DO UPDATE SET
+      field_name = excluded.field_name,
+      field_type = excluded.field_type,
+      value_json = excluded.value_json,
+      value_text = excluded.value_text,
+      updated_at = excluded.updated_at
+  `).run(
+    scope.workspace_id,
+    scope.project_key,
+    workItemId,
+    fieldKey,
+    cleanText(input.field_name || input.fieldName).slice(0, 160),
+    cleanText(input.field_type || input.fieldType).slice(0, 80),
+    safeJsonStringify(input.value ?? input.value_json, {}),
+    cleanText(input.value_text || input.valueText).slice(0, 2000),
+    cleanText(input.updated_at || input.updatedAt, nowIso())
+  );
+  return mapFeishuProjectItemFieldRow(db.prepare(`
+    SELECT *
+    FROM feishu_project_item_fields
+    WHERE workspace_id = ? AND project_key = ? AND work_item_id = ? AND field_key = ?
+  `).get(scope.workspace_id, scope.project_key, workItemId, fieldKey));
+}
+
+export function upsertFeishuProjectIdeaLink(input = {}) {
+  const scope = cleanFeishuProjectScope(input);
+  const workItemId = cleanText(input.work_item_id || input.workItemId).slice(0, 160);
+  if (!workItemId) throw new Error("feishu_project_idea_link_missing_required:work_item_id");
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO feishu_project_idea_links (
+      workspace_id, project_key, work_item_id, research_id, link_status, imported_at, last_synced_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(workspace_id, project_key, work_item_id) DO UPDATE SET
+      research_id = excluded.research_id,
+      link_status = excluded.link_status,
+      imported_at = COALESCE(feishu_project_idea_links.imported_at, excluded.imported_at),
+      last_synced_at = excluded.last_synced_at
+  `).run(
+    scope.workspace_id,
+    scope.project_key,
+    workItemId,
+    cleanText(input.research_id || input.researchId).slice(0, 160),
+    cleanText(input.link_status || input.linkStatus, "imported").slice(0, 80),
+    cleanText(input.imported_at || input.importedAt, now),
+    cleanText(input.last_synced_at || input.lastSyncedAt, now)
+  );
+  return getFeishuProjectIdeaLink(scope.workspace_id, scope.project_key, workItemId);
+}
+
+export function getFeishuProjectIdeaLink(workspaceId, projectKey, workItemId) {
+  return mapFeishuProjectIdeaLinkRow(db.prepare(`
+    SELECT *
+    FROM feishu_project_idea_links
+    WHERE workspace_id = ? AND project_key = ? AND work_item_id = ?
+  `).get(cleanText(workspaceId), cleanText(projectKey), cleanText(workItemId)));
+}
+
+export function listFeishuProjectIdeaLinks(workspaceId, filters = {}) {
+  const projectKey = cleanText(filters.project_key || filters.projectKey).slice(0, 160);
+  return db.prepare(`
+    SELECT *
+    FROM feishu_project_idea_links
+    WHERE workspace_id = ?
+      AND (? = '' OR project_key = ?)
+    ORDER BY last_synced_at DESC, imported_at DESC
+  `).all(cleanText(workspaceId), projectKey, projectKey).map(mapFeishuProjectIdeaLinkRow);
 }
 
 export function markSynced(userId, kind, records) {

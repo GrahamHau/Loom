@@ -4,7 +4,7 @@ import { fetchPageContent } from "./content-fetcher.js";
 import { buildSearchContext } from "./search-service.js";
 import { rawState } from "./repository.js";
 import { fieldOptionsText, normalizeFields } from "./field-config.js";
-import { normalizeTagValues } from "./field-matcher.js";
+import { matchFieldOption, normalizeTagValues } from "./field-matcher.js";
 
 function compactArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String).slice(0, 8);
@@ -15,6 +15,62 @@ function compactArray(value) {
 function compactUrlArray(value, limit = 12) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, limit);
+}
+
+function demandImageUrls(source = {}) {
+  return compactUrlArray([
+    source.thumbnail_url,
+    source.image,
+    ...(Array.isArray(source.image_urls) ? source.image_urls : []),
+    ...(Array.isArray(source.images) ? source.images : []),
+    ...(Array.isArray(source.detail_images) ? source.detail_images : []),
+  ], 8);
+}
+
+function commentsPrompt(comments = []) {
+  if (!Array.isArray(comments) || !comments.length) return "无";
+  return comments
+    .map((comment, index) => {
+      const name = String(comment?.user_name || comment?.username || comment?.author || `评论${index + 1}`).trim();
+      const content = String(comment?.content || "").trim();
+      return content ? `${name}：${content}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 30)
+    .join("\n") || "无";
+}
+
+function hostField(userId) {
+  return fieldSchema(userId, "competitor").find((field) => field.key === "host");
+}
+
+function normalizeHostValue(userId, rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return { value: "", match: null };
+  const field = hostField(userId);
+  const match = field ? matchFieldOption(raw, field, { keepUnmatched: false, threshold: 0.82 }) : null;
+  if (!match) {
+    return {
+      value: raw,
+      match: {
+        raw_name: raw,
+        canonical_name: raw,
+        confidence: 0,
+        matched_by: "needs_review",
+        status: "needs_review",
+      },
+    };
+  }
+  return {
+    value: match.value,
+    match: {
+      raw_name: raw,
+      canonical_name: match.value,
+      confidence: Number(match.confidence.toFixed(3)),
+      matched_by: match.method || "fuzzy",
+      status: "matched",
+    },
+  };
 }
 
 function safeNumber(value) {
@@ -30,7 +86,8 @@ function normalizeMonthlySales(value) {
 }
 
 function fields(userId) {
-  return rawState(userId)?.settings?.fields || [];
+  const settings = rawState(userId)?.settings || {};
+  return normalizeFields(settings.fields, settings.tag_groups, { includeDefaults: true });
 }
 
 function fieldSchema(userId, entity, options = {}) {
@@ -70,8 +127,6 @@ function legacyTagCandidates(entity, result = {}) {
       brand: result.brand,
       host: result.host,
       category: result.category,
-      custom_tags: result.tags || result.tags_custom,
-      标签: result.tags || result.tags_custom,
     };
   }
   return {
@@ -81,8 +136,6 @@ function legacyTagCandidates(entity, result = {}) {
     用户痛点: result.tags_painpoint || result.painpoints,
     innovation: result.tags_innovation || result.innovation,
     创新类型: result.tags_innovation || result.innovation,
-    custom_tags: result.tags_custom || result.tags,
-    标签: result.tags_custom || result.tags,
   };
 }
 
@@ -93,13 +146,11 @@ function fieldSuggestions(entity, result = {}, tagValues = {}) {
         [result.brand, "品牌"],
         [result.host, "主机"],
         [result.category, "品类"],
-        [result.tags || result.tags_custom, "标签"],
       ]
     : [
         [result.tags_scenario || result.scenarios, "使用场景"],
         [result.tags_painpoint || result.painpoints, "用户痛点"],
         [result.tags_innovation || result.innovation, "创新类型"],
-        [result.tags_custom || result.tags, "标签"],
       ];
   return suggestions
     .filter(([value]) => compactArray(value).length || (typeof value === "string" && value.trim()))
@@ -222,7 +273,9 @@ export async function parseProductRaw(userId, { platform, data }) {
   "brand": "品牌名",
   "host": "适配主机/设备型号",
   "category": "品类",
-  "price": "带符号的价格",
+  "price": "主要成交价/折扣价，带币种符号",
+  "original_price": "淘宝/天猫原价或划线价，带币种符号",
+  "discount_price": "淘宝/天猫折扣价/券后价/到手价，带币种符号",
   "creator": "Kickstarter 发起人或空字符串",
   "pledged_amount": "Kickstarter 认缴金额或空字符串",
   "goal_amount": "Kickstarter 目标金额或空字符串",
@@ -343,9 +396,10 @@ ${fieldLibraryPrompt(userId, "competitor")}
 平台：${platform}
 URL：${source.url || ""}
 商品名：${source.name || source.title || ""}
-价格：${source.price || ""}
+原价：${source.original_price || source.price || ""}
+折扣价：${source.discount_price || source.price || ""}
 SKU：${source.sku_id || ""}
-月销：${source.monthly_sales || ""}
+已售：${source.monthly_sales || ""}
 描述：${source.description || source.content || ""}
 原始规格文本：${rawBullets.join("；")}
 详情图数量：${detailImages.length}
@@ -365,6 +419,8 @@ ${detailImages.map((url, index) => `${index + 1}. ${url}`).join("\n")}`,
     host: result.host || source.host || "",
     category: result.category || "",
     price: result.price || source.price || "",
+    original_price: result.original_price || source.original_price || "",
+    discount_price: result.discount_price || source.discount_price || result.price || source.price || "",
     sku_id: result.sku_id || source.sku_id || "",
     rating: safeNumber(source.rating),
     review_count: safeNumber(source.review_count),
@@ -391,7 +447,6 @@ export async function parseDemandUrl(userId, { url }) {
 使用场景：${fieldListText(userId, "scenarios")}
 用户痛点：${fieldListText(userId, "painpoints")}
 创新类型：${fieldListText(userId, "innovation")}
-自定义标签：${fieldListText(userId, "custom_tags")}
 字段库：
 ${fieldLibraryPrompt(userId, "inspiration")}
 
@@ -403,7 +458,6 @@ ${fieldLibraryPrompt(userId, "inspiration")}
   "tags_painpoint": [],
   "tags_innovation": "单选值",
   "tags_category": [],
-  "tags_custom": [],
   "tag_values": { "字段key": ["字段值"] }
 }
 
@@ -431,8 +485,6 @@ ${searchContext}`,
     scenarios: compactArray(result.tags_scenario),
     painpoints: compactArray(result.tags_painpoint),
     tags_category: compactArray(result.tags_category),
-    tags_custom: compactArray(result.tags_custom),
-    tags: compactArray(result.tags_custom),
     tag_values: tagValues,
     field_suggestions: fieldSuggestions("inspiration", result, tagValues),
     import_method: "manual",
@@ -445,30 +497,42 @@ ${searchContext}`,
 
 export async function parseDemandRaw(userId, { platform, data }) {
   const source = data || {};
-  const result = await callLLM({
+  const images = platform === "xiaohongshu" ? demandImageUrls(source) : [];
+  const result = await callRoutedLLM({
     userId,
     purpose: "demands:parse_raw",
     system: "你是产品信息分类助手。只返回 JSON，不要解释。",
+    visionSystem: "你是社媒图片信息提取助手，只根据图片提取可见的产品、主机、场景、痛点和文字信息。只返回 JSON，不要解释。",
+    visionUser: `请识别这些社媒图片中和产品需求有关的信息。重点提取可见主机/设备型号、使用场景、配件形态、用户痛点和图片文字。字段缺失就返回空字符串或空数组。
+
+返回 JSON：
+{
+  "host": "图片中出现或暗示的主机/设备型号",
+  "scenarios": ["使用场景"],
+  "painpoints": ["痛点"],
+  "image_summary": "80字以内图片摘要"
+}`,
     user: `请对插件采集的内容进行需求结构化打标。
 
 规则：
 - title 必须基于原始标题压缩或清洗，不要改成另一个事件，也不要凭空重写。
 - 如果原始标题已经清晰，直接沿用原始标题。
+- host 只填内容明确出现或高度确定的主机/设备型号；不确定返回空字符串。
 
 使用场景：${fieldListText(userId, "scenarios")}
 用户痛点：${fieldListText(userId, "painpoints")}
 创新类型：${fieldListText(userId, "innovation")}
-自定义标签：${fieldListText(userId, "custom_tags")}
+主机名标准表：${fieldListText(userId, "host")}
 
 返回 JSON：
 {
   "title": "一句话标题",
   "summary": "80字以内中文摘要",
+  "host": "主机/设备型号或空字符串",
   "tags_scenario": [],
   "tags_painpoint": [],
   "tags_innovation": "单选值",
   "tags_category": [],
-  "tags_custom": [],
   "tag_values": { "字段key": ["字段值"] }
 }
 
@@ -480,22 +544,29 @@ URL：${source.url || ""}
 标题：${source.title || source.name || ""}
 作者：${source.author || source.brand || ""}
 互动：点赞 ${source.likes || 0}，收藏 ${source.collects || 0}，评论 ${source.comments || 0}
-内容：${source.content || source.description || ""}`,
+内容：${source.content || source.description || ""}
+可见评论：
+${commentsPrompt(source.visible_comments)}`,
+    imageUrls: images,
     maxTokens: 240,
   });
+  const host = normalizeHostValue(userId, result.host || source.host || source.related_product_name || "");
   const tagValues = accountTagValues(userId, "inspiration", result);
+  if (host.value) tagValues.host = [host.value];
 
   return {
     ...source,
     platform,
     title: source.title || source.name || result.title || "未命名需求",
     summary: source.content || source.description || result.summary || "",
+    ai_summary: result.summary || source.ai_summary || "",
     original_content: source.content || source.description || source.summary || "",
+    host: host.value,
+    host_match: host.match,
     tags_scenario: compactArray(result.tags_scenario),
     tags_painpoint: compactArray(result.tags_painpoint),
     tags_innovation: result.tags_innovation || "待分类",
     tags_category: compactArray(result.tags_category),
-    tags_custom: compactArray(result.tags_custom),
     tag_values: tagValues,
     field_suggestions: fieldSuggestions("inspiration", result, tagValues),
     thumbnail_url: source.thumbnail_url || "",

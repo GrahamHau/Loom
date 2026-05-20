@@ -83,7 +83,26 @@ npm run dev
 The Vite app usually runs at:
 
 ```text
-http://127.0.0.1:5173
+http://127.0.0.1:5173/app
+```
+
+The local backend listens on `http://127.0.0.1:3000`. Both ports are fixed for local testing; Vite uses strict port mode so port conflicts are visible instead of silently switching to a new URL.
+
+On this Mac, the local development stack can be auto-started by LaunchAgent:
+
+```bash
+launchctl print gui/$(id -u)/com.grahamhau.loom-local-dev
+launchctl kickstart -k gui/$(id -u)/com.grahamhau.loom-local-dev
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.grahamhau.loom-local-dev.plist
+```
+
+Logs:
+
+```text
+logs/local-server.log
+logs/local-vite.log
+logs/local-db-sync.log
+logs/launchd.err.log
 ```
 
 Useful checks:
@@ -136,6 +155,24 @@ FEISHU_OAUTH_AUTO_PROVISION=true
 FEISHU_OAUTH_ALLOWED_TENANT_KEYS=
 FEISHU_OAUTH_ALLOWED_EMAIL_DOMAINS=
 ```
+
+For local testing, Feishu OAuth redirect URI must point to a URL that matches the Feishu app config and reaches the local backend session. If you want to replay online data locally without using the live production database directly, run:
+
+```bash
+npm run db:pull-remote
+```
+
+This creates a verified SQLite backup inside the production container, copies it to `data/loom.remote.snapshot.sqlite`, runs a local `quick_check`, and atomically replaces the local snapshot only after validation. It does not change the live remote database.
+
+On Graham's Mac the intended local workflow is:
+
+- Bookmark `http://127.0.0.1:5173/app`.
+- Keep the Chrome extension pointed at production (`https://loom.palecedar.site`) so collection writes to the real online account.
+- Keep local Feishu OAuth disabled unless a public HTTPS callback URL is configured in the Feishu app.
+- Use `.env.local` with `DATABASE_PATH=data/loom.remote.snapshot.sqlite` and `LOOM_PASSWORD_USER_ID=<production-user-id>` so local password login opens the mirrored production user workspace.
+- Restart the LaunchAgent or run `npm run db:pull-remote` after collecting online data to refresh the local mirror. The LaunchAgent can also sync periodically and restart the local backend after a valid snapshot is pulled.
+
+If the local backend is running, prefer refreshing through the LaunchAgent rather than overwriting `DATABASE_PATH` directly. SQLite may have `-wal`/`-shm` sidecar files open; the LaunchAgent pulls into a pending snapshot, stops the local backend, installs the verified snapshot, removes stale sidecars, and then starts the backend again.
 
 Optional seal/private overlay:
 

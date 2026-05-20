@@ -632,8 +632,8 @@ async function enrichOfficialImages(source, newsItems) {
   for (const item of newsItems) {
     if (!shouldRetryImageEnrichment(item)) continue;
     const reusableThumbnail = findReusableNewsThumbnail({
-      originalUrl: item.original_url || item.article_url || "",
-      mergeKey: item.classification?.merge_key || "",
+      originalUrl: imageLookupUrlForItem(item),
+      mergeKey: item.classification?.merge_key || mergeKeyForItem(item),
       titleZh: item.titleZh || item.original_title || "",
       userId: source.user_id || "",
     });

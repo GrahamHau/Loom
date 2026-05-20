@@ -36,6 +36,10 @@
     return `¥${raw}`;
   }
 
+  function cleanPriceNumber(value) {
+    return cleanPrice(value).replace(/^¥/, "");
+  }
+
   function visibleText(selector, root = document) {
     const nodes = root.querySelectorAll(selector);
     for (const node of nodes) {
@@ -101,6 +105,20 @@
       /到手价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
       /售价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
       /¥\s*([0-9]+(?:\.[0-9]+)?)/,
+    ];
+    for (const pattern of patterns) {
+      const match = bodyText.match(pattern);
+      if (match?.[1]) return match[1];
+    }
+    return "";
+  }
+
+  function findOriginalPriceFromText() {
+    const bodyText = document.body?.innerText || "";
+    const patterns = [
+      /原价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
+      /划线价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
+      /价格\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
     ];
     for (const pattern of patterns) {
       const match = bodyText.match(pattern);
@@ -368,6 +386,20 @@
       ["itemDO", "price"],
       ["data", "price"],
     ]);
+    const originalPriceFromScripts = pickFirstValue(scriptObjects, [
+      ["price", "reservePrice"],
+      ["price", "originPrice"],
+      ["price", "originalPrice"],
+      ["item", "reservePrice"],
+      ["itemDO", "reservePrice"],
+      ["skuCore", "sku2info", "0", "price", "reservePrice"],
+    ]);
+    const discountPriceFromScripts = pickFirstValue(scriptObjects, [
+      ["price", "promotionPrice"],
+      ["price", "promotionList", 0, "price"],
+      ["skuCore", "sku2info", "0", "price", "promotionList", 0, "price"],
+      ["skuCore", "sku2info", "0", "price", "priceText"],
+    ]);
 
     const salesFromScripts = pickFirstValue(scriptObjects, [
       ["item", "sellCount"],
@@ -414,6 +446,17 @@
       || parsePrimaryPrice(findPriceFromText())
       || attr("[data-price]", "data-price")
     );
+    const originalPrice = cleanPrice(
+      parsePrimaryPrice(originalPriceFromScripts)
+      || findOriginalPriceFromText()
+      || price
+    );
+    const discountPrice = cleanPrice(
+      parsePrimaryPrice(discountPriceFromScripts)
+      || findPrimaryPrice()
+      || parsePrimaryPrice(priceFromScripts)
+      || cleanPriceNumber(price)
+    );
 
     const monthlySales = cleanSales(
       salesFromScripts
@@ -445,6 +488,8 @@
     return {
       name,
       price,
+      original_price: originalPrice,
+      discount_price: discountPrice,
       sku_id: itemId,
       brand: "",
       rating: Number.parseFloat(String(ratingText).replace(/[^\d.]/g, "")) || null,
