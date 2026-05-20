@@ -29,6 +29,7 @@ function storedConfig() {
     model: cleanText(config.model),
     api_key: cleanText(config.api_key),
     allow_all_users: Boolean(config.allow_all_users),
+    allow_future_users: Boolean(config.allow_future_users),
     allowed_user_ids: uniqueList(config.allowed_user_ids),
     updated_at: cleanText(config.updated_at),
     updated_by: cleanText(config.updated_by),
@@ -62,6 +63,7 @@ export function updatePlatformAiConfig(actorUser, input = {}) {
     model: cleanText(input.model, previous.model),
     api_key: apiKeyInput === "********" ? previous.api_key : apiKeyInput,
     allow_all_users: input.allow_all_users === undefined ? previous.allow_all_users : Boolean(input.allow_all_users),
+    allow_future_users: input.allow_future_users === undefined ? previous.allow_future_users : Boolean(input.allow_future_users),
     allowed_user_ids: allowedUserIds,
     updated_at: new Date().toISOString(),
     updated_by: actorUser?.id || "",
@@ -75,7 +77,9 @@ export function isPlatformAiAllowedForUser(userId) {
   if (!config.enabled || !config.api_url || !config.model || !config.api_key) return false;
   if (!userId || userId === LEGACY_USER_ID) return false;
   if (config.allow_all_users) return true;
-  return config.allowed_user_ids.includes(userId);
+  if (config.allowed_user_ids.includes(userId)) return true;
+  if (config.allow_future_users) return true;
+  return false;
 }
 
 export function platformAiSettingsForUser(userId) {

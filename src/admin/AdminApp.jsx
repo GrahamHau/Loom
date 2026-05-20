@@ -12,6 +12,7 @@ const EMPTY_PLATFORM_AI = {
   model: "",
   api_key: "",
   allow_all_users: false,
+  allow_future_users: false,
   allowed_user_ids: [],
   configured: false,
 };
@@ -593,6 +594,15 @@ function PlatformAiPanel({ config, users, onSave }) {
             全部活跃用户
           </label>
         </div>
+
+        <label className="admin-checkline" style={{ marginBottom: 14 }}>
+          <input
+            type="checkbox"
+            checked={Boolean(draft.allow_future_users)}
+            onChange={(event) => patch({ allow_future_users: event.target.checked })}
+          />
+          新来用户默认可用平台 AI
+        </label>
 
         <div className="admin-user-access-list">
           {users.map((user) => {

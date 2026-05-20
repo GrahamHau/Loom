@@ -2126,6 +2126,7 @@ describe("admin users", () => {
         model: "platform-model",
         api_key: "platform-key",
         allow_all_users: false,
+        allow_future_users: true,
         allowed_user_ids: ["platform-ai-member", "missing-user"],
       }),
     });
@@ -2138,6 +2139,7 @@ describe("admin users", () => {
       api_key: "********",
       configured: true,
       allow_all_users: false,
+      allow_future_users: true,
       allowed_user_ids: ["platform-ai-member"],
     });
 

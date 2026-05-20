@@ -5707,7 +5707,7 @@ function CreateResearchModal({ api, refreshData, onClose }) {
             </div>
             <div>
               <label className="field-label">产品想法</label>
-              <textarea className="input" style={{ width: "100%", minHeight: 120, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="补充产品想法、目标用户、关键洞察或资料链接..." />
+              <textarea className="research-idea-input" style={{ minHeight: 120 }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="补充产品想法、目标用户、关键洞察或资料链接..." />
             </div>
             {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
           </div>

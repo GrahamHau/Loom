@@ -3291,11 +3291,18 @@ a.platform-card-link:hover {
   padding: 12px 14px;
   resize: vertical;
   transition: none;
+  appearance: none;
+  -webkit-appearance: none;
 }
 .research-idea-input:hover,
 .research-idea-input:focus {
   border-color: var(--border);
   background: #fff;
+  box-shadow: none;
+}
+.research-idea-input:focus-visible {
+  outline: none;
+  border-color: var(--border);
   box-shadow: none;
 }
 .research-idea-input::placeholder {
