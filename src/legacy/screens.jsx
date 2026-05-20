@@ -5135,6 +5135,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const [feishuPreview, setFeishuPreview] = useState(null);
   const [notice, setNotice] = useState("");
   const [status, setStatus] = useState(research.status || "草稿");
+  const [dossierOpen, setDossierOpen] = useState(false);
   const linkedFeishuIdea = research.feishu_project_idea || null;
   const products = productIds.map((id) => safeArray(data.products).find((p) => p.id === id)).filter(Boolean);
   const demands = demandIds.map((id) => safeArray(data.demands).find((d) => d.id === id)).filter(Boolean);
@@ -5191,6 +5192,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
       setFeishuPreviewBusy(false);
     }
   };
+  const ResearchDossier = globalThis.ResearchDossier;
 
   return (
     <div className="viewport">
@@ -5200,10 +5202,26 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
           <div className="grow" />
           <div className="page-actions">
             <Btn icon="sync" onClick={analyze} disabled={busy}>{busy ? "分析中..." : "重新分析"}</Btn>
+            <Btn
+              icon="sparkles"
+              onClick={() => setDossierOpen(true)}
+              disabled={!ResearchDossier || (products.length === 0 && demands.length === 0)}
+            >
+              生成调研档案
+            </Btn>
             <Btn icon="external" onClick={previewFeishuProjectIdea} disabled={feishuPreviewBusy}>{feishuPreviewBusy ? "检查中..." : "提交到飞书产品想法登记"}</Btn>
             <Btn variant="primary" icon="external" onClick={exportCsv}>导出整理数据</Btn>
           </div>
         </div>
+
+        {dossierOpen && ResearchDossier &&
+          <ResearchDossier
+            research={research}
+            products={products}
+            demands={demands}
+            onClose={() => setDossierOpen(false)}
+          />
+        }
 
         <div className="research-detail-layout">
           <div className="research-detail-main">
