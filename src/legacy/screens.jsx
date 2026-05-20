@@ -4861,21 +4861,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
   };
 
   const ResearchDossier = globalThis.ResearchDossier;
-
-  if (view === "dossier" && ResearchDossier) {
-    return (
-      <div className="viewport">
-        <div className="page page-fluid">
-          <ResearchDossier
-            research={research}
-            products={products}
-            demands={demands}
-            onClose={() => setView("overview")}
-          />
-        </div>
-      </div>
-    );
-  }
+  const dossierOpen = view === "dossier";
 
   return (
     <div className="viewport">
@@ -4895,6 +4881,15 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
             </Btn>
           </div>
         </div>
+
+        {dossierOpen && ResearchDossier && (
+          <ResearchDossier
+            research={research}
+            products={products}
+            demands={demands}
+            onClose={() => setView("overview")}
+          />
+        )}
 
         <div className="research-detail-layout">
           <div className="research-detail-main">
