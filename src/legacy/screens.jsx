@@ -2549,7 +2549,7 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
         <div className="demands-source-banner">
           <Icon name="link" size={12} style={{ color: "var(--text-3)", flexShrink: 0 }} />
           <span className="demands-source-text">
-            数据来源：<strong>飞书多维表格</strong>
+            数据来源：<strong>飞书项目 · 产研中心产品开发流程</strong>
           </span>
           {feishuConnected ? (
             <Tag tone="success">已接入 · 2 分钟前同步</Tag>
@@ -2614,21 +2614,20 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
         {tab === "requirements" && (
           <div className="demands-tab-empty">
             <Icon name="clipboard" size={28} style={{ color: "var(--text-4)" }} />
-            <div className="demands-tab-empty-title">需求列表（飞书镜像表）</div>
+            <div className="demands-tab-empty-title">需求列表（飞书项目工作项镜像）</div>
             <div className="demands-tab-empty-desc">
-              接入飞书 Loom 标准模板后，所有需求会在这里以表格形式镜像显示。
-              字段包括：需求名称 / 品类 / 负责 PM / 当前状态 / 优先级 / 周更新 / 决策状态 / 决策理由 / 关联竞品。
+              接入飞书项目后，工作项按类型镜像显示。每种类型自带飞书定义的标准字段 + 流程节点。
             </div>
             <div className="demands-tab-empty-fields">
-              <span>需求名称</span>
-              <span>品类</span>
-              <span>负责 PM</span>
-              <span>当前状态</span>
-              <span>优先级</span>
-              <span>周更新</span>
-              <span>决策状态</span>
-              <span>决策理由</span>
-              <span>关联竞品</span>
+              <span>产品想法登记</span>
+              <span>产品规划流程</span>
+              <span>技术预研流程</span>
+              <span>产品立项流程</span>
+              <span>ID 设计流程</span>
+              <span>产品开发流程</span>
+              <span>试量产流程</span>
+              <span>产品上市管理</span>
+              <span>变更管理</span>
             </div>
             <button
               type="button"
@@ -2636,7 +2635,7 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
               style={{ marginTop: 18 }}
               onClick={() => onNavigate?.("settings")}
             >
-              去配置飞书 →
+              去配置飞书项目 →
             </button>
           </div>
         )}
@@ -2665,12 +2664,13 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
             <Icon name="calendar" size={28} style={{ color: "var(--text-4)" }} />
             <div className="demands-tab-empty-title">决策时间线</div>
             <div className="demands-tab-empty-desc">
-              按时间顺序展示每条需求的状态变更与决策事件——AI 从每周五更新单元格自动抽取。
+              直接读取飞书项目的工作项 op_record 与节点流转——已结构化，无需 AI 抽取。
             </div>
             <div className="demands-tab-empty-bullets">
-              <div>· 立项 / 暂缓 / 弃单 / 重启 事件</div>
-              <div>· 决策理由 + 触发来源（销售反馈 / 竞品动作）</div>
-              <div>· 关联的调研任务与竞品快照</div>
+              <div>· 状态流转事件（立项 / 暂缓 / 弃单 / 重启）</div>
+              <div>· 字段变更（含计算字段的自动评级，如"D 类不可接受"）</div>
+              <div>· 工作项评论中的决策理由</div>
+              <div>· 操作人、操作时间、from→to 完整 diff</div>
             </div>
             <div className="demands-tab-empty-note">
               团队全部动态在这里查看，工作台只显示"我"的部分。
@@ -4825,6 +4825,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [status, setStatus] = useState(research.status || "草稿");
+  const [view, setView] = useState("overview"); // overview | dossier
   const products = productIds.map((id) => safeArray(data.products).find((p) => p.id === id)).filter(Boolean);
   const demands = demandIds.map((id) => safeArray(data.demands).find((d) => d.id === id)).filter(Boolean);
   const detailProduct = detailTarget?.type === "product" ? safeArray(data.products).find((p) => p.id === detailTarget.id) : null;
@@ -4859,6 +4860,23 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
     }
   };
 
+  const ResearchDossier = globalThis.ResearchDossier;
+
+  if (view === "dossier" && ResearchDossier) {
+    return (
+      <div className="viewport">
+        <div className="page page-fluid">
+          <ResearchDossier
+            research={research}
+            products={products}
+            demands={demands}
+            onClose={() => setView("overview")}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="viewport">
       <div className="page page-fluid research-detail-page">
@@ -4867,7 +4885,14 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
           <div className="grow" />
           <div className="page-actions">
             <Btn icon="sync" onClick={analyze} disabled={busy}>{busy ? "分析中..." : "重新分析"}</Btn>
-            <Btn variant="primary" icon="external">导出报告</Btn>
+            <Btn
+              variant="primary"
+              icon="sparkles"
+              onClick={() => setView("dossier")}
+              disabled={products.length === 0 && demands.length === 0}
+            >
+              生成调研档案
+            </Btn>
           </div>
         </div>
 

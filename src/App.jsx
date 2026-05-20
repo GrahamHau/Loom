@@ -977,7 +977,7 @@ function HomeScreen({ data, onNavigate }) {
           <div className={`home-kpi-card ${feishuConnected ? "" : "home-kpi-card-pending"}`}>
             <div className="home-kpi-num">{feishuConnected ? 0 : ""}</div>
             <div className="home-kpi-label">
-              {feishuConnected ? "我本周的决策" : "我本周的决策 · 待接入飞书"}
+              {feishuConnected ? "我本周的状态流转" : "我本周的状态流转 · 待接入飞书项目"}
             </div>
           </div>
         </div>
@@ -988,9 +988,9 @@ function HomeScreen({ data, onNavigate }) {
               <Icon name="feishu" size={16} />
             </div>
             <div className="home-connect-banner-body">
-              <div className="home-connect-banner-title">接入飞书多维表格，工作台才能告诉你今天该做什么</div>
+              <div className="home-connect-banner-title">接入飞书项目——Loom 直接从你团队的工作流读取决策</div>
               <div className="home-connect-banner-desc">
-                Loom 从你每周五更新的单元格里自动抽取决策。无需新增动作，按现有节奏写更新即可。
+                工作项状态流转、节点变更、评论——全部结构化，无需 AI 抽取。在设置里填入飞书项目 MCP token 即可。
               </div>
             </div>
             <button className="home-connect-banner-cta" onClick={() => onNavigate("settings")}>
@@ -1021,20 +1021,20 @@ function HomeScreen({ data, onNavigate }) {
             ) : (
               <div className="home-pending-card">
                 <div className="home-pending-explain">
-                  接入飞书后，每周五你写完更新单元格，这里会自动出现你的决策摘要：
+                  接入飞书项目后，你在工作项上的每一次操作（状态流转、字段更新、节点推进）都会自动出现在这里：
                 </div>
                 <ul className="home-pending-bullets">
                   <li>
                     <span className="home-pending-bullet-dot" />
-                    你做出的决策（暂缓 / 立项 / 弃单 …）
+                    状态流转（产品立项 → 试量产 / 暂缓 / 弃单 …）
                   </li>
                   <li>
                     <span className="home-pending-bullet-dot" />
-                    决策理由（从单元格自然语言抽取）
+                    节点推进（开模通知单 / MRD 评审 / 打样预研）
                   </li>
                   <li>
                     <span className="home-pending-bullet-dot" />
-                    重启条件（"等模具降到 18 万再说"等隐性标记）
+                    评论里的决策理由（直接从工作项评论同步）
                   </li>
                 </ul>
                 <div className="home-pending-note-2">

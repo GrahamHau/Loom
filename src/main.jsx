@@ -12,5 +12,6 @@ if (window.location.pathname.startsWith("/admin")) {
   await import("./legacy/components.jsx");
   await import("./legacy/tweaks-panel.jsx");
   await import("./legacy/screens.jsx");
+  await import("./legacy/research-dossier.jsx");
   await import("./App.jsx");
 }
