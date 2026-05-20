@@ -610,6 +610,28 @@ function OpportunityGrid({ topPains, commonTags, openOpportunities }) {
   );
 }
 
+/* Mini sparkbars used inside the hero bento card */
+function SparkBars({ bands, dominantBand }) {
+  if (!bands || !bands.length) return null;
+  const max = Math.max(...bands.map((b) => b.pct), 0.05);
+  return (
+    <div className="dossier-bento-sparkbars" aria-hidden="true">
+      {bands.map((b, i) => {
+        const isDominant = dominantBand && b.lo === dominantBand.lo && b.count > 0;
+        const h = b.count > 0 ? Math.max((b.pct / max) * 100, 18) : 8;
+        return (
+          <div
+            key={i}
+            className={`dossier-spark-bar ${isDominant ? "is-dominant" : ""} ${b.count === 0 ? "is-zero" : ""}`}
+            style={{ height: `${h}%` }}
+            title={`${fmtCNY(b.lo)}-${fmtCNY(b.hi)} · ${b.count} 款`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 /* ---------- Export to standalone HTML ---------- */
 
 function exportDossierHTML(dossierEl, research) {
@@ -718,31 +740,62 @@ function ResearchDossier({ research, products, demands, onClose }) {
         <div className="dossier-modal-body" ref={bodyRef}>
           <div className={`dossier ${revealed ? "dossier-revealed" : ""}`}>
 
-            {/* HERO */}
+            {/* HERO — Apple bento grid */}
             <section className="dossier-hero">
               <div className="dossier-hero-eyebrow">调研档案 · {research?.date || "—"}</div>
               <h1 className="dossier-hero-title">{research?.title || `${stats.dominantCategory} 品类全景`}</h1>
-              <div className="dossier-hero-stats">
-                <div className="dossier-hero-stat">
-                  <div className="dossier-hero-stat-num">{stats.productsTotal}</div>
-                  <div className="dossier-hero-stat-label">关联竞品</div>
+
+              <div className="dossier-bento">
+                {/* Big card: 主流价格带 + AI 洞察 + sparkbars */}
+                <div className="dossier-bento-card dossier-bento-hero-card">
+                  <div className="dossier-bento-eyebrow">主流价格带</div>
+                  {stats.dominantBand && stats.dominantBand.count > 0 ? (
+                    <>
+                      <div className="dossier-bento-mega-num">{fmtCNY(stats.dominantBand.lo)}–{fmtCNY(stats.dominantBand.hi)}</div>
+                      <div className="dossier-bento-mega-sub">{Math.round(stats.dominantBand.pct * 100)}% 竞品集中于此区间</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="dossier-bento-mega-num">—</div>
+                      <div className="dossier-bento-mega-sub">竞品数据不足以判断主流价格带</div>
+                    </>
+                  )}
+                  <SparkBars bands={stats.bands} dominantBand={stats.dominantBand} />
+                  <div className="dossier-bento-insight">
+                    <Icon name="sparkles" size={12} />
+                    <span>{insight}</span>
+                  </div>
                 </div>
-                <div className="dossier-hero-stat">
-                  <div className="dossier-hero-stat-num">{stats.demandsTotal}</div>
-                  <div className="dossier-hero-stat-label">用户声音</div>
+
+                {/* Top right 1: 关联竞品 */}
+                <div className="dossier-bento-card dossier-bento-small">
+                  <div className="dossier-bento-small-num">{stats.productsTotal}</div>
+                  <div className="dossier-bento-small-label">关联竞品</div>
                 </div>
-                <div className="dossier-hero-stat">
-                  <div className="dossier-hero-stat-num">{stats.priceStats.median ? fmtCNY(stats.priceStats.median) : "—"}</div>
-                  <div className="dossier-hero-stat-label">价格中位数</div>
+
+                {/* Top right 2: 用户声音 */}
+                <div className="dossier-bento-card dossier-bento-small">
+                  <div className="dossier-bento-small-num">{stats.demandsTotal}</div>
+                  <div className="dossier-bento-small-label">用户声音</div>
                 </div>
-                <div className="dossier-hero-stat">
-                  <div className="dossier-hero-stat-num">{stats.openOpportunities.length}</div>
-                  <div className="dossier-hero-stat-label">空白机会点</div>
+
+                {/* Bottom right 1: 机会区 (accent highlight) */}
+                <div className="dossier-bento-card dossier-bento-small dossier-bento-highlight">
+                  <div className="dossier-bento-small-num">{stats.openOpportunities.length}</div>
+                  <div className="dossier-bento-small-label">空白机会点</div>
+                  {stats.openOpportunities[0] && (
+                    <div className="dossier-bento-small-meta">"{stats.openOpportunities[0].pain}" 待破</div>
+                  )}
                 </div>
-              </div>
-              <div className="dossier-hero-insight">
-                <Icon name="sparkles" size={14} />
-                <span>{insight}</span>
+
+                {/* Bottom right 2: 高频痛点 */}
+                <div className="dossier-bento-card dossier-bento-small">
+                  <div className="dossier-bento-small-num">{stats.topPains.length}</div>
+                  <div className="dossier-bento-small-label">已聚合痛点</div>
+                  {stats.topPains[0] && (
+                    <div className="dossier-bento-small-meta">最高频 · {stats.topPains[0][0]}</div>
+                  )}
+                </div>
               </div>
             </section>
 
