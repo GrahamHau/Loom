@@ -3554,11 +3554,16 @@ function ResearchScreen({ data, api, refreshData }) {
   const [selectMode, setSelectMode] = useState(false);
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [dossierTargetId, setDossierTargetId] = useState(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const items = safeArray(data.research);
   const pageSize = 8;
   const paged = paginate(items, page, pageSize);
+  const ResearchDossier = globalThis.ResearchDossier;
+  const dossierTarget = items.find((item) => item.id === dossierTargetId) || null;
+  const dossierProducts = safeArray(dossierTarget?.products).map((id) => safeArray(data.products).find((p) => p.id === id)).filter(Boolean);
+  const dossierDemands = safeArray(dossierTarget?.demands).map((id) => safeArray(data.demands).find((d) => d.id === id)).filter(Boolean);
 
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
@@ -3663,6 +3668,19 @@ function ResearchScreen({ data, api, refreshData }) {
                 {r.status === "草稿" && "📝 "}
                 {r.status}
               </Tag>
+              {!selectMode && ResearchDossier &&
+                <Btn
+                  size="sm"
+                  variant="ghost"
+                  icon="sparkles"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDossierTargetId(r.id);
+                  }}
+                >
+                  生成调研档案
+                </Btn>
+              }
               <button className="row-delete-btn apple-delete-btn" title="删除调研" onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }}>
                 <Icon name="trash" size={13} />
               </button>
@@ -3679,6 +3697,14 @@ function ResearchScreen({ data, api, refreshData }) {
           }
         </div>
         <PaginationBar page={paged.currentPage} total={paged.total} pageSize={pageSize} onPageChange={setPage} label="个调研" />
+        {dossierTarget && ResearchDossier &&
+          <ResearchDossier
+            research={dossierTarget}
+            products={dossierProducts}
+            demands={dossierDemands}
+            onClose={() => setDossierTargetId(null)}
+          />
+        }
         {showCreate && <CreateResearchModal api={api} refreshData={refreshData} onClose={() => setShowCreate(false)} />}
         {deleteTarget && <DeleteItemsConfirmModal entityLabel="调研" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
         {showBulkDeleteConfirm && <DeleteItemsConfirmModal entityLabel="调研" items={selectedItems} busy={deleteBusy} onClose={() => !deleteBusy && setShowBulkDeleteConfirm(false)} onConfirm={deleteBulk} />}
@@ -5205,7 +5231,7 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
             <Btn
               icon="sparkles"
               onClick={() => setDossierOpen(true)}
-              disabled={!ResearchDossier || (products.length === 0 && demands.length === 0)}
+              disabled={!ResearchDossier}
             >
               生成调研档案
             </Btn>
