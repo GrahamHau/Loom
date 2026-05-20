@@ -3,6 +3,8 @@ import { DEFAULT_TAG_GROUPS, normalizeTagGroups } from "./tag-config.js";
 
 const HOST_OPTIONS = [
   "Osmo Pocket 3",
+  "Osmo Pocket 4",
+  "Osmo Pocket 4P",
   "Osmo Action 5 Pro",
   "Osmo Action 4",
   "Osmo Mobile 7P",
@@ -20,6 +22,7 @@ const HOST_OPTIONS = [
   "Insta360 Flow 2 Pro",
   "Insta360 Flow 2",
   "Insta360 Flow Pro",
+  "Insta360 Luna",
 ];
 const CONTROLLED_TAG_GROUP_KEYS = new Set(["competitor_brands", "camera_brands", "product_categories"]);
 

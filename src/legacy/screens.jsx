@@ -535,6 +535,8 @@ const OFFICIAL_BRAND_OPTIONS = [
 
 const OFFICIAL_HOST_OPTIONS = [
   "Osmo Pocket 3",
+  "Osmo Pocket 4",
+  "Osmo Pocket 4P",
   "Osmo Action 5 Pro",
   "Osmo Action 4",
   "Osmo Mobile 7P",
@@ -552,6 +554,7 @@ const OFFICIAL_HOST_OPTIONS = [
   "Insta360 Flow 2 Pro",
   "Insta360 Flow 2",
   "Insta360 Flow Pro",
+  "Insta360 Luna",
 ];
 
 const OFFICIAL_FIELD_OPTIONS = {

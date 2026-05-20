@@ -1365,7 +1365,12 @@ describe("repository", () => {
     expect(state.settings.fields).toEqual([]);
     expect(state.settings.tag_groups).toEqual([]);
     expect(repo.listFields(legacyUserId)).toEqual([]);
-    expect(JSON.parse(fieldOptionsText(state.settings.fields, "host"))).toEqual(expect.arrayContaining(["Osmo Pocket 3"]));
+    expect(JSON.parse(fieldOptionsText(state.settings.fields, "host"))).toEqual(expect.arrayContaining([
+      "Osmo Pocket 3",
+      "Osmo Pocket 4",
+      "Osmo Pocket 4P",
+      "Insta360 Luna",
+    ]));
   });
 
   it("does not merge brand and host options into a pseudo brands field", () => {
@@ -1437,6 +1442,9 @@ describe("repository", () => {
 
     expect(matchFieldKey("适配设备型号", fields)?.field.key).toBe("host");
     expect(matchFieldOption("pocket3", fields.find((field) => field.key === "host"))?.value).toBe("Osmo Pocket 3");
+    expect(matchFieldOption("Pocket 4", fields.find((field) => field.key === "host"))?.value).toBe("Osmo Pocket 4");
+    expect(matchFieldOption("Pocket 4 Pro", fields.find((field) => field.key === "host"))?.value).toBe("Osmo Pocket 4P");
+    expect(matchFieldOption("影石 Luna", fields.find((field) => field.key === "host"))?.value).toBe("Insta360 Luna");
     expect(matchFieldOptionInText("Insta360 GO 3S 复古套装发布", fields.find((field) => field.key === "host"))?.value).toBe("Insta360 GO 3S");
     expect(matchFieldOption("vlog 自拍", fields.find((field) => field.key === "scenarios"))?.value).toBe("vlog 自拍");
     expect(normalizeTagValues({ 主机: ["DJI Pocket 3"], 场景: ["vlog 自拍"] }, fields)).toEqual({

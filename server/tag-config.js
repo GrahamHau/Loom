@@ -26,6 +26,8 @@ export const DEFAULT_TAG_GROUPS = [
     tone: "outline",
     tags: [
       "Osmo Pocket 3",
+      "Osmo Pocket 4",
+      "Osmo Pocket 4P",
       "Osmo Action 5 Pro",
       "Osmo Action 4",
       "Osmo Mobile 7P",
@@ -43,6 +45,7 @@ export const DEFAULT_TAG_GROUPS = [
       "Insta360 Flow 2 Pro",
       "Insta360 Flow 2",
       "Insta360 Flow Pro",
+      "Insta360 Luna",
     ],
   },
   {
