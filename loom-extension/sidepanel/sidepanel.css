@@ -648,7 +648,7 @@ textarea.ghost-input{
    但全部降为浅色调，不喧宾夺主
    ============================================================ */
 .tag-row{display:flex;flex-wrap:wrap;gap:5px}
-/* Shared chip style. Field chips, dropdown chips, and normal tag rows must look identical. */
+/* Shared chip style — field chips, dropdown chips, and normal tag rows align with Feishu multi-select. */
 .tag{
   display:inline-flex;align-items:center;gap:4px;
   padding:3px 8px;border-radius:6px;
@@ -692,8 +692,8 @@ textarea.ghost-input{
 }
 .tag.dashed:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
 
-/* Removable chips keep the same body style; only the small × affordance is extra. */
-.tag.removable{padding-right:4px;max-width:180px;gap:4px}
+/* Removable: × button hidden by default, fades in on chip hover (Feishu pattern) */
+.tag.removable{padding-right:4px;max-width:180px;gap:2px}
 .tag.removable > button{
   border:none;background:transparent;color:inherit;
   opacity:0;
