@@ -6264,9 +6264,13 @@ function SettingsScreen({ data, api, refreshData }) {
             <div className="settings-row">
               <div className="label">&nbsp;</div>
               <div className="row">
+                <Btn icon="save" onClick={() => saveSettings()}>保存配置</Btn>
                 <Btn icon="check" onClick={() => test("/api/settings/test-feishu-project-mcp", "飞书项目 MCP")}>{isAdmin ? "测试并固定空间" : "测试连接并回填"}</Btn>
                 {isAdmin ? <Btn variant="primary" icon="sync" onClick={syncFeishuProjectNow}>立即同步</Btn> : null}
                 {(settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at) && <span className="muted text-sm" style={{ marginLeft: 4 }}>上次:{settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at}</span>}
+              </div>
+              <div className="muted text-sm" style={{ marginTop: 8 }}>
+                先保存，再测试连接；如果 token 正确，空间名称和产品想法类型会自动回填。
               </div>
             </div>
           </div>
