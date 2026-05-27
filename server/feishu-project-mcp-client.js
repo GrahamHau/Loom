@@ -88,7 +88,23 @@ function extractWorkItemTypes(result) {
 }
 
 function extractProjectSummary(result) {
-  const source = result?.project || result?.data?.project || result?.data || result || {};
+  const parsed = parseToolContent(result);
+  const source = [
+    parsed?.project,
+    parsed?.data?.project,
+    parsed?.result?.project,
+    parsed?.project_info,
+    parsed?.data?.project_info,
+    parsed?.result?.project_info,
+    Array.isArray(parsed?.projects) ? parsed.projects[0] : null,
+    Array.isArray(parsed?.project_infos) ? parsed.project_infos[0] : null,
+    Array.isArray(parsed?.items) ? parsed.items[0] : null,
+    Array.isArray(parsed?.data?.items) ? parsed.data.items[0] : null,
+    Array.isArray(parsed?.data?.projects) ? parsed.data.projects[0] : null,
+    Array.isArray(parsed?.data?.project_infos) ? parsed.data.project_infos[0] : null,
+    parsed?.data,
+    parsed,
+  ].find((item) => item && typeof item === "object") || {};
   if (!source || typeof source !== "object") return null;
   return {
     key: source.project_key || source.projectKey || source.key || "",
@@ -499,8 +515,9 @@ export async function testFeishuProjectMcpForUser(userId, { fetchImpl } = {}) {
       if (settings.projectKey) throw error;
     }
   }
-  if (settings.projectKey && toolNames.includes("list_workitem_types")) {
-    const typeResult = await client.callTool("list_workitem_types", { project_key: settings.projectKey });
+  const resolvedProjectKey = cleanText(project?.key || settings.projectKey);
+  if (resolvedProjectKey && toolNames.includes("list_workitem_types")) {
+    const typeResult = await client.callTool("list_workitem_types", { project_key: resolvedProjectKey });
     workItemTypes = extractWorkItemTypes(typeResult);
   }
 

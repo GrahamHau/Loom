@@ -121,6 +121,46 @@ describe("testFeishuProjectMcpForUser", () => {
     expect(repo.rawState(userId).settings.last_feishu_project_mcp_test_at).toBeTruthy();
     expect(repo.rawState(userId).settings.feishu_project_idea_type_key).toBeTruthy();
   });
+
+  it("auto-fills project and idea type when only token is provided", async () => {
+    const userId = dbModule.getLegacyUserId();
+    repo.updateSettings(userId, {
+      feishu_mcp_token: "secret-token",
+    });
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (body.method === "initialize") return okText(JSON.stringify({ result: { serverInfo: { name: "Meego MCP Server", version: "1.0.0" } } }));
+      if (body.method === "tools/list") return okText(JSON.stringify({ result: { tools: [{ name: "search_project_info" }, { name: "list_workitem_types" }] } }));
+      if (body.params.name === "search_project_info") {
+        return okText(JSON.stringify({
+          result: {
+            projects: [
+              { project_key: "project-auto", name: "产研中心产品开发流程" },
+            ],
+          },
+        }));
+      }
+      if (body.params.name === "list_workitem_types") {
+        expect(body.params.arguments.project_key).toBe("project-auto");
+        return okText(JSON.stringify({
+          result: {
+            work_item_types: [
+              { key: "idea-type", name: "产品想法登记" },
+              { key: "project-type", name: "产品立项流程" },
+            ],
+          },
+        }));
+      }
+      return okText(JSON.stringify({ result: {} }));
+    });
+
+    const summary = await testFeishuProjectMcpForUser(userId, { fetchImpl });
+
+    expect(summary.project).toMatchObject({ key: "project-auto", name: "产研中心产品开发流程" });
+    expect(summary.workItemTypeCount).toBe(2);
+    expect(repo.rawState(userId).settings.feishu_project_default_project_key).toBe("project-auto");
+    expect(repo.rawState(userId).settings.feishu_project_idea_type_key).toBe("idea-type");
+  });
 });
 
 describe("syncFeishuProjectMcpForUser", () => {
