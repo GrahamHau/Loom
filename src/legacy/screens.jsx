@@ -5855,6 +5855,8 @@ function SettingsScreen({ data, api, refreshData }) {
   const [deleteSourceTarget, setDeleteSourceTarget] = useState(null);
   const [deleteSourceBusy, setDeleteSourceBusy] = useState(false);
   const editingSettingsRef = useRef(false);
+  const mcpAutoSaveSeqRef = useRef(0);
+  const lastMcpTokenQueuedRef = useRef("");
   const isAdmin = ["owner", "admin"].includes(data.user?.role_code || "");
   useEffect(() => setSources(data.rssSources), [data.rssSources]);
   useEffect(() => setOfficialSources(data.officialRssSources || []), [data.officialRssSources]);
@@ -5889,6 +5891,26 @@ function SettingsScreen({ data, api, refreshData }) {
       setNotice(error.message);
     }
   };
+  useEffect(() => {
+    const token = String(settings.feishu_mcp_token || "").trim();
+    if (!token || token === "********") return;
+    if (token === lastMcpTokenQueuedRef.current) return;
+    lastMcpTokenQueuedRef.current = token;
+    const seq = mcpAutoSaveSeqRef.current + 1;
+    mcpAutoSaveSeqRef.current = seq;
+    setNotice("正在自动匹配飞书项目空间...");
+    const timer = window.setTimeout(() => {
+      saveSettings({ ...settings, feishu_mcp_token: token }).catch?.(() => {});
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    settings.feishu_mcp_token,
+    settings.feishu_mcp_url,
+    settings.feishu_mcp_project_key,
+    settings.feishu_mcp_project_name,
+    settings.feishu_project_idea_type_key,
+    settings.feishu_mcp_interval,
+  ]);
   const test = async (path, label) => {
     setNotice(`${label}测试中...`);
     try {
@@ -6269,12 +6291,11 @@ function SettingsScreen({ data, api, refreshData }) {
               <div className="label">&nbsp;</div>
               <div className="row">
                 <Btn icon="save" onClick={() => saveSettings()}>保存并自动匹配</Btn>
-                <Btn icon="check" onClick={() => test("/api/settings/test-feishu-project-mcp", "飞书项目 MCP")}>{isAdmin ? "测试并固定空间" : "测试连接并回填"}</Btn>
                 {isAdmin ? <Btn variant="primary" icon="sync" onClick={syncFeishuProjectNow}>立即同步</Btn> : null}
                 {(settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at) && <span className="muted text-sm" style={{ marginLeft: 4 }}>上次:{settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at}</span>}
               </div>
               <div className="muted text-sm" style={{ marginTop: 8 }}>
-                输入 token 后直接保存即可；如果 token 正确，空间名称和产品想法类型会自动回填。
+                输入或粘贴 token 后会自动保存并尝试匹配空间；如果 token 正确，空间名称和产品想法类型会自动回填。
               </div>
             </div>
           </div>
