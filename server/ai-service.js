@@ -4,6 +4,23 @@ import { platformAiSettingsForUser } from "./platform-ai-config.js";
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const FETCH_TIMEOUT_MS = 30000;
+const DEFAULT_LLM_MAX_CONCURRENCY = 1;
+const DEFAULT_LLM_MIN_INTERVAL_MS = 1200;
+const DEFAULT_LLM_RETRY_ATTEMPTS = 3;
+const DEFAULT_LLM_RETRY_BASE_MS = 1500;
+
+let activeLlmRequests = 0;
+let lastLlmRequestAt = 0;
+const llmQueue = [];
+
+export function __resetLlmQueueForTests() {
+  activeLlmRequests = 0;
+  lastLlmRequestAt = 0;
+  while (llmQueue.length) {
+    const item = llmQueue.shift();
+    item?.reject?.(new Error("llm_queue_reset"));
+  }
+}
 
 export class AppError extends Error {
   constructor(status, code, message, details = undefined) {
@@ -112,8 +129,77 @@ function compactImageUrls(value, limit = 8) {
   return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, limit);
 }
 
+function clampNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(Math.max(Math.round(number), min), max);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function retryAfterMs(response) {
+  const raw = response?.headers?.get?.("retry-after");
+  if (!raw) return 0;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const dateMs = Date.parse(raw);
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : 0;
+}
+
+function queueSettings(settings = {}) {
+  return {
+    maxConcurrency: clampNumber(settings.llm_max_concurrency ?? process.env.LLM_MAX_CONCURRENCY, DEFAULT_LLM_MAX_CONCURRENCY, 1, 8),
+    minIntervalMs: clampNumber(settings.llm_min_interval_ms ?? process.env.LLM_MIN_INTERVAL_MS, DEFAULT_LLM_MIN_INTERVAL_MS, 0, 60000),
+    retryAttempts: clampNumber(settings.llm_retry_max_attempts ?? process.env.LLM_RETRY_MAX_ATTEMPTS, DEFAULT_LLM_RETRY_ATTEMPTS, 1, 6),
+    retryBaseMs: clampNumber(settings.llm_retry_base_ms ?? process.env.LLM_RETRY_BASE_MS, DEFAULT_LLM_RETRY_BASE_MS, 0, 60000),
+  };
+}
+
+function pumpLlmQueue() {
+  const next = llmQueue[0];
+  if (!next) return;
+  if (activeLlmRequests >= next.policy.maxConcurrency) return;
+  llmQueue.shift();
+  activeLlmRequests += 1;
+  const waitMs = Math.max(0, next.policy.minIntervalMs - (Date.now() - lastLlmRequestAt));
+  setTimeout(async () => {
+    lastLlmRequestAt = Date.now();
+    try {
+      next.resolve(await next.task());
+    } catch (error) {
+      next.reject(error);
+    } finally {
+      activeLlmRequests = Math.max(0, activeLlmRequests - 1);
+      pumpLlmQueue();
+    }
+  }, waitMs);
+}
+
+function enqueueLlmRequest(policy, task) {
+  return new Promise((resolve, reject) => {
+    llmQueue.push({ policy, task, resolve, reject });
+    pumpLlmQueue();
+  });
+}
+
+async function fetchWithRetry(url, options, timeoutMs, policy) {
+  let lastResponse = null;
+  for (let attempt = 1; attempt <= policy.retryAttempts; attempt += 1) {
+    const response = await fetchWithTimeout(url, options, timeoutMs);
+    if (response.status !== 429 || attempt >= policy.retryAttempts) return response;
+    lastResponse = response;
+    const waitMs = retryAfterMs(response) || policy.retryBaseMs * (2 ** (attempt - 1));
+    await response.json().catch(() => null);
+    await sleep(waitMs);
+  }
+  return lastResponse;
+}
+
 async function requestLLM(settings, { userId, kind = "text", purpose = "unknown", system, user, imageUrls = [], responseFormat = "json", temperature = 0.2, maxTokens }) {
   const timeoutMs = Number(settings.llm_timeout_ms || process.env.LLM_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
+  const policy = queueSettings(settings);
   const images = compactImageUrls(imageUrls);
   const model = settings.llm_model;
   const apiUrl = chatCompletionsUrl(settings.llm_api_url);
@@ -125,7 +211,7 @@ async function requestLLM(settings, { userId, kind = "text", purpose = "unknown"
       ]
     : user;
   try {
-    const response = await fetchWithTimeout(apiUrl, {
+    const response = await enqueueLlmRequest(policy, () => fetchWithRetry(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -141,7 +227,7 @@ async function requestLLM(settings, { userId, kind = "text", purpose = "unknown"
         max_tokens: maxTokens,
         response_format: responseFormat === "json" ? { type: "json_object" } : undefined,
       }),
-    });
+    }, timeoutMs, policy));
 
     const body = await response.json().catch(async () => ({ raw: await response.text().catch(() => "") }));
     if (!response.ok) {

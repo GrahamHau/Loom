@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
 import { nanoid } from "nanoid";
 import { db } from "./db.js";
-import { queryKnowledge } from "./knowledge-query-service.js";
-import { queryApi } from "./query-api-service.js";
+import { askLoom } from "./ask-loom-router-service.js";
 
 function cleanText(value, fallback = "") {
   const text = String(value ?? "").trim();
@@ -326,7 +325,7 @@ export async function handleFeishuBotEvent(input = {}) {
   const chat = resolveChat(normalized.workspace_id, normalized.chat_id, normalized.chat_type);
   const user = resolveUser(normalized.workspace_id, normalized.sender_id);
   const visibilityCeiling = visibilityFor({ chat, user });
-  const queryResult = await queryApi({
+  const queryResult = await askLoom({
     workspace_id: normalized.workspace_id,
     user_id: user?.loom_user_id || "",
     user: user ? { id: user.loom_user_id } : undefined,
@@ -336,6 +335,7 @@ export async function handleFeishuBotEvent(input = {}) {
     chat_type: normalized.chat_type,
     visibility_ceiling: visibilityCeiling,
     q: normalized.content,
+    chat_id: normalized.chat_id,
   });
   const card = buildFeishuAnswerCard(queryResult, {
     visibility_applied: visibilityCeiling,
@@ -409,9 +409,10 @@ export function handleFeishuCardAction(input = {}) {
 
 export async function handleFeishuBotQuestion(input = {}) {
   if (!input.chat_id && !input.sender_id && !input.open_id && !input.user_open_id) {
-    const result = await queryKnowledge({
+    const result = await askLoom({
       ...input,
       channel: input.channel || "feishu_group",
+      q: input.q || input.question,
     });
     return {
       result,

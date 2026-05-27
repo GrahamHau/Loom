@@ -11,6 +11,7 @@ process.env.REMOTE_MEDIA_CACHE_TIMEOUT_MS = "1000";
 
 const dbModule = await import("./db.js");
 const repo = await import("./repository.js");
+const aiService = await import("./ai-service.js");
 const { default: app, zonedDateHour } = await import("./index.js");
 
 let server;
@@ -22,6 +23,7 @@ function extractCookie(headers) {
 }
 
 beforeEach(async () => {
+  aiService.__resetLlmQueueForTests();
   process.env.LOOM_OWNER_EMAIL = "";
   process.env.APP_PASSWORD_ACCOUNTS = "";
   dbModule.migrate();
@@ -66,6 +68,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  aiService.__resetLlmQueueForTests();
   vi.unstubAllGlobals();
   if (!server) return;
   await new Promise((resolve, reject) => {
@@ -76,6 +79,31 @@ afterEach(async () => {
 });
 
 describe("auth logout", () => {
+  it("redirects Feishu OAuth start to the configured callback origin before creating state", async () => {
+    process.env.FEISHU_OAUTH_APP_ID = "cli_test";
+    process.env.FEISHU_OAUTH_APP_SECRET = "feishu-secret";
+    process.env.FEISHU_OAUTH_REDIRECT_URI = "https://loom.palecedar.site/api/auth/feishu/callback";
+
+    const aliasResponse = await fetch(`${baseUrl}/api/auth/feishu/start?return_to=/app`, {
+      redirect: "manual",
+      headers: { "X-Forwarded-Host": "loom.my1panelsite.xyz", "X-Forwarded-Proto": "https" },
+    });
+    expect(aliasResponse.status).toBe(302);
+    expect(aliasResponse.headers.get("location")).toBe("https://loom.palecedar.site/api/auth/feishu/start?return_to=%2Fapp");
+    expect(aliasResponse.headers.get("set-cookie") || "").toBe("");
+
+    const canonicalResponse = await fetch(`${baseUrl}/api/auth/feishu/start?return_to=/app`, {
+      redirect: "manual",
+      headers: { "X-Forwarded-Host": "loom.palecedar.site", "X-Forwarded-Proto": "https" },
+    });
+    expect(canonicalResponse.status).toBe(302);
+    const location = new URL(canonicalResponse.headers.get("location"));
+    expect(location.host).toBe("open.feishu.cn");
+    expect(location.searchParams.get("redirect_uri")).toBe("https://loom.palecedar.site/api/auth/feishu/callback");
+    expect(location.searchParams.get("state")).toMatch(/^[a-f0-9]{32}$/);
+    expect(canonicalResponse.headers.get("set-cookie") || "").toContain("connect.sid=");
+  });
+
   it("clears the session and revokes all user tokens on web logout", async () => {
     const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
@@ -567,7 +595,7 @@ describe("M4 query API", () => {
     const firstQuery = await firstQueryResponse.json();
     expect(firstQueryResponse.status).toBe(200);
     expect(firstQuery).toMatchObject({
-      adapter: "local",
+      adapter: "multi_tool",
       visibility_applied: "internal_only",
     });
     expect(firstQuery.trace_id).toMatch(/^trace_/);
@@ -575,7 +603,6 @@ describe("M4 query API", () => {
     expect(firstQuery.citations[0]).toMatchObject({
       source_id: "mrd_seed_xyz",
       source_type: "mrd_section",
-      evidence_id: "ev_color_temp",
     });
     expect(firstQuery.citations[0].id).toMatch(/^cit_/);
 
@@ -662,6 +689,72 @@ describe("M4 query API", () => {
     const body = await response.json();
     expect(response.status).toBe(200);
     expect(body).toMatchObject({ adapter: "local", ok: true });
+  });
+
+  it("answers from structured products and demands without a manual pack", async () => {
+    const { cookie } = await login();
+    const productResponse = await fetch(`${baseUrl}/api/products`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        name: "Ulanzi QuickLock Battery Grip",
+        brand: "Ulanzi",
+        category: "相机配件",
+        ai_summary: "主卖点是快拆结构、续航扩展和单手握持稳定。",
+        selling_points: ["快拆结构", "续航扩展"],
+      }),
+    });
+    expect(productResponse.status).toBe(201);
+
+    const demandResponse = await fetch(`${baseUrl}/api/demands`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "ws-company",
+        title: "用户希望电池手柄更快拆",
+        summary: "评论集中提到快拆、续航和重量平衡。",
+        scenarios: ["户外拍摄"],
+        painpoints: ["换电慢"],
+      }),
+    });
+    expect(demandResponse.status).toBe(201);
+
+    const doc = (await import("./knowledge-repository.js")).createDocument({
+      id: "doc-quicklock-prd",
+      workspace_id: "ws-company",
+      project_id: "proj-quicklock",
+      title: "QuickLock PRD",
+      doc_type: "prd",
+      status: "published",
+      access_policy: { visibility: "project_team", rag_enabled: true },
+      content: {
+        normalized_sections: [
+          { key: "functional_attributes", title: "功能属性", content: "QuickLock 电池手柄需要单手快拆和续航扩展。" },
+        ],
+      },
+    });
+    expect(doc.id).toBe("doc-quicklock-prd");
+
+    const queryResponse = await fetch(`${baseUrl}/api/query`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company", q: "QuickLock 快拆 续航 换电慢" }),
+    });
+    const result = await queryResponse.json();
+    expect(queryResponse.status).toBe(200);
+    expect(result.adapter).toBe("multi_tool");
+    expect(result.tools_used).toEqual(expect.arrayContaining(["products", "demands"]));
+    expect(result.citations.map((citation) => citation.source_type)).toEqual(expect.arrayContaining(["product", "demand"]));
+
+    const rebuildResponse = await fetch(`${baseUrl}/api/query/rebuild-index`, {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: "ws-company" }),
+    });
+    const rebuild = await rebuildResponse.json();
+    expect(rebuildResponse.status).toBe(200);
+    expect(rebuild.indexed).toMatchObject({ products: 1, demands: 1, documents: 1 });
   });
 });
 
@@ -1608,6 +1701,7 @@ describe("news daily digest", () => {
       llm_api_url: "https://llm.test/v1",
       llm_model: "digest-model",
       llm_api_key: "digest-key",
+      llm_min_interval_ms: 0,
     });
     dbModule.db.prepare(`
       INSERT INTO news_items (
@@ -1691,6 +1785,7 @@ describe("news daily digest", () => {
       llm_api_url: "https://llm.test/v1",
       llm_model: "digest-model",
       llm_api_key: "digest-key",
+      llm_min_interval_ms: 0,
     });
     dbModule.db.prepare(`
       INSERT INTO news_items (

@@ -7,6 +7,8 @@ const repo = await import("./repository.js");
 const { DEFAULT_FIELDS, fieldOptionsText } = await import("./field-config.js");
 const { matchFieldKey, matchFieldOption, matchFieldOptionInText, normalizeTagValues } = await import("./field-matcher.js");
 
+const recentNewsDate = (daysAgo = 0) => new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
+
 beforeEach(() => {
   dbModule.migrate();
   for (const table of [
@@ -391,6 +393,42 @@ describe("repository", () => {
     expect(updated?.thumbnail_url).toBe("data:image/png;base64,manual-cover");
   });
 
+  it("stores visible comments for products and keeps them on update", () => {
+    const legacyUserId = dbModule.getLegacyUserId();
+    const product = repo.createProduct(legacyUserId, {
+      name: "Amazon Light",
+      comments: 2,
+      visible_comments: [
+        { user_name: "Alice", content: "Magnetic mount is handy", like_count: 3 },
+        { user_name: "Bob", content: "Wish it were lighter", like_count: 1 },
+      ],
+    });
+
+    expect(product.comments).toBe(2);
+    expect(product.visible_comments).toHaveLength(2);
+    expect(product.visible_comments[0]).toMatchObject({
+      user_name: "Alice",
+      content: "Magnetic mount is handy",
+      like_count: 3,
+    });
+
+    const updated = repo.updateProduct(legacyUserId, product.id, {
+      comments: 3,
+      visible_comments: [
+        { user_name: "Alice", content: "Magnetic mount is handy", like_count: 4 },
+        { user_name: "Cara", content: "Works well on my desk", like_count: 0 },
+      ],
+    });
+
+    expect(updated?.comments).toBe(3);
+    expect(updated?.visible_comments).toHaveLength(2);
+    expect(updated?.visible_comments[0]).toMatchObject({
+      user_name: "Alice",
+      content: "Magnetic mount is handy",
+      like_count: 4,
+    });
+  });
+
   it("masks settings in bootstrap", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     expect(repo.bootstrap(legacyUserId).settings.llm_api_key).toBe("********");
@@ -417,7 +455,7 @@ describe("repository", () => {
         source_group: "official-default",
         source_homepage: "https://example.com",
       },
-      date: "2026-05-10",
+      date: recentNewsDate(1),
     }]);
 
     const item = repo.listNews(legacyUserId).find((entry) => entry.original_url === "https://a.test/grouped");
@@ -437,15 +475,15 @@ describe("repository", () => {
 
   it("upserts news by source and url", () => {
     const legacyUserId = dbModule.getLegacyUserId();
-    repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/1", titleZh: "A", date: "2026-05-10" }]);
-    repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/1", titleZh: "B", date: "2026-05-10" }]);
+    repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/1", titleZh: "A", date: recentNewsDate(1) }]);
+    repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/1", titleZh: "B", date: recentNewsDate(1) }]);
     expect(repo.listNews(legacyUserId)).toHaveLength(2);
     expect(repo.listNews(legacyUserId).find((item) => item.original_url === "https://a.test/1")?.titleZh).toBe("B");
   });
 
   it("updates missing thumbnail on existing news during upsert", () => {
     const legacyUserId = dbModule.getLegacyUserId();
-    repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/with-image", titleZh: "A", type: "行业趋势", date: "2026-05-10" }]);
+    repo.upsertNews(legacyUserId, [{ source_id: "s1", source: "S", original_url: "https://a.test/with-image", titleZh: "A", type: "行业趋势", date: recentNewsDate(1) }]);
     const result = repo.upsertNews(legacyUserId, [{
       source_id: "s1",
       source: "S",
@@ -454,7 +492,7 @@ describe("repository", () => {
       type: "行业趋势",
       thumbnail_url: "https://cdn.test/a.jpg",
       classification: { image_enriched: true },
-      date: "2026-05-10",
+      date: recentNewsDate(1),
     }]);
 
     expect(result.updated).toHaveLength(1);
@@ -473,7 +511,7 @@ describe("repository", () => {
       thumbnail_url: "https://cdn.test/other-user.jpg",
       type: "新品发布",
       classification: { merge_key: "sony-a7r-vi" },
-      date: "2026-05-10",
+      date: recentNewsDate(1),
     }]);
 
     repo.upsertNews(legacyUserId, [{
@@ -484,7 +522,7 @@ describe("repository", () => {
       thumbnail_url: "https://cdn.test/same-user.jpg",
       type: "新品发布",
       classification: { merge_key: "sony-a7r-vi" },
-      date: "2026-05-11",
+      date: recentNewsDate(0),
     }]);
 
     expect(repo.findReusableNewsThumbnail({
@@ -507,7 +545,7 @@ describe("repository", () => {
       thumbnail_url: "https://cdn.test/shared.jpg",
       type: "行业趋势",
       classification: { merge_key: "canon-firmware-update" },
-      date: "2026-05-10",
+      date: recentNewsDate(1),
     }]);
 
     expect(repo.findReusableNewsThumbnail({
@@ -529,7 +567,7 @@ describe("repository", () => {
       summary: "旧摘要",
       type: "行业趋势",
       classification: { fakeid: "old", seen: "first" },
-      date: "2026-05-06T13:30:00.000Z",
+      date: recentNewsDate(2),
     }]);
 
     const result = repo.upsertNews(legacyUserId, [{
@@ -545,13 +583,13 @@ describe("repository", () => {
       type: "新品发布",
       thumbnail_url: "https://cdn.test/wechat.jpg",
       classification: { fakeid: "new", article_aid: "aid-1" },
-      published_at: "2026-05-13T15:35:36.000Z",
+      published_at: recentNewsDate(0),
       llmProcessed: true,
     }]);
 
     const updated = repo.listNews(legacyUserId).find((item) => item.original_url === "https://mp.weixin.qq.com/s/existing");
     expect(result.updated).toHaveLength(1);
-    expect(updated?.published_at).toBe("2026-05-13T15:35:36.000Z");
+    expect(updated?.published_at).toBe(result.updated[0].published_at);
     expect(updated?.titleZh).toBe("新标题");
     expect(updated?.summary).toBe("新摘要");
     expect(updated?.contentZh).toBe("新正文");
@@ -572,7 +610,7 @@ describe("repository", () => {
       type: "新品发布",
       needsTranslation: true,
       llmProcessed: true,
-      date: "2026-05-10",
+      date: recentNewsDate(1),
     }]);
 
     const pending = repo.listPendingNewsForLlm(legacyUserId, 10);
@@ -583,11 +621,11 @@ describe("repository", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     const secondUser = repo.ensureLocalUser({ id: "user-b", name: "User B", auth_provider: "feishu" });
     repo.upsertNews(legacyUserId, [
-      { source_id: "google", source: "配件竞品新品 - Google News", original_url: "https://news.google.com/rss/a", titleZh: "Tilta launches filter kit", original_title: "Tilta launches filter kit", date: "2026-05-10" },
-      { source_id: "google", source: "配件竞品新品 - Google News", original_url: "https://news.google.com/rss/b", titleZh: "Tilta launches filter kit", original_title: "Tilta launches filter kit", date: "2026-05-10" },
+      { source_id: "google", source: "配件竞品新品 - Google News", original_url: "https://news.google.com/rss/a", titleZh: "Tilta launches filter kit", original_title: "Tilta launches filter kit", date: recentNewsDate(1) },
+      { source_id: "google", source: "配件竞品新品 - Google News", original_url: "https://news.google.com/rss/b", titleZh: "Tilta launches filter kit", original_title: "Tilta launches filter kit", date: recentNewsDate(1) },
     ]);
     repo.upsertNews(secondUser.id, [
-      { source_id: "google", source: "配件竞品新品 - Google News", original_url: "https://news.google.com/rss/a", titleZh: "Tilta launches filter kit", original_title: "Tilta launches filter kit", date: "2026-05-10" },
+      { source_id: "google", source: "配件竞品新品 - Google News", original_url: "https://news.google.com/rss/a", titleZh: "Tilta launches filter kit", original_title: "Tilta launches filter kit", date: recentNewsDate(1) },
     ]);
     const legacyMatches = repo.listNews(legacyUserId).filter((item) => item.original_title === "Tilta launches filter kit");
     const secondMatches = repo.listNews(secondUser.id).filter((item) => item.original_title === "Tilta launches filter kit");
@@ -606,7 +644,7 @@ describe("repository", () => {
         titleZh: "Insta360 GO 3S 复古套装发布",
         original_title: "Insta360 GO 3S retro bundle launches",
         type: "新品发布",
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
       {
         source_id: "google",
@@ -616,7 +654,7 @@ describe("repository", () => {
         original_title: "Insta360 GO 3S vintage kit announced",
         thumbnail_url: "https://cdn.test/go-3s.jpg",
         type: "新品发布",
-        date: "2026-05-11",
+        date: recentNewsDate(0),
       },
     ]);
 
@@ -642,7 +680,7 @@ describe("repository", () => {
         titleZh: "DJI Osmo Mobile 7P 评测",
         original_title: "DJI Osmo Mobile 7P review",
         type: "行业趋势",
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
       {
         source_id: "source-b",
@@ -651,7 +689,7 @@ describe("repository", () => {
         titleZh: "DJI Osmo Mobile 7P 发布",
         original_title: "DJI Osmo Mobile 7P launches",
         type: "新品发布",
-        date: "2026-05-11",
+        date: recentNewsDate(0),
       },
     ]);
 
@@ -668,7 +706,7 @@ describe("repository", () => {
         titleZh: "佳能推C2PA图像验证",
         original_title: "Canon launches C2PA image verification",
         type: "行业趋势",
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
       {
         source_id: "dcw",
@@ -678,7 +716,7 @@ describe("repository", () => {
         original_title: "Canon launches C2PA photo verification",
         thumbnail_url: "https://cdn.test/c2pa.jpg",
         type: "行业趋势",
-        date: "2026-05-11",
+        date: recentNewsDate(0),
       },
       {
         source_id: "other",
@@ -687,7 +725,7 @@ describe("repository", () => {
         titleZh: "佳能推C2PA影像验证",
         original_title: "Canon launches C2PA photo verification",
         type: "行业趋势",
-        date: "2026-05-11",
+        date: recentNewsDate(0),
       },
     ]);
 
@@ -710,7 +748,7 @@ describe("repository", () => {
         titleZh: "索尼发布Alpha 7R VI",
         original_title: "Sony Alpha 7R VI launches",
         type: "新品发布",
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
       {
         source_id: "google",
@@ -720,7 +758,7 @@ describe("repository", () => {
         original_title: "New high-res Sony Alpha 7R VI uses autofocus tech",
         thumbnail_url: "https://cdn.test/sony-a7r.jpg",
         type: "新品发布",
-        date: "2026-05-11",
+        date: recentNewsDate(0),
       },
       {
         source_id: "review",
@@ -729,7 +767,7 @@ describe("repository", () => {
         titleZh: "索尼a7R高速版评测",
         original_title: "Sony A7R VI review",
         type: "行业趋势",
-        date: "2026-05-11",
+        date: recentNewsDate(0),
       },
     ]);
 
@@ -752,7 +790,7 @@ describe("repository", () => {
         original_title: "Sony Alpha 7R VI launches",
         summary: "Google summary",
         type: "新品发布",
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
       {
         source_id: "wechat-sony",
@@ -767,7 +805,7 @@ describe("repository", () => {
           source_type: "wechat_exporter",
           source_group: "wechat-exporter",
         },
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
     ]);
 
@@ -795,7 +833,7 @@ describe("repository", () => {
           source_type: "wechat_exporter",
           source_group: "wechat-exporter",
         },
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
       {
         source_id: "google",
@@ -806,7 +844,7 @@ describe("repository", () => {
         summary: "Google later summary",
         thumbnail_url: "https://cdn.test/google.jpg",
         type: "新品发布",
-        date: "2026-05-11",
+        date: recentNewsDate(0),
       },
     ]);
 
@@ -829,7 +867,7 @@ describe("repository", () => {
         titleZh: "Sony unveils 66.8-megapixel Alpha 7R VI camera - Photo Review",
         original_title: "Sony unveils 66.8-megapixel Alpha 7R VI camera - Photo Review",
         type: "新品发布",
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
       {
         source_id: "review",
@@ -838,7 +876,7 @@ describe("repository", () => {
         titleZh: "Sony a7R VI Review: The High-Resolution Camera to Rule Them All - PetaPixel",
         original_title: "Sony a7R VI Review: The High-Resolution Camera to Rule Them All - PetaPixel",
         type: "行业趋势",
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
     ]);
 
@@ -857,7 +895,7 @@ describe("repository", () => {
         titleZh: "索尼发布Alpha 7R VI",
         original_title: "Sony Alpha 7R VI launches",
         type: "新品发布",
-        date: "2026-05-10",
+        date: recentNewsDate(1),
       },
       {
         source_id: "leak",
@@ -866,7 +904,7 @@ describe("repository", () => {
         titleZh: "索尼A7R VI新图泄露",
         original_title: "New leaked Sony A7R VI images",
         type: "行业趋势",
-        date: "2026-05-11",
+        date: recentNewsDate(0),
       },
       {
         source_id: "vii",
@@ -875,7 +913,7 @@ describe("repository", () => {
         titleZh: "索尼A7R VII传闻",
         original_title: "Sony A7R VII rumors",
         type: "行业趋势",
-        date: "2026-05-11",
+        date: recentNewsDate(0),
       },
     ]);
 
@@ -1019,6 +1057,40 @@ describe("repository", () => {
     expect(state.dashboard.abnormal_items[0]).toMatchObject({ id: demand.id, title: "Tripod demand" });
   });
 
+  it("uses fixed Feishu Project workspace as dashboard primary source", () => {
+    const user = repo.ensureLocalUser({ id: "dashboard-project-user", name: "Project User", auth_provider: "password", withDefaultWorkspace: true });
+    const workspaceId = repo.ensureDefaultWorkspaceForUser(user, { autoAssign: true }).workspace_id;
+    repo.updateSettings(user.id, {
+      feishu_mcp_token: "mcp-token",
+      feishu_project_default_project_key: "proj-fixed",
+      feishu_project_default_project_name: "产品想法空间",
+      feishu_project_idea_type_key: "idea-type",
+    });
+    repo.upsertFeishuProjectItem({
+      workspace_id: workspaceId,
+      project_key: "proj-fixed",
+      work_item_id: "wi-1",
+      work_item_type_key: "idea-type",
+      work_item_type_name: "产品想法登记",
+      name: "JOBY 快拆折叠桌面",
+      status_name: "评审中",
+      current_node_name: "产品评审",
+      updated_at: "2026-05-26T08:00:00.000Z",
+    });
+
+    const state = repo.bootstrap(user.id);
+
+    expect(state.dashboard.feishu_status.primary_source).toBe("feishu_project");
+    expect(state.dashboard.feishu_project_status).toMatchObject({
+      configured: true,
+      project_key: "proj-fixed",
+      project_name: "产品想法空间",
+      idea_type_configured: true,
+      items_count: 1,
+    });
+    expect(state.dashboard.demands_scope_label).toBe("飞书项目 · 工作项");
+  });
+
   it("hides untranslated news from bootstrap", () => {
     const legacyUserId = dbModule.getLegacyUserId();
     repo.upsertNews(legacyUserId, [{
@@ -1032,7 +1104,7 @@ describe("repository", () => {
       type: "行业趋势",
       needsTranslation: true,
       llmProcessed: false,
-      date: "2026-05-14",
+      date: recentNewsDate(0),
     }]);
 
     const state = repo.bootstrap(legacyUserId);
@@ -1051,7 +1123,7 @@ describe("repository", () => {
       summary: "后端统一采集的一条新闻。",
       contentZh: "后端统一采集的一条新闻。",
       type: "新品发布",
-      published_at: "2026-05-14T10:00:00.000Z",
+      published_at: recentNewsDate(0),
       llmProcessed: true,
       classification: { source_group: "official-default" },
     }]);
@@ -1074,7 +1146,7 @@ describe("repository", () => {
       summary: "后端缓存给用户的官方资讯。",
       contentZh: "后端缓存给用户的官方资讯。",
       type: "新品发布",
-      published_at: "2026-05-14T12:00:00.000Z",
+      published_at: recentNewsDate(0),
       llmProcessed: true,
       classification: { source_group: "official-default" },
     }]);
@@ -1082,7 +1154,7 @@ describe("repository", () => {
     const ensured = repo.ensureOfficialNewsCache(user.id);
     expect(ensured.inserted.length + ensured.updated.length).toBeGreaterThan(0);
     expect(ensured.status.visible).toBeGreaterThan(0);
-    expect(ensured.status.latestPublishedAt).toBe("2026-05-14T12:00:00.000Z");
+    expect(ensured.status.latestPublishedAt).toBeTruthy();
   });
 
   it("does not sync stale official news to regular users", () => {

@@ -14,11 +14,16 @@ const TOKEN_KEY = "loom_token";
 const USER_KEY = "loom_user";
 const DEFAULT_MODE_KEY = "loom_default_mode";
 const AI_BEFORE_SAVE_KEY = "loom_ai_before_save";
+const AI_BEFORE_SAVE_UPDATED_AT_KEY = "loom_ai_before_save_updated_at";
+const AUTO_AI_ENABLED = false;
 const AI_ORGANIZE_WAIT_MS = 12000;
 const LLM_NOTICE_DISMISSED_KEY = "loom_llm_notice_dismissed";
 const DRAFT_STATE_KEY = "loom_sidepanel_draft_state_v1";
-const URL_WATCH_INTERVAL_MS = 650;
+const URL_WATCH_INTERVAL_MS = 1600;
 const EDIT_IDLE_GUARD_MS = 4000;
+const BOOTSTRAP_CACHE_MS = 30000;
+const COMMENT_COLLECT_INTERVAL_MS = 2500;
+const COMMENT_COLLECT_MAX_MS = 15000;
 const TAOBAO_IMAGE_LOAD_HINT = "下滑加载所有图片后，再使用AI整理";
 const LEGACY_KEY_MAP = {
   pmcopilot_api_base: API_BASE_KEY,
@@ -110,6 +115,7 @@ const state = {
   tagGroups: DEFAULT_TAG_GROUPS,
   llmConfigured: false,
   tagPicker: null,
+  autoRevealTagPicker: false,
   activeTagFields: {},
   commentCollecting: false,
   commentCollectStartedAt: 0,
@@ -135,6 +141,8 @@ let autosizeTimer = null;
 let uiStateWatchTimer = null;
 let lastUserEditAt = 0;
 let captureLocked = false;
+let bootstrapCache = null;
+let bootstrapCacheAt = 0;
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -219,6 +227,7 @@ function normalizeFieldList(fields = [], tagGroups = [], options = {}) {
 }
 
 function debugEvent(name, payload = {}) {
+  if (globalThis.LOOMS_DEBUG_EVENTS === false) return;
   try {
     chrome.runtime.sendMessage({
       type: "LOOM_DEBUG_EVENT",
@@ -235,6 +244,23 @@ function isVisitorUser(user) {
   const id = String(user?.id || "").toLowerCase();
   const name = String(user?.name || "").trim().toLowerCase();
   return Boolean(user?.is_visitor || id === "visitor" || name === "visitor");
+}
+
+function normalizeBooleanSetting(value, fallback = false) {
+  if (value === true || value === false) return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["false", "0", "off", "no", "关闭"].includes(normalized)) return false;
+    if (["true", "1", "on", "yes", "开启"].includes(normalized)) return true;
+  }
+  return fallback;
+}
+
+function normalizeStoredSettingValue(key, value) {
+  if (key === AI_BEFORE_SAVE_KEY) return normalizeBooleanSetting(value, false);
+  if (key === API_BASE_KEY) return normalizeApiBase(value);
+  return value;
 }
 
 function isNetworkAuthError(error) {
@@ -272,6 +298,11 @@ function taobaoImageLoadHint(result = state.page) {
 function resetAiProcessedFlag(value) {
   if (!value || typeof value !== "object") return value;
   return { ...value, __loom_ai_processed: false };
+}
+
+function restoreDraftValue(value, resetAi = false) {
+  if (!value || typeof value !== "object") return value;
+  return resetAi ? resetAiProcessedFlag(value) : value;
 }
 
 function currentCaptureUrl() {
@@ -339,8 +370,9 @@ async function restoreDraftState(result, mode) {
       await clearPersistedDraftState();
       return false;
     }
-    state.processed = resetAiProcessedFlag(snapshot.processed) || { ...result.data, __loom_ai_processed: false };
-    state.form = resetAiProcessedFlag(snapshot.form) || buildDraft(mode, state.processed);
+    const resetAi = Boolean(snapshot.processingAi);
+    state.processed = restoreDraftValue(snapshot.processed, resetAi) || { ...result.data, __loom_ai_processed: false };
+    state.form = restoreDraftValue(snapshot.form, resetAi) || buildDraft(mode, state.processed);
     state.activeTagFields = snapshot.activeTagFields || activeTagFieldsForDraft(mode, state.form, state.processed);
     state.formDirty = Boolean(snapshot.formDirty);
     state.message = snapshot.processingAi
@@ -398,18 +430,20 @@ async function init() {
 }
 
 async function getStoredSettings() {
-  const keys = [API_BASE_KEY, TOKEN_KEY, USER_KEY, DEFAULT_MODE_KEY, AI_BEFORE_SAVE_KEY, LLM_NOTICE_DISMISSED_KEY, ...Object.keys(LEGACY_KEY_MAP)];
+  const keys = [API_BASE_KEY, TOKEN_KEY, USER_KEY, DEFAULT_MODE_KEY, AI_BEFORE_SAVE_KEY, AI_BEFORE_SAVE_UPDATED_AT_KEY, LLM_NOTICE_DISMISSED_KEY, ...Object.keys(LEGACY_KEY_MAP)];
   const stored = await chrome.storage.local.get(keys);
   const migrated = {};
   if (stored[API_BASE_KEY] !== undefined) {
     const normalized = normalizeApiBase(stored[API_BASE_KEY]);
     if (normalized !== stored[API_BASE_KEY]) migrated[API_BASE_KEY] = normalized;
   }
+  if (stored[AI_BEFORE_SAVE_KEY] !== undefined) {
+    const normalized = normalizeBooleanSetting(stored[AI_BEFORE_SAVE_KEY], false);
+    if (normalized !== stored[AI_BEFORE_SAVE_KEY]) migrated[AI_BEFORE_SAVE_KEY] = normalized;
+  }
   for (const [legacyKey, loomKey] of Object.entries(LEGACY_KEY_MAP)) {
     if (stored[loomKey] === undefined && stored[legacyKey] !== undefined) {
-      migrated[loomKey] = loomKey === API_BASE_KEY
-        ? normalizeApiBase(stored[legacyKey])
-        : stored[legacyKey];
+      migrated[loomKey] = normalizeStoredSettingValue(loomKey, stored[legacyKey]);
     }
   }
   if (Object.keys(migrated).length) await chrome.storage.local.set(migrated);
@@ -465,7 +499,7 @@ async function loadCurrentPage(defaultMode = "auto") {
     });
     renderMain();
     scheduleAutosizeTextareas();
-    await maybeAutoProcessAfterCapture(stored);
+    await maybeAutoProcessAfterCapture();
   } catch (error) {
     state.page = null;
     debugEvent("collect:read-error", { error: error.message || "waiting_for_collect" });
@@ -504,6 +538,7 @@ function isMissingContentScriptError(error) {
 }
 
 async function ensureContentScriptsInjected(tabId, platform, { force = false } = {}) {
+  if (!tabId || !platform || !EXTRACTOR_FILES[platform]) return;
   const cacheKey = `${tabId}:${platform}`;
   if (!force && injectedPlatformTabs.get(cacheKey)) return;
   await chrome.scripting.executeScript({
@@ -712,6 +747,9 @@ async function resyncAuthWhenIdle(payload = {}) {
 
 async function processRaw() {
   if (!state.page?.data) return;
+  if (["xiaohongshu", "amazon"].includes(state.page.platform)) {
+    await collectVisibleComments({ silent: true });
+  }
   const endpoint = state.mode === "product" ? "/api/products/parse-raw" : "/api/demands/parse-raw";
   debugEvent("parse-raw:start", { endpoint, platform: state.page.platform, mode: state.mode });
   try {
@@ -723,17 +761,25 @@ async function processRaw() {
       state.processed = { ...state.page.data, __loom_ai_processed: false, __loom_ai_job_id: data.job_id };
       state.form = buildDraft(state.mode, state.processed);
       state.activeTagFields = activeTagFieldsForDraft(state.mode, state.form, state.processed);
+      state.tagPicker = null;
       state.formDirty = false;
       state.message = data.message || "AI 整理耗时较长，已进入后端队列；可以先保存继续采集。";
       debugEvent("parse-raw:queued", { endpoint, jobId: data.job_id || "" });
       return;
     }
-    state.processed = { ...state.page.data, ...data, __loom_ai_processed: true };
+    const visibleComments = alignAiCommentsWithSource(state.page.data?.visible_comments, data.visible_comments);
+    state.processed = {
+      ...state.page.data,
+      ...data,
+      visible_comments: visibleComments,
+      __loom_ai_processed: true,
+    };
     state.aiProcessedSignature = state.pageSignature;
     state.form = buildDraft(state.mode, state.processed);
     state.activeTagFields = activeTagFieldsForDraft(state.mode, state.form, state.processed);
+    autoOpenTagPickerForProcessed(state.mode, state.form, state.processed);
     state.formDirty = false;
-    state.message = `AI 结构化完成。${aiFieldSuggestionText(state.processed)}`.trim();
+    state.message = aiQualityWarningText(state.processed) || `AI 结构化完成。${aiFieldSuggestionText(state.processed)}`.trim();
     debugEvent("parse-raw:ok", {
       endpoint,
       title: state.processed?.title || state.processed?.name || "",
@@ -779,6 +825,10 @@ async function reloadCurrentPage() {
     if (tab?.id) state.tab = tab;
     state.lastSeenTabId = state.tab?.id || null;
     state.lastSeenUrl = state.tab?.url || state.lastSeenUrl;
+    const detection = detectPageTarget(state.tab?.url || "");
+    if (state.tab?.id && detection.platform) {
+      await ensureContentScriptsInjected(state.tab.id, detection.platform, { force: true });
+    }
     const result = await readPageData(state.tab);
     if (await activeTabChangedSince(state.tab)) {
       debugEvent("collect:reload-stale", { url: state.tab?.url || "" });
@@ -806,7 +856,7 @@ async function reloadCurrentPage() {
       hasImage: Boolean(result.data?.image || result.data?.thumbnail_url),
     });
     renderMain();
-    await maybeAutoProcessAfterCapture(stored);
+    await maybeAutoProcessAfterCapture();
   } catch (error) {
     state.reloading = false;
     debugEvent("collect:reload-error", { error: error.message || "waiting_for_collect" });
@@ -827,6 +877,11 @@ function bindAutoSync() {
   chrome.tabs.onActivated.addListener(async () => {
     await scheduleAutoSync(0);
   });
+  chrome.tabs.onRemoved?.addListener((tabId) => {
+    for (const key of injectedPlatformTabs.keys()) {
+      if (key.startsWith(`${tabId}:`)) injectedPlatformTabs.delete(key);
+    }
+  });
 
   chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     if (!changeInfo.url && changeInfo.status !== "complete") return;
@@ -842,6 +897,7 @@ function bindAutoSync() {
 
   if (!autoSyncPoller) {
     autoSyncPoller = setInterval(() => {
+      if (!state.token || document.visibilityState !== "visible") return;
       void observeActiveTabUrl("poll");
     }, URL_WATCH_INTERVAL_MS);
   }
@@ -879,8 +935,11 @@ function bindRuntimePageSignals() {
     const tabId = sender.tab?.id || null;
     const url = message.url || sender.tab?.url || "";
     if (!tabId || !url || !shouldAutoSyncUrl(url)) return undefined;
-    if (tabId !== state.lastSeenTabId && state.lastSeenTabId !== null) return undefined;
-    void scheduleAutoSync(0);
+    void syncIfUrlChanged({
+      reason: message.reason || "runtime-url-change",
+      tab: { ...(sender.tab || {}), id: tabId, url },
+      forceUrlChange: true,
+    });
     return undefined;
   });
 }
@@ -971,13 +1030,6 @@ async function syncIfUrlChanged(options = {}) {
       debugEvent("collect:unlock-on-exit-detail", { platform: detection.platform, url: nextUrl });
       clearCapturedPageState();
       renderWaitingForDetail();
-      return;
-    }
-    if (detection.platform && detection.detail) {
-      state.tab = tab;
-      state.lastSeenTabId = nextTabId;
-      state.lastSeenUrl = nextUrl;
-      debugEvent("collect:locked-ignore-detail-url", { platform: detection.platform, url: nextUrl });
       return;
     }
   }
@@ -1086,9 +1138,10 @@ async function clearAuthState() {
   await chrome.storage.local.remove([TOKEN_KEY, USER_KEY, DRAFT_STATE_KEY, "pmcopilot_token", "pmcopilot_user"]);
 }
 
-async function maybeAutoProcessAfterCapture(storedSettings = null) {
-  const settings = storedSettings || await getStoredSettings();
-  const explicitAutoAi = settings?.[AI_BEFORE_SAVE_KEY] === true;
+async function maybeAutoProcessAfterCapture() {
+  if (!AUTO_AI_ENABLED) return;
+  const settings = await getStoredSettings();
+  const explicitAutoAi = normalizeBooleanSetting(settings?.[AI_BEFORE_SAVE_KEY], false);
   if (!explicitAutoAi) return;
   if (state.page?.platform === "taobao") return;
   if (!state.page?.data || !state.form) return;
@@ -1129,8 +1182,10 @@ async function runAiProcess(source = "manual") {
 }
 
 function maybeStartAutoCommentCollector() {
-  if (state.page?.platform !== "xiaohongshu") return;
-  if (state.mode !== "demand") return;
+  const platform = state.page?.platform;
+  if (!["xiaohongshu", "amazon"].includes(platform)) return;
+  if (platform === "xiaohongshu" && state.mode !== "demand") return;
+  if (platform === "amazon" && state.mode !== "product") return;
   if (state.commentCollecting) return;
   startCommentCollector();
 }
@@ -1349,13 +1404,25 @@ function bindLoginStateSync() {
 
 async function loadTagGroups() {
   try {
-    const data = await api("/api/bootstrap");
+    const now = Date.now();
+    const data = bootstrapCache && now - bootstrapCacheAt < BOOTSTRAP_CACHE_MS
+      ? bootstrapCache
+      : await api("/api/bootstrap");
+    if (data !== bootstrapCache) {
+      bootstrapCache = data;
+      bootstrapCacheAt = now;
+    }
     const settings = data?.settings || {};
     state.tagGroups = safeArray(settings.tag_groups);
     state.fields = normalizeFieldList(settings.fields, state.tagGroups, { useDefaults: true });
     state.llmConfigured = Boolean(settings.llm_configured);
     if (settings.extension_ai_before_save !== undefined) {
-      await chrome.storage.local.set({ [AI_BEFORE_SAVE_KEY]: settings.extension_ai_before_save !== false });
+      const stored = await getStoredSettings();
+      if (stored[AI_BEFORE_SAVE_KEY] === undefined) {
+        await chrome.storage.local.set({
+          [AI_BEFORE_SAVE_KEY]: normalizeBooleanSetting(settings.extension_ai_before_save, false),
+        });
+      }
     }
     if (state.llmConfigured && state.llmNoticeDismissed) {
       state.llmNoticeDismissed = false;
@@ -1605,7 +1672,20 @@ const dismissNoticeButton = document.getElementById("dismiss-llm-notice");
   schedulePersistDraftState();
   syncActionButtons();
   scheduleAutosizeTextareas();
+  revealTagPickerIfNeeded();
   maybeStartAutoCommentCollector();
+}
+
+function revealTagPickerIfNeeded() {
+  if (!state.autoRevealTagPicker || !state.tagPicker?.key) return;
+  state.autoRevealTagPicker = false;
+  requestAnimationFrame(() => {
+    const field = document.querySelector(`[data-field-select="${CSS.escape(state.tagPicker.key)}"]`);
+    if (!field) return;
+    field.scrollIntoView({ block: "center", behavior: "smooth" });
+    const input = field.querySelector("[data-tag-query]");
+    if (input) input.focus();
+  });
 }
 
 function syncActionButtons() {
@@ -1756,10 +1836,10 @@ function successMotionIcon() {
 function buildDraft(mode, item) {
   if (mode === "product") {
     const sourceTagValues = item?.tag_values || {};
-    const brandValues = uniqueList(sourceTagValues.brand || (item?.brand ? [item.brand] : []));
-    const hostValues = uniqueList(sourceTagValues.host || (item?.host ? [item.host] : []));
-    const categoryValues = uniqueList(sourceTagValues.category || (item?.category ? [item.category] : []));
-    const customTagValues = uniqueList(sourceTagValues.custom_tags || item?.tags);
+    const brandValues = uniqueList(sourceTagValues.brand || sourceTagValues.competitor_brands || (item?.brand ? [item.brand] : []));
+    const hostValues = uniqueList(sourceTagValues.host || sourceTagValues.camera_brands || (item?.host ? [item.host] : []));
+    const categoryValues = uniqueList(sourceTagValues.category || sourceTagValues.product_categories || (item?.category ? [item.category] : []));
+    const customTagValues = uniqueList(sourceTagValues.custom_tags || sourceTagValues.tags || item?.tags);
     const tagValues = {
       ...sourceTagValues,
       brand: brandValues,
@@ -1772,6 +1852,7 @@ function buildDraft(mode, item) {
     const category = categoryValues.join(" / ");
     const reviewCount = cleanText(item?.review_count ?? item?.platforms?.[0]?.reviews, "");
     const monthlySales = cleanText(item?.monthly_sales || item?.platforms?.[0]?.sales, "");
+    const commentCount = Number(item?.comments || item?.review_count || item?.platforms?.[0]?.reviews || 0);
     const sellingPoints = safeArray(item?.selling_points).length
       ? safeArray(item?.selling_points)
       : safeArray(item?.raw_bullets);
@@ -1787,6 +1868,8 @@ function buildDraft(mode, item) {
       cost_estimate: cleanText(item?.cost_estimate, ""),
       rating: cleanText(item?.rating ?? item?.platforms?.[0]?.rating, ""),
       review_count: reviewCount,
+      comments: commentCount,
+      visible_comments: mergeComments([], item?.visible_comments),
       monthly_sales: monthlySales,
       image: cleanText(item?.thumbnail_url || item?.image, ""),
       creator: cleanText(item?.creator || item?.platforms?.[0]?.creator, ""),
@@ -1807,10 +1890,10 @@ function buildDraft(mode, item) {
   }
   const originalText = cleanText(item?.content || item?.original_content || item?.description || item?.summary || item?.ai_summary, "");
   const sourceTagValues = item?.tag_values || {};
-  const innovationValues = uniqueList(sourceTagValues.innovation || [item?.innovation || item?.tags_innovation].filter(Boolean));
-  const scenarioValues = uniqueList(sourceTagValues.scenarios || (safeArray(item?.scenarios).length ? item.scenarios : item?.tags_scenario));
-  const painpointValues = uniqueList(sourceTagValues.painpoints || (safeArray(item?.painpoints).length ? item.painpoints : item?.tags_painpoint));
-  const customTagValues = uniqueList(sourceTagValues.custom_tags || item?.tags_custom || item?.tags);
+  const innovationValues = uniqueList(sourceTagValues.innovation || sourceTagValues.innovation_types || [item?.innovation || item?.tags_innovation].filter(Boolean));
+  const scenarioValues = uniqueList(sourceTagValues.scenarios || sourceTagValues.使用场景 || (safeArray(item?.scenarios).length ? item.scenarios : item?.tags_scenario));
+  const painpointValues = uniqueList(sourceTagValues.painpoints || sourceTagValues.用户痛点 || (safeArray(item?.painpoints).length ? item.painpoints : item?.tags_painpoint));
+  const customTagValues = uniqueList(sourceTagValues.custom_tags || sourceTagValues.tags || item?.tags_custom || item?.tags);
   const tagValues = {
     ...sourceTagValues,
     innovation: innovationValues,
@@ -1870,6 +1953,32 @@ function activeTagFieldsForDraft(mode, form, processed = null) {
 function aiFieldSuggestionText(processed) {
   const suggestions = uniqueList(processed?.field_suggestions).slice(0, 3);
   return suggestions.length ? ` 可添加字段：${suggestions.join("、")}` : "";
+}
+
+function aiQualityWarningText(processed) {
+  const warnings = new Set(uniqueList(processed?.__loom_ai_warnings));
+  if (!warnings.size) return "";
+  const messages = [];
+  if (warnings.has("comments_untranslated")) messages.push("评论仍是英文");
+  if (warnings.has("selling_points_untranslated")) messages.push("卖点仍是英文");
+  if (warnings.has("comments_missing")) messages.push("评论未返回");
+  return messages.length ? `AI 整理结果不完整：${messages.join("、")}。请点重新整理，或检查模型配置。` : "";
+}
+
+function autoOpenTagPickerForProcessed(mode, form, processed = null) {
+  const entity = mode === "product" ? "competitor" : "inspiration";
+  const source = processed || form || {};
+  const fields = allFieldsForEntity(entity);
+  const fieldWithValue = fields.find((field) => fieldValues(source, field).length > 0);
+  if (fieldWithValue) {
+    state.tagPicker = { key: fieldWithValue.key, query: "" };
+    state.autoRevealTagPicker = true;
+    return;
+  }
+  const suggestions = uniqueList(processed?.field_suggestions);
+  const suggestedField = fields.find((field) => suggestions.includes(field.key) || suggestions.includes(field.name));
+  state.tagPicker = suggestedField ? { key: suggestedField.key, query: "" } : null;
+  state.autoRevealTagPicker = Boolean(suggestedField);
 }
 
 function activateTagField(fieldKey, entity) {
@@ -1954,7 +2063,7 @@ function detachFieldFromEntity(fieldKey, entity) {
 }
 
 function fieldValues(item, field) {
-  const values = item?.tag_values?.[field.key];
+  const values = item?.tag_values?.[field.key] || item?.tag_values?.[field.legacyKey];
   if (safeArray(values).length) return safeArray(values).filter(Boolean);
   if (field.key === "brand" && item?.brand) return String(item.brand).split(/\s*\/\s*/).filter(Boolean);
   if (field.key === "host" && item?.host) return String(item.host).split(/\s*\/\s*/).filter(Boolean);
@@ -2033,7 +2142,55 @@ function normalizeComment(item) {
     posted_at_text: cleanText(item.posted_at_text || item.time || item.date, ""),
     location: cleanText(item.location, ""),
     is_reply: Boolean(item.is_reply),
+    ai_processed: Boolean(item.ai_processed || item.__loom_ai_processed),
   };
+}
+
+function markAiProcessedComments(comments) {
+  return safeArray(comments).map((comment) => ({
+    ...comment,
+    ai_processed: true,
+  }));
+}
+
+function commentIdentityMatch(a, b) {
+  const left = normalizeComment(a);
+  const right = normalizeComment(b);
+  if (!left || !right) return false;
+  if (left.id && right.id && left.id === right.id) return true;
+  const sameUser = left.user_id && right.user_id
+    ? left.user_id === right.user_id
+    : cleanText(left.user_name).toLowerCase() === cleanText(right.user_name).toLowerCase();
+  if (!sameUser) return false;
+  if (left.posted_at_text && right.posted_at_text && left.posted_at_text === right.posted_at_text) return true;
+  return left.like_count === right.like_count;
+}
+
+function alignAiCommentsWithSource(sourceComments, aiComments) {
+  const sources = safeArray(sourceComments).map(normalizeComment).filter(Boolean);
+  const processed = markAiProcessedComments(aiComments).map(normalizeComment).filter(Boolean);
+  if (!processed.length) return [];
+  const usedSourceIndexes = new Set();
+  return processed.map((comment, index) => {
+    const matchedIndex = sources.findIndex((source, sourceIndex) => (
+      !usedSourceIndexes.has(sourceIndex) && commentIdentityMatch(source, comment)
+    ));
+    const fallbackIndex = !usedSourceIndexes.has(index) ? index : -1;
+    const sourceIndex = matchedIndex >= 0 ? matchedIndex : fallbackIndex;
+    const source = sourceIndex >= 0 ? sources[sourceIndex] : null;
+    if (sourceIndex >= 0) usedSourceIndexes.add(sourceIndex);
+    return {
+      ...(source || {}),
+      ...comment,
+      id: comment.id || source?.id || "",
+      user_id: comment.user_id || source?.user_id || "",
+      user_name: comment.user_name || source?.user_name || "",
+      like_count: comment.like_count || source?.like_count || 0,
+      posted_at_text: comment.posted_at_text || source?.posted_at_text || "",
+      location: comment.location || source?.location || "",
+      ai_processed: true,
+    };
+  });
 }
 
 function mergeComments(current, incoming) {
@@ -2047,13 +2204,16 @@ function mergeComments(current, incoming) {
     if (seen.has(key)) {
       const existingIndex = indexByKey.get(key);
       const existing = result[existingIndex];
+      const keepExistingContent = existing.ai_processed && !item.ai_processed;
       result[existingIndex] = {
         ...existing,
         ...item,
         user_id: item.user_id || existing.user_id,
         user_name: item.user_name || existing.user_name,
+        content: keepExistingContent ? existing.content : item.content,
         posted_at_text: item.posted_at_text || existing.posted_at_text,
         location: item.location || existing.location,
+        ai_processed: existing.ai_processed || item.ai_processed,
       };
       continue;
     }
@@ -2065,14 +2225,17 @@ function mergeComments(current, incoming) {
 }
 
 async function collectVisibleComments({ silent = false } = {}) {
-  if (state.page?.platform !== "xiaohongshu" || !state.tab?.id) return;
+  if (!["xiaohongshu", "amazon"].includes(state.page?.platform) || !state.tab?.id) return;
+  if (silent && (isEditingForm() || document.visibilityState !== "visible")) return;
   try {
-    const result = await readInjectedPageData(state.tab.id, "xiaohongshu");
+    await ensureContentScriptsInjected(state.tab.id, state.page.platform);
+    const result = await readInjectedPageData(state.tab.id, state.page.platform);
     if (!result?.ok) throw new Error(result?.error || "评论读取失败");
     const incoming = safeArray(result.data?.visible_comments);
     const previousCount = safeArray(state.form?.visible_comments).length;
     const next = mergeComments(state.form?.visible_comments, incoming);
-    state.page = { ...state.page, data: { ...state.page.data, visible_comments: next } };
+    const countChanged = next.length !== previousCount;
+    state.page = { ...state.page, data: { ...state.page.data, visible_comments: mergeComments(state.page.data?.visible_comments, incoming) } };
     state.processed = { ...(state.processed || {}), visible_comments: next };
     state.form = { ...(state.form || {}), visible_comments: next };
     if (!silent) {
@@ -2080,7 +2243,7 @@ async function collectVisibleComments({ silent = false } = {}) {
         ? `已采集 ${next.length} 条当前可见评论。`
         : "当前可见评论还没有读到，向下滚动评论区后再试。";
     }
-    if (!silent) renderMain();
+    if (!silent || countChanged) renderMain();
   } catch (error) {
     if (!silent) {
       state.message = `评论采集失败：${error.message}`;
@@ -2099,15 +2262,20 @@ function stopCommentCollector() {
 }
 
 function startCommentCollector() {
-  if (state.page?.platform !== "xiaohongshu") return;
+  if (!["xiaohongshu", "amazon"].includes(state.page?.platform)) return;
+  if (isEditingForm()) return;
   state.commentCollecting = true;
   state.commentCollectStartedAt = Date.now();
-  state.message = "评论会随滚动自动补充。";
+  state.message = "评论会短暂随滚动自动补充。";
   void collectVisibleComments({ silent: true });
   if (commentCollectorTimer) clearInterval(commentCollectorTimer);
   commentCollectorTimer = setInterval(() => {
+    if (Date.now() - state.commentCollectStartedAt > COMMENT_COLLECT_MAX_MS || isEditingForm() || document.visibilityState !== "visible") {
+      stopCommentCollector();
+      return;
+    }
     void collectVisibleComments({ silent: true });
-  }, 1200);
+  }, COMMENT_COLLECT_INTERVAL_MS);
   renderMain();
 }
 
@@ -2174,6 +2342,7 @@ function productView(item) {
       ${platformCardsHtml(item)}
     </div>
     ${schemaFieldsView("competitor", item)}
+    ${state.page?.platform === "amazon" ? commentsCaptureView(item) : ""}
     <div class="cl-section">
       <div class="cl-section-label">核心卖点 · AI 总结</div>
       ${listEditor("selling_points", mergedSellingPoints, "输入卖点，回车添加", "success")}
@@ -2270,7 +2439,7 @@ function demandView(item) {
       <textarea class="ghost-input full source-content-input" data-key="content" data-min-height="132" placeholder="采集到的原文正文">${escapeHtml(originalText)}</textarea>
     </div>
     ${schemaFieldsView("inspiration", item)}
-    ${state.page?.platform === "xiaohongshu" ? commentsCaptureView(item) : ""}
+    ${["xiaohongshu", "amazon"].includes(state.page?.platform) ? commentsCaptureView(item) : ""}
     <div class="cl-section">
       <div class="cl-section-label">备注</div>
       <textarea class="ghost-input full" data-key="note" placeholder="可选备注">${escapeHtml(item.note || "")}</textarea>
@@ -2288,6 +2457,9 @@ function commentsCaptureView(item) {
   const isExpanded = state.commentListExpanded;
   const preview = comments.slice(0, isExpanded ? comments.length : collapsedLimit);
   const hiddenCount = Math.max(comments.length - preview.length, 0);
+  const sourceHint = state.page?.platform === "amazon"
+    ? "已开启自动评论采集，滚动评论区可补充更多评论。"
+    : "已开启自动评论采集，滚动加载更多评论。";
   return `
     <div class="cl-section">
       <div class="comments-card">
@@ -2298,7 +2470,7 @@ function commentsCaptureView(item) {
           </div>
           <button class="btn sm comments-more-btn" type="button" id="collect-comments-more">刷新</button>
         </div>
-        <div class="comments-tip">已开启自动评论采集，滚动加载更多评论。</div>
+        <div class="comments-tip">${sourceHint}</div>
         <div class="comments-list ${preview.length ? "" : "empty"}">
           ${preview.length ? preview.map(commentItemView).join("") : `<div class="comments-empty">当前还没有读到评论，滚动评论区后会自动出现。</div>`}
         </div>
@@ -2392,7 +2564,7 @@ function fieldSelect(key, label, selectedValues, tone = "accent", options = {}) 
             <span class="tag ${tone} removable" data-tag-key="${escapeAttr(key)}" data-tag-value="${escapeAttr(item)}">
               ${escapeHtml(item)}<button type="button">×</button>
             </span>
-          `).join("") : `<span class="field-empty">点击选择…</span>`}
+          `).join("") : `<span class="field-empty">添加${escapeHtml(label || "标签")}</span>`}
         </div>
       </div>
       ${active ? tagPickerPanel(key, group, selected, tone, options) : ""}
@@ -2877,6 +3049,8 @@ function productPayload(item) {
     rating: item.rating || null,
     review_count: Number(item.review_count || 0),
     monthly_sales: item.monthly_sales || "",
+    comments: Number(item.comments || item.review_count || 0),
+    visible_comments: mergeComments([], item.visible_comments),
     creator: item.creator || "",
     pledged_amount: item.pledged_amount || "",
     goal_amount: item.goal_amount || "",

@@ -837,6 +837,7 @@ export async function processNewsWithLlm(userId, limit = 20) {
         updateNews(userId, item.id, {
           is_kept: 0,
           llm_processed: 1,
+          needsTranslation: false,
           classification: { reason: "manual_llm_filtered" },
         });
         filtered += 1;

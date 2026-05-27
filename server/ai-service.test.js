@@ -7,6 +7,7 @@ const aiService = await import("./ai-service.js");
 const repo = await import("./repository.js");
 
 beforeEach(() => {
+  aiService.__resetLlmQueueForTests();
   dbModule.migrate();
   dbModule.db.prepare("DELETE FROM llm_call_logs").run();
   dbModule.db.prepare("DELETE FROM app_data").run();
@@ -24,17 +25,78 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  aiService.__resetLlmQueueForTests();
   vi.unstubAllGlobals();
 });
 
 function mockResponse(payload) {
   return {
     ok: true,
+    status: 200,
     json: async () => payload,
   };
 }
 
 describe("ai-service routing", () => {
+  it("limits concurrent LLM requests through the shared queue", async () => {
+    const userId = dbModule.getLegacyUserId();
+    repo.updateSettings(userId, { llm_max_concurrency: 1, llm_min_interval_ms: 0 });
+    let active = 0;
+    let maxActive = 0;
+    const releases = [];
+    vi.stubGlobal("fetch", async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => releases.push(resolve));
+      active -= 1;
+      return mockResponse({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+    });
+
+    const first = aiService.callLLM({ userId, purpose: "queue:first", system: "system", user: "user" });
+    const second = aiService.callLLM({ userId, purpose: "queue:second", system: "system", user: "user" });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(releases).toHaveLength(1);
+    releases.shift()();
+    await first;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(releases).toHaveLength(1);
+    releases.shift()();
+    await second;
+    expect(maxActive).toBe(1);
+  });
+
+  it("retries rate-limited LLM requests after a bounded backoff", async () => {
+    const userId = dbModule.getLegacyUserId();
+    repo.updateSettings(userId, {
+      llm_max_concurrency: 1,
+      llm_min_interval_ms: 0,
+      llm_retry_max_attempts: 2,
+      llm_retry_base_ms: 1,
+    });
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const calls = [];
+    vi.stubGlobal("fetch", async () => {
+      calls.push(Date.now());
+      if (calls.length === 1) {
+        return {
+          ok: false,
+          status: 429,
+          headers: { get: () => "0" },
+          json: async () => ({ error: { message: "rate limited" } }),
+        };
+      }
+      return mockResponse({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+    });
+
+    const result = await aiService.callLLM({ userId, purpose: "queue:retry", system: "system", user: "user" });
+
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(2);
+    const logs = dbModule.db.prepare("SELECT status, http_status FROM llm_call_logs ORDER BY rowid ASC").all();
+    expect(logs).toEqual([{ status: "ok", http_status: 200 }]);
+  });
+
   it("routes image prompts through the vision model first and then text model", async () => {
     const calls = [];
     vi.stubGlobal("fetch", async (_url, options) => {
@@ -192,6 +254,11 @@ describe("ai-service routing", () => {
   });
 
   it("records failed LLM calls without storing prompt content", async () => {
+    repo.updateSettings(dbModule.getLegacyUserId(), {
+      llm_retry_max_attempts: 1,
+      llm_retry_base_ms: 0,
+      llm_min_interval_ms: 0,
+    });
     vi.stubGlobal("fetch", async () => ({
       ok: false,
       status: 429,

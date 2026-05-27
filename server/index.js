@@ -18,6 +18,7 @@ import {
   createOauthState,
   exchangeFeishuCode,
   fetchFeishuUserInfo,
+  feishuOauthRedirectOrigin,
   findPasswordAuthAccount,
   getFeishuOauthConfig,
   getPasswordAuthConfig,
@@ -40,7 +41,7 @@ import { analyzeResearch } from "./research-service.js";
 import { buildResearchExportCsv } from "./research-export-service.js";
 import { buildFeishuProjectIdeaDraft } from "./feishu-project-submit-service.js";
 import { submitFeedbackToFeishu, syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
-import { testFeishuProjectMcpForUser } from "./feishu-project-mcp-client.js";
+import { syncFeishuProjectMcpForUser, testFeishuProjectMcpForUser } from "./feishu-project-mcp-client.js";
 import {
   getDocumentImportResult,
   importFeishuDocument,
@@ -62,10 +63,11 @@ import {
   upsertFeishuChat,
 } from "./feishu-bot-service.js";
 import { withCachedImageFields } from "./media-cache-service.js";
-import { indexKnowledgeRecord } from "./knowledge-indexer.js";
+import { indexDemand, indexDocument, indexKnowledgeRecord, indexProduct } from "./knowledge-indexer.js";
 import { generateProjectKnowledgePack, generateResearchKnowledgePack } from "./knowledge-pack-service.js";
 import { evaluateKnowledgeRegression, listKnowledgeQueryLogs, queryKnowledge } from "./knowledge-query-service.js";
-import { getCitation, queryApi, queryHealth, upsertQuerySources } from "./query-api-service.js";
+import { getCitation, queryHealth, upsertQuerySources } from "./query-api-service.js";
+import { askLoom } from "./ask-loom-router-service.js";
 import {
   answerKnowledgeGap,
   createOrBumpKnowledgeGap,
@@ -197,6 +199,7 @@ import {
   findUserById,
   finishSampleWorkspace,
   getFeishuProjectUserMapping,
+  getFeishuProjectStatus,
   importWechatExporterAccounts,
   listFields,
   listAllUsers,
@@ -267,6 +270,25 @@ if (sealConfigResult.configured) {
 }
 const sampleRefreshInFlight = new Set();
 const requestLogEnabled = ["1", "true", "yes"].includes(String(process.env.LOOM_REQUEST_LOG || "").toLowerCase());
+
+function defaultAskIndexPolicy() {
+  return {
+    visibility: "project_team",
+    rag_enabled: true,
+    bot_enabled: false,
+    external_safe: false,
+  };
+}
+
+function indexAskProduct(product, workspaceId) {
+  if (!product || !workspaceId) return null;
+  return indexProduct({ ...product, workspace_id: workspaceId, access_policy: defaultAskIndexPolicy() });
+}
+
+function indexAskDemand(demand, workspaceId) {
+  if (!demand || !workspaceId) return null;
+  return indexDemand({ ...demand, workspace_id: workspaceId, access_policy: defaultAskIndexPolicy() });
+}
 
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "2mb" }));
@@ -859,6 +881,15 @@ app.post("/api/auth/visitor", (req, res) => {
 });
 
 app.get("/api/auth/feishu/start", (req, res) => {
+  const canonicalOrigin = feishuOauthRedirectOrigin();
+  const canonicalHostname = canonicalOrigin ? new URL(canonicalOrigin).hostname : "";
+  const requestHostname = String(req.hostname || "").trim();
+  if (canonicalHostname && requestHostname !== canonicalHostname) {
+    const target = new URL("/api/auth/feishu/start", canonicalOrigin);
+    const returnTo = safeReturnTo(req.query.return_to);
+    if (returnTo) target.searchParams.set("return_to", returnTo);
+    return res.redirect(target.toString());
+  }
   const state = createOauthState();
   req.session.oauthState = state;
   req.session.oauthReturnTo = safeReturnTo(req.query.return_to);
@@ -1331,9 +1362,10 @@ app.get("/api/knowledge/packs/:id", requireAuth, (req, res) => {
 
 app.post("/api/knowledge/query", requireAuth, asyncHandler(async (req, res) => {
   const workspaceId = requestWorkspaceId(req);
-  res.json(await queryKnowledge({
+  res.json(await askLoom({
     ...(req.body || {}),
     workspace_id: workspaceId,
+    q: req.body?.q || req.body?.question,
     user_id: currentUserId(req),
     user: currentUser(req),
     roles: currentWorkspaceRoles(req, workspaceId),
@@ -1342,7 +1374,7 @@ app.post("/api/knowledge/query", requireAuth, asyncHandler(async (req, res) => {
 
 app.post("/api/query", requireAuth, asyncHandler(async (req, res) => {
   const workspaceId = requestWorkspaceId(req);
-  res.json(await queryApi({
+  res.json(await askLoom({
     ...(req.body || {}),
     workspace_id: workspaceId,
     user_id: req.body?.user_id || currentUserId(req),
@@ -1416,6 +1448,69 @@ app.post("/api/query/upsert", requireAuth, (req, res, next) => {
     if (error.message) return res.status(400).json({ error: error.message });
     next(error);
   }
+});
+
+app.post("/api/query/rebuild-index", requireAuth, (req, res) => {
+  const workspaceId = requestWorkspaceId(req);
+  const userId = currentUserId(req);
+  const state = rawState(userId);
+  const access_policy = {
+    visibility: "project_team",
+    rag_enabled: true,
+    bot_enabled: false,
+    external_safe: false,
+  };
+  let products = 0;
+  let demands = 0;
+  let documents = 0;
+  let feishuProjectItems = 0;
+  for (const product of state.products || []) {
+    indexProduct({ ...product, workspace_id: workspaceId, access_policy });
+    products += 1;
+  }
+  for (const demand of state.demands || []) {
+    indexDemand({ ...demand, workspace_id: workspaceId, access_policy });
+    demands += 1;
+  }
+  for (const document of listDocuments(workspaceId)) {
+    const documentPolicy = document.access_policy || {};
+    if (document.status !== "published" && documentPolicy.rag_enabled !== true) continue;
+    indexDocument(document);
+    documents += 1;
+  }
+  const projectItems = listFeishuProjectItems({
+    workspace_id: workspaceId,
+    project_key: state.settings?.feishu_project_default_project_key || state.settings?.feishu_mcp_project_key || "",
+    limit: 100,
+  });
+  if (projectItems.length) {
+    upsertQuerySources({
+      workspace_id: workspaceId,
+      sources: projectItems.map((item) => ({
+        id: `feishu_project_item:${item.project_key}:${item.work_item_id}`,
+        type: "feishu_project_item",
+        title: item.name || "飞书项目工作项",
+        body: [
+          item.name,
+          item.work_item_type_name,
+          item.status_name,
+          item.current_node_name,
+          Object.values(item.fields || {}).map((field) => `${field.name}: ${field.text || JSON.stringify(field.value)}`).join("\n"),
+        ].filter(Boolean).join("\n"),
+        source_url: item.source_url,
+        visibility: "internal_only",
+        confidence: 0.85,
+        metadata: {
+          project_key: item.project_key,
+          work_item_id: item.work_item_id,
+          work_item_type_key: item.work_item_type_key,
+          work_item_type_name: item.work_item_type_name,
+        },
+      })),
+    });
+    feishuProjectItems = projectItems.length;
+  }
+  res.json({ ok: true, indexed: { products, demands, documents, feishu_project_items: feishuProjectItems } });
 });
 
 app.get("/api/knowledge/source-policies", requireAuth, (req, res) => {
@@ -1788,6 +1883,7 @@ app.post("/api/products", requireAuth, asyncHandler(async (req, res) => {
   const body = req.body || {};
   const payload = await withCachedImageFields(req.body || {});
   const product = createProduct(userId, payload);
+  indexAskProduct(product, requestWorkspaceId(req));
   syncVisitorSampleIfNeeded(userId);
   if (body.import_method === "chrome_extension" && !body.__loom_ai_processed) {
     const job = queueAiOrganizeJob({
@@ -1834,6 +1930,7 @@ app.patch("/api/products/:id", requireAuth, asyncHandler(async (req, res) => {
   const payload = await withCachedImageFields(req.body || {});
   const item = updateProduct(currentUserId(req), req.params.id, payload);
   if (!item) return res.status(404).json({ error: "product_not_found" });
+  indexAskProduct(item, requestWorkspaceId(req));
   res.json(item);
 }));
 app.post("/api/products/:id/platforms", requireAuth, (req, res) => {
@@ -1878,6 +1975,7 @@ app.post("/api/demands", requireAuth, asyncHandler(async (req, res) => {
   const userId = currentUserId(req);
   const payload = await withCachedImageFields(req.body || {});
   const demand = createDemand(userId, payload);
+  indexAskDemand(demand, requestWorkspaceId(req));
   syncVisitorSampleIfNeeded(userId);
   if (payload.import_method === "chrome_extension" && !payload.__loom_ai_processed) {
     const job = queueAiOrganizeJob({
@@ -1919,6 +2017,7 @@ app.patch("/api/demands/:id", requireAuth, asyncHandler(async (req, res) => {
   const payload = await withCachedImageFields(req.body || {});
   const item = updateDemand(currentUserId(req), req.params.id, payload);
   if (!item) return res.status(404).json({ error: "demand_not_found" });
+  indexAskDemand(item, requestWorkspaceId(req));
   res.json(item);
 }));
 app.delete("/api/demands/:id", requireAuth, (req, res) => {
@@ -2246,6 +2345,17 @@ app.get("/api/feishu-project/items", requireAuth, (req, res) => {
     limit: req.query.limit,
   }));
 });
+app.get("/api/feishu-project/status", requireAuth, (req, res) => {
+  res.json(getFeishuProjectStatus(currentUserId(req), requestWorkspaceId(req, "query")));
+});
+app.post("/api/feishu-project/sync", requireAuth, asyncHandler(async (req, res) => {
+  const user = currentUser(req);
+  if (!isAdmin(user)) return res.status(403).json({ error: "admin_required" });
+  res.json(await syncFeishuProjectMcpForUser(currentUserId(req), {
+    workspaceId: requestWorkspaceId(req),
+    limit: req.body?.limit,
+  }));
+}));
 app.get("/api/research/:id", requireAuth, (req, res) => {
   const workspaceId = requestWorkspaceId(req, "query");
   const research = (rawState(currentUserId(req)).research || []).find((item) => item.id === req.params.id);

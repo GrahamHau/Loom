@@ -141,6 +141,16 @@ export function buildFeishuAuthUrl(state) {
   return `https://open.feishu.cn/open-apis/authen/v1/index?${params.toString()}`;
 }
 
+export function feishuOauthRedirectOrigin() {
+  const config = getFeishuOauthConfig();
+  if (!config.redirectUri) return "";
+  try {
+    return new URL(config.redirectUri).origin;
+  } catch {
+    return "";
+  }
+}
+
 async function feishuOauthFetch(path, options = {}) {
   const response = await fetch(`${FEISHU_BASE}${path}`, options);
   const body = await response.json().catch(() => ({}));

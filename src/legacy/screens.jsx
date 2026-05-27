@@ -2728,9 +2728,14 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [projectItems, setProjectItems] = useState([]);
+  const [projectItemsLoading, setProjectItemsLoading] = useState(false);
   const selected = demands.find((d) => d.id === selectedId);
   const feishuStatus = data.dashboard?.feishu_status || {};
-  const feishuConnected = Boolean(feishuStatus.connected || data.settings?.feishu_app_token || data.settings?.feishu_connected || data.workspace?.feishu_app_token);
+  const feishuProjectStatus = data.dashboard?.feishu_project_status || {};
+  const feishuProjectConfigured = Boolean(feishuProjectStatus.configured);
+  const feishuConnected = feishuProjectConfigured || Boolean(feishuStatus.connected || data.settings?.feishu_app_token || data.settings?.feishu_connected || data.workspace?.feishu_app_token);
+  const feishuProjectName = feishuProjectStatus.project_name || "飞书项目空间";
 
   const filtered = demands.filter((d) =>
   (!filterScenario || safeArray(d.scenarios).includes(filterScenario)) && (
@@ -2757,6 +2762,23 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
     await refreshData?.();
   };
   const demandFields = normalizeFields(data.settings?.fields, data.settings?.tag_groups, { includeDefaults: true });
+
+  const loadProjectItems = async () => {
+    if (!api || !feishuProjectConfigured) return;
+    setProjectItemsLoading(true);
+    try {
+      const items = await api(`/api/feishu-project/items?limit=80&workspace_id=${encodeURIComponent(data.workspace?.workspace_id || data.workspace?.id || "")}`);
+      setProjectItems(safeArray(items));
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setProjectItemsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "requirements") loadProjectItems();
+  }, [tab, feishuProjectConfigured, feishuProjectStatus.items_count]);
 
   const openDeleteConfirm = (demand) => {
     setDeleteTarget(demand);
@@ -2827,7 +2849,7 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
             <div>
               <h1 className="h1" style={{ marginBottom: 2 }}>需求库</h1>
               <div className="muted text-sm">
-                飞书多维表格镜像 · AI 语义搜索 · 品类分析视图。
+                飞书项目工作项镜像 · 用户声音 · AI 语义搜索。
               </div>
             </div>
           </div>
@@ -2855,16 +2877,19 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
         <div className="demands-source-banner">
           <Icon name="link" size={12} style={{ color: "var(--text-3)", flexShrink: 0 }} />
           <span className="demands-source-text">
-            数据来源：<strong>飞书多维表格</strong>
+            数据来源：<strong>{feishuProjectConfigured ? feishuProjectName : "飞书项目空间"}</strong>
           </span>
-          {feishuConnected ? (
+          {feishuProjectConfigured ? (
             <Tag tone="success">
-              已接入{feishuStatus.last_sync_at ? ` · ${formatRelativeTime(feishuStatus.last_sync_at)}同步` : ""}
+              已固定{feishuProjectStatus.items_count ? ` · ${feishuProjectStatus.items_count} 个工作项` : ""}
+              {feishuStatus.last_sync_at ? ` · ${formatRelativeTime(feishuStatus.last_sync_at)}同步` : ""}
             </Tag>
+          ) : feishuConnected ? (
+            <Tag tone="outline">旧飞书表兼容源</Tag>
           ) : (
-            <Tag tone="outline">未接入</Tag>
+            <Tag tone="outline">管理员尚未固定</Tag>
           )}
-          {!feishuConnected && (
+          {!feishuProjectConfigured && (
             <button type="button" className="demands-source-cta" onClick={() => onNavigate?.("settings")}>
               配置
             </button>
@@ -2894,29 +2919,72 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
         </div>
 
         {tab === "requirements" && (
-          <div className="demands-tab-empty">
-            <Icon name="clipboard" size={28} style={{ color: "var(--text-4)" }} />
-            <div className="demands-tab-empty-title">需求列表（飞书镜像表）</div>
-            <div className="demands-tab-empty-desc">
-              接入飞书 Loom 标准模板后，这里会镜像团队需求表，并展示需求名称、品类、负责 PM、当前状态、优先级、周更新、决策状态、决策理由和关联竞品。
+          projectItems.length ? (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>工作项名称</th>
+                    <th>类型</th>
+                    <th>负责人</th>
+                    <th>当前节点</th>
+                    <th>状态</th>
+                    <th>更新时间</th>
+                    <th>字段摘要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projectItems.map((item) => {
+                    const owners = safeArray(item.current_owners).map((owner) => owner.name || owner.user_name || owner.user_key).filter(Boolean).join("、");
+                    const fields = Object.values(item.fields || {}).filter((field) => field.text).slice(0, 3);
+                    return (
+                      <tr key={item.id || item.work_item_id}>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{item.name || "未命名工作项"}</div>
+                          <div className="muted text-xs">#{item.work_item_id}</div>
+                        </td>
+                        <td>{item.work_item_type_name || item.work_item_type_key}</td>
+                        <td>{owners || "未同步"}</td>
+                        <td>{item.current_node_name || "未同步"}</td>
+                        <td>{item.status_name || "未同步"}</td>
+                        <td>{item.updated_at ? formatRelativeTime(item.updated_at) : "未同步"}</td>
+                        <td>
+                          <div className="col" style={{ gap: 3 }}>
+                            {fields.length ? fields.map((field) => (
+                              <span key={field.key} className="muted text-xs">{field.name}: {String(field.text).slice(0, 44)}</span>
+                            )) : <span className="muted text-xs">暂无字段摘要</span>}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            <div className="demands-tab-empty-fields">
-              <span>需求名称</span>
-              <span>品类</span>
-              <span>负责 PM</span>
-              <span>当前状态</span>
-              <span>优先级</span>
-              <span>周更新</span>
-              <span>决策状态</span>
-              <span>决策理由</span>
-              <span>关联竞品</span>
+          ) : (
+            <div className="demands-tab-empty">
+              <Icon name={projectItemsLoading ? "sync" : "clipboard"} size={28} style={{ color: "var(--text-4)" }} />
+              <div className="demands-tab-empty-title">需求列表（飞书项目工作项）</div>
+              <div className="demands-tab-empty-desc">
+                管理员固定飞书项目空间后，这里会镜像产品想法登记和项目工作项，并展示名称、类型、负责 PM、当前节点、状态、更新时间和关联证据。
+              </div>
+              <div className="demands-tab-empty-fields">
+                <span>工作项名称</span>
+                <span>工作项类型</span>
+                <span>品类</span>
+                <span>负责 PM</span>
+                <span>当前节点</span>
+                <span>状态</span>
+                <span>更新时间</span>
+                <span>关联证据</span>
+              </div>
+              {!feishuProjectConfigured && (
+                <button type="button" className="btn primary" style={{ marginTop: 18 }} onClick={() => onNavigate?.("settings")}>
+                  去固定飞书项目空间
+                </button>
+              )}
             </div>
-            {!feishuConnected && (
-              <button type="button" className="btn primary" style={{ marginTop: 18 }} onClick={() => onNavigate?.("settings")}>
-                去配置飞书
-              </button>
-            )}
-          </div>
+          )
         )}
 
         {tab === "analysis" && (
@@ -4638,7 +4706,6 @@ function KnowledgeScreen({ data, api, onNavigate, onOpenDocumentModal, initialPa
   const [question, setQuestion] = useState('这份 PRD 定义了哪些功能？');
   const [answer, setAnswer] = useState(null);
   const [audience, setAudience] = useState('internal');
-  const [packId, setPackId] = useState('');
 
   // 起草
   const [draftTitle, setDraftTitle] = useState('');
@@ -4679,44 +4746,24 @@ function KnowledgeScreen({ data, api, onNavigate, onOpenDocumentModal, initialPa
 
   useEffect(() => { loadRecent(); }, [api, workspaceId]);
 
-  const ensurePack = async () => {
-    if (packId) return packId;
-    const pack = await api('/api/knowledge/packs/build', {
-      method: 'POST',
-      body: JSON.stringify({
-        workspace_id: workspaceId,
-        project_id: defaultProjectId,
-        title: 'Auto Pack',
-      }),
-    });
-    if (pack?.id) setPackId(pack.id);
-    return pack?.id;
-  };
-
   const ask = async (e) => {
     e?.preventDefault();
     if (!question.trim()) return;
     setBusy('ask');
     setAnswer(null);
     try {
-      const nextPackId = await ensurePack();
-      if (!nextPackId) {
-        setNote('error', '资料包构建失败，请检查 workspace / project。');
-        return;
-      }
       const result = await api('/api/knowledge/query', {
         method: 'POST',
         body: JSON.stringify({
           workspace_id: workspaceId,
           project_id: defaultProjectId,
-          pack_id: nextPackId,
           question,
           audience,
         }),
       });
       setAnswer(result);
       setNote(safeArray(result?.citations).length ? 'success' : 'warn',
-        safeArray(result?.citations).length ? '答案已生成，下面附引用。' : '已回答，但没有引用 — 试试加资料或换问法。');
+        safeArray(result?.citations).length ? '答案已生成，下面附引用。' : '证据不足，已记录到 Gap。');
     } catch (error) {
       setNote('error', error.message || '问答失败');
     } finally {
@@ -4742,6 +4789,21 @@ function KnowledgeScreen({ data, api, onNavigate, onOpenDocumentModal, initialPa
       onNavigate?.(draftType);
     } catch (error) {
       setNote('error', error.message || '创建失败');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const rebuildAskIndex = async () => {
+    setBusy('rebuild-index');
+    try {
+      const result = await api('/api/query/rebuild-index', {
+        method: 'POST',
+        body: JSON.stringify({ workspace_id: workspaceId }),
+      });
+      setNote('success', `已重建问答索引：竞品 ${result.indexed?.products || 0}，需求 ${result.indexed?.demands || 0}，文档 ${result.indexed?.documents || 0}`);
+    } catch (error) {
+      setNote('error', error.message || '重建索引失败');
     } finally {
       setBusy('');
     }
@@ -4865,6 +4927,7 @@ function KnowledgeScreen({ data, api, onNavigate, onOpenDocumentModal, initialPa
           </div>
           <div className="page-head-actions">
             <Btn size="sm" variant="ghost" icon="plus" onClick={openImport}>加资料</Btn>
+            <Btn size="sm" variant="ghost" icon="sync" onClick={rebuildAskIndex} disabled={busy === 'rebuild-index'}>{busy === 'rebuild-index' ? '重建中...' : '重建问答索引'}</Btn>
             <Btn size="sm" variant="ghost" icon="settings" onClick={() => { setMgmtTab('graph'); setMgmtOpen(true); }}>管理</Btn>
           </div>
         </header>
@@ -4911,6 +4974,7 @@ function KnowledgeScreen({ data, api, onNavigate, onOpenDocumentModal, initialPa
                 <div className="knowledge-answer-top">
                   <Tag tone={answer.mode === 'refused' ? 'danger' : 'success'}>{answer.mode || 'answered'}</Tag>
                   <span className="muted text-sm">{Math.round((answer.confidence || 0) * 100)}% confidence</span>
+                  {safeArray(answer.tools_used).length ? <Tag tone="outline">{answer.tools_used.join(' / ')}</Tag> : null}
                   {answer.needs_review ? <Tag tone="accent">待复核</Tag> : null}
                 </div>
                 <div className="knowledge-answer-text">{answer.answer}</div>
@@ -4918,15 +4982,25 @@ function KnowledgeScreen({ data, api, onNavigate, onOpenDocumentModal, initialPa
                   <div className="doc-studio-chip-row">
                     {answer.citations.map((item) => (
                       <CitationChip
-                        key={item.chunk_id || item.title}
-                        label={item.title || item.chunk_id}
+                        key={item.id || item.chunk_id || `${item.source_type}:${item.source_id}`}
+                        label={`${item.source_type || 'source'} · ${item.title || item.source_title || item.source_id}`}
                         onClick={() => jumpToCitation(item)}
                       />
                     ))}
                   </div>
                 ) : (
-                  <div className="muted text-sm">没有引用 — 可能是空 pack 或问题与已有资料无关。</div>
+                  <div className="muted text-sm">没有足够证据生成答案。</div>
                 )}
+                {safeArray(answer.evidence_packets).length ? (
+                  <div className="knowledge-empty-note" style={{ marginTop: 10 }}>
+                    命中来源：{answer.evidence_packets.slice(0, 5).map((item) => `${item.source_type} / ${item.tool}`).join('、')}
+                  </div>
+                ) : null}
+                {safeArray(answer.gaps).length ? (
+                  <div className="knowledge-empty-note" style={{ marginTop: 10 }}>
+                    已记录待补问题：{answer.gaps.map((gap) => gap.id).join('、')}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="ask-suggestions">
@@ -5781,6 +5855,7 @@ function SettingsScreen({ data, api, refreshData }) {
   const [deleteSourceTarget, setDeleteSourceTarget] = useState(null);
   const [deleteSourceBusy, setDeleteSourceBusy] = useState(false);
   const editingSettingsRef = useRef(false);
+  const isAdmin = ["owner", "admin"].includes(data.user?.role_code || "");
   useEffect(() => setSources(data.rssSources), [data.rssSources]);
   useEffect(() => setOfficialSources(data.officialRssSources || []), [data.officialRssSources]);
   useEffect(() => {
@@ -5868,6 +5943,18 @@ function SettingsScreen({ data, api, refreshData }) {
       setNotice(error.message);
     }
   };
+  const syncFeishuProjectNow = async () => {
+    setNotice("飞书项目同步中...");
+    try {
+      await saveSettings(settings);
+      const result = await api("/api/feishu-project/sync", { method: "POST", body: JSON.stringify({ limit: 50 }) });
+      await api("/api/query/rebuild-index", { method: "POST", body: JSON.stringify({ workspace_id: data.workspace?.workspace_id || data.workspace?.id }) });
+      await refreshData?.();
+      setNotice(`飞书项目同步完成：${result?.synced?.items || 0} 个工作项，${result?.synced?.field_configs || 0} 个字段。`);
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
   const sortedSources = [...sources].sort((a, b) => {
     const countDiff = Number(b.last_item_count || 0) - Number(a.last_item_count || 0);
     if (countDiff !== 0) return countDiff;
@@ -5945,6 +6032,15 @@ function SettingsScreen({ data, api, refreshData }) {
             <div className="settings-row">
               <div className="label">模型名称</div>
               <input className="input" style={{ width: 280 }} value={settings.llm_model || ""} onChange={(e) => setSettings({ ...settings, llm_model: e.target.value })} />
+            </div>
+            <div className="settings-row">
+              <div className="label">后台限流</div>
+              <div className="settings-grid" style={{ gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8, width: "100%" }}>
+                <input className="input" type="number" min="1" max="8" value={settings.llm_max_concurrency ?? 1} onChange={(e) => setSettings({ ...settings, llm_max_concurrency: Number(e.target.value || 1) })} placeholder="并发" />
+                <input className="input" type="number" min="0" step="100" value={settings.llm_min_interval_ms ?? 1200} onChange={(e) => setSettings({ ...settings, llm_min_interval_ms: Number(e.target.value || 0) })} placeholder="间隔 ms" />
+                <input className="input" type="number" min="1" max="6" value={settings.llm_retry_max_attempts ?? 3} onChange={(e) => setSettings({ ...settings, llm_retry_max_attempts: Number(e.target.value || 1) })} placeholder="重试次数" />
+                <input className="input" type="number" min="0" step="100" value={settings.llm_retry_base_ms ?? 1500} onChange={(e) => setSettings({ ...settings, llm_retry_base_ms: Number(e.target.value || 0) })} placeholder="退避 ms" />
+              </div>
             </div>
             <div className="settings-row">
               <div className="label">&nbsp;</div>
@@ -6123,25 +6219,44 @@ function SettingsScreen({ data, api, refreshData }) {
             <Icon name="folder-open" size={14} style={{ color: "var(--accent)" }} />
             <div>
               <h3>飞书项目 MCP <Tag tone="accent">Beta</Tag></h3>
-              <div className="desc">通过飞书项目 MCP 读取产品想法、立项和项目集。Token 只保存在服务端设置里。</div>
+              <div className="desc">管理员固定项目空间后，普通用户只提交产品想法，不需要填写空间号。</div>
             </div>
           </div>
           <div className="settings-section-body">
-            <div className="settings-row">
-              <div className="label">MCP Endpoint</div>
-              <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_url || ""} onChange={(e) => updateSetting("feishu_mcp_url", e.target.value)} placeholder="可不填，默认 https://project.feishu.cn/mcp_server/v1" />
-            </div>
-            <div className="settings-row">
-              <div className="label">X-Mcp-Token</div>
-              <input className="input" style={{ width: "100%" }} type="password" value={settings.feishu_mcp_token || ""} onChange={(e) => updateSetting("feishu_mcp_token", e.target.value)} placeholder="只填写 token 值，不需要填写 X-Mcp-Token 这个 header 名" />
-            </div>
-            <div className="settings-row">
-              <div className="label">项目空间 ID</div>
-              <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_key || ""} onChange={(e) => updateSetting("feishu_mcp_project_key", e.target.value)} placeholder="项目空间 project_key" />
-            </div>
+            {isAdmin ? (
+              <>
+                <div className="settings-row">
+                  <div className="label">MCP Endpoint</div>
+                  <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_url || ""} onChange={(e) => updateSetting("feishu_mcp_url", e.target.value)} placeholder="可不填，默认 https://project.feishu.cn/mcp_server/v1" />
+                </div>
+                <div className="settings-row">
+                  <div className="label">X-Mcp-Token</div>
+                  <input className="input" style={{ width: "100%" }} type="password" value={settings.feishu_mcp_token || ""} onChange={(e) => updateSetting("feishu_mcp_token", e.target.value)} placeholder="只填写 token 值，不需要填写 X-Mcp-Token 这个 header 名" />
+                </div>
+                <div className="settings-row">
+                  <div className="label">固定项目空间</div>
+                  <div className="col" style={{ gap: 8, width: "100%" }}>
+                    <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_name || settings.feishu_project_default_project_name || ""} onChange={(e) => updateSetting("feishu_mcp_project_name", e.target.value)} placeholder="空间名称，测试连接后自动回填" />
+                    <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_key || settings.feishu_project_default_project_key || ""} onChange={(e) => updateSetting("feishu_mcp_project_key", e.target.value)} placeholder="管理员可选填 project_key；普通用户不需要知道" />
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="label">产品想法类型</div>
+                  <input className="input" style={{ width: "100%" }} value={settings.feishu_project_idea_type_key || ""} onChange={(e) => updateSetting("feishu_project_idea_type_key", e.target.value)} placeholder="测试连接后识别“产品想法登记”并自动回填" />
+                </div>
+              </>
+            ) : (
+              <div className="settings-row">
+                <div className="label">项目空间</div>
+                <div className="col" style={{ gap: 6 }}>
+                  <div>{settings.feishu_project_default_project_name || settings.feishu_mcp_project_name || "管理员尚未固定"}</div>
+                  <div className="muted text-sm">空间、类型和字段映射由管理员维护，你只需要在调研工坊提交产品想法。</div>
+                </div>
+              </div>
+            )}
             <div className="settings-row">
               <div className="label">同步频率</div>
-              <select className="input" style={{ maxWidth: 200 }} value={settings.feishu_mcp_interval || "manual"} onChange={(e) => updateSetting("feishu_mcp_interval", e.target.value)}>
+              <select className="input" style={{ maxWidth: 200 }} value={settings.feishu_mcp_interval || "manual"} onChange={(e) => updateSetting("feishu_mcp_interval", e.target.value)} disabled={!isAdmin}>
                 <option value="manual">仅手动</option>
                 <option value="15m">每 15 分钟</option>
                 <option value="1h">每小时</option>
@@ -6152,9 +6267,9 @@ function SettingsScreen({ data, api, refreshData }) {
             <div className="settings-row">
               <div className="label">&nbsp;</div>
               <div className="row">
-                <Btn icon="check" onClick={() => test("/api/settings/test-feishu-project-mcp", "飞书项目 MCP")}>测试连接</Btn>
-                <Btn variant="primary" icon="sync" onClick={() => setNotice("飞书 MCP 接入即将上线，已保存配置。")}>立即同步</Btn>
-                {settings.last_feishu_project_mcp_test_at && <span className="muted text-sm" style={{ marginLeft: 4 }}>上次:{settings.last_feishu_project_mcp_test_at}</span>}
+                {isAdmin ? <Btn icon="check" onClick={() => test("/api/settings/test-feishu-project-mcp", "飞书项目 MCP")}>测试并固定空间</Btn> : null}
+                {isAdmin ? <Btn variant="primary" icon="sync" onClick={syncFeishuProjectNow}>立即同步</Btn> : null}
+                {(settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at) && <span className="muted text-sm" style={{ marginLeft: 4 }}>上次:{settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at}</span>}
               </div>
             </div>
           </div>

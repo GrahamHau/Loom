@@ -7,6 +7,7 @@ const repo = await import("./repository.js");
 const {
   FeishuProjectMcpClient,
   parseMcpResponseText,
+  syncFeishuProjectMcpForUser,
   testFeishuProjectMcpForUser,
 } = await import("./feishu-project-mcp-client.js");
 
@@ -99,9 +100,9 @@ describe("testFeishuProjectMcpForUser", () => {
       return okText(JSON.stringify({
         result: {
           work_item_types: [
-            { name: "产品想法登记" },
-            { name: "产品立项流程" },
-            { name: "项目集流程" },
+            { key: "idea-type", name: "产品想法登记" },
+            { key: "project-type", name: "产品立项流程" },
+            { key: "program-type", name: "项目集流程" },
           ],
         },
       }));
@@ -118,5 +119,79 @@ describe("testFeishuProjectMcpForUser", () => {
     });
     expect(JSON.stringify(summary)).not.toContain("secret-token");
     expect(repo.rawState(userId).settings.last_feishu_project_mcp_test_at).toBeTruthy();
+    expect(repo.rawState(userId).settings.feishu_project_idea_type_key).toBeTruthy();
+  });
+});
+
+describe("syncFeishuProjectMcpForUser", () => {
+  it("mirrors project work items and field values through flexible MCP tools", async () => {
+    const user = repo.ensureLocalUser({ id: "mcp-sync-user", name: "MCP Sync", role_code: "admin", auth_provider: "password", withDefaultWorkspace: true });
+    const userId = user.id;
+    const workspaceId = repo.ensureDefaultWorkspaceForUser(user, { autoAssign: true }).workspace_id;
+    repo.updateSettings(userId, {
+      feishu_mcp_token: "secret-token",
+      feishu_mcp_project_key: "project-1",
+      feishu_mcp_project_name: "产研中心产品开发流程",
+    });
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (body.method === "initialize") return okText(JSON.stringify({ result: { serverInfo: { name: "Meego MCP Server" } } }));
+      if (body.method === "tools/list") {
+        return okText(JSON.stringify({ result: { tools: [
+          { name: "list_workitem_types" },
+          { name: "list_workitem_field_config" },
+          { name: "list_workitems" },
+          { name: "get_workitem_brief" },
+        ] } }));
+      }
+      if (body.params.name === "list_workitem_types") {
+        return okText(JSON.stringify({ result: { work_item_types: [
+          { key: "idea-type", name: "产品想法登记" },
+          { key: "project-type", name: "产品立项流程" },
+        ] } }));
+      }
+      if (body.params.name === "list_workitem_field_config") {
+        return okText(JSON.stringify({ result: { fields: [
+          { field_key: "field_363968", field_name: "想法概述", field_type: "text" },
+        ] } }));
+      }
+      if (body.params.name === "list_workitems") {
+        return okText(JSON.stringify({ result: { items: [
+          {
+            id: "wi-1",
+            name: "智能相机电池仓",
+            work_item_type_key: body.params.arguments.work_item_type_key,
+            work_item_type_name: "产品想法登记",
+            current_node: { id: "node-1", name: "想法登记", owners: [{ user_key: "u1", name: "Graham" }] },
+            fields: [{ field_key: "field_363968", value: "客户希望电池仓更易拆装" }],
+          },
+        ] } }));
+      }
+      if (body.params.name === "get_workitem_brief") {
+        return okText(JSON.stringify({ result: { work_item: {
+          id: "wi-1",
+          name: "智能相机电池仓",
+          work_item_type_key: "idea-type",
+          work_item_type_name: "产品想法登记",
+          status: { key: "reviewing", name: "评审中" },
+          work_item_current_node: { node_key: "node-1", node_name: "想法登记", owners: [{ user_key: "u1", name: "Graham" }] },
+          fields: [{ field_key: "field_363968", value: "客户希望电池仓更易拆装" }],
+          updated_at: "2026-05-27T09:00:00.000Z",
+        } } }));
+      }
+      return okText(JSON.stringify({ result: {} }));
+    });
+
+    const result = await syncFeishuProjectMcpForUser(userId, { workspaceId, fetchImpl, limit: 10 });
+
+    expect(result.synced.items).toBeGreaterThan(0);
+    const items = repo.listFeishuProjectItems({ workspace_id: workspaceId, project_key: "project-1", limit: 10 });
+    expect(items[0]).toMatchObject({
+      work_item_id: "wi-1",
+      name: "智能相机电池仓",
+      current_node_name: "想法登记",
+    });
+    expect(items[0].fields.field_363968.text).toContain("电池仓");
+    expect(repo.rawState(userId).settings.last_feishu_project_mcp_sync_at).toBeTruthy();
   });
 });

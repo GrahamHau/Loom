@@ -218,7 +218,7 @@ function mapStoredCitation(row) {
   };
 }
 
-function citationFromChunk(workspaceId, chunk, score) {
+export function citationFromChunk(workspaceId, chunk, score) {
   const sourceRefs = Array.isArray(chunk.source_refs) ? chunk.source_refs : [];
   const evidenceIds = Array.isArray(chunk.metadata?.evidence_ids)
     ? chunk.metadata.evidence_ids

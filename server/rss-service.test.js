@@ -140,6 +140,61 @@ describe("rss-service classification", () => {
     }
   });
 
+  it("removes llm-filtered items from the pending translation queue", async () => {
+    dbModule.migrate();
+    dbModule.db.prepare("DELETE FROM news_items").run();
+    dbModule.db.prepare("DELETE FROM users").run();
+    dbModule.db.prepare("DELETE FROM app_data").run();
+    dbModule.ensureSeed({
+      user: { name: "Graham", role: "管理员", initials: "GR" },
+      products: [],
+      demands: [],
+      news: [],
+      research: [],
+      rssSources: [],
+      settings: {
+        llm_api_url: "https://llm.test/v1",
+        llm_model: "gpt-test",
+        llm_api_key: "secret",
+      },
+    });
+    const userId = dbModule.getLegacyUserId();
+    repo.upsertNews(userId, [{
+      source_id: "rss-36kr",
+      source: "36Kr",
+      original_url: "https://example.com/broad-market-story",
+      original_title: "A broad stock market update",
+      titleZh: "A broad stock market update",
+      summary: "Not relevant to product intelligence.",
+      llmProcessed: false,
+      needsTranslation: true,
+      date: "2026-05-15T00:00:00.000Z",
+    }]);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: JSON.stringify({ keep: false }),
+          },
+        }],
+      }),
+    });
+
+    try {
+      const result = await processNewsWithLlm(userId, 1);
+      expect(result.filtered).toBe(1);
+      expect(result.remaining).toBe(0);
+      expect(repo.listPendingNewsForLlm(userId, 10)).toHaveLength(0);
+      const saved = repo.listNews(userId).find((item) => item.original_url === "https://example.com/broad-market-story");
+      expect(saved?.needsTranslation).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("marks ambiguous updates for llm review", () => {
     const result = heuristicClassifyNews({
       source: { name: "Brand Feed", authority: "watchlist" },

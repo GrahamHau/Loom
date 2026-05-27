@@ -17,22 +17,43 @@
         <img class="mark mark-image" src="../icons/icon48.png" alt="LOOM extension logo">
         <div>
           <h1>LOOM Clipper</h1>
-          <p>配置采集插件的服务器、登录状态、平台和字段映射。</p>
+          <p>确认账号连接、采集方式和 AI 状态。字段和标签会跟随 Web 端账号自动同步。</p>
         </div>
       </div>
       <a id="open-web" class="btn" href="https://loom.palecedar.site/app" target="_blank" rel="noreferrer">打开 Web 端</a>
     </header>
 
-    <section class="section">
+    <section class="section hero-card">
       <div class="section-head">
-        <h2>连接</h2>
+        <div>
+          <h2>常用设置</h2>
+          <div class="section-sub">平时只需要确认登录状态、默认模式和支持平台。AI 整理在侧边栏手动触发。</div>
+        </div>
         <span id="connection-state">未检测</span>
       </div>
-      <div class="form-grid">
-        <label>服务器地址<input id="api-base" type="url" placeholder="https://loom.palecedar.site"></label>
-        <label>登录方式<input value="跟随 Web 端登录态自动同步" type="text" readonly></label>
+      <input id="ai-before-save" type="checkbox" hidden>
+      <span id="ai-before-save-label" hidden>关闭</span>
+      <div class="primary-settings-grid">
+        <label>默认模式
+          <select id="default-mode">
+            <option value="auto">自动判断</option>
+            <option value="product">竞品</option>
+            <option value="demand">需求</option>
+          </select>
+        </label>
+        <div class="manual-ai-note">
+          <div class="status-label">AI 整理</div>
+          <div class="status-value">手动触发</div>
+          <div class="status-copy">采集后在侧边栏点 AI 整理，避免进入页面时自动占用。</div>
+        </div>
       </div>
-      <div class="section-note">插件不再单独保存账号密码。请先在 Web 端登录，插件会自动同步当前账号。</div>
+      <div class="section-mini-title">支持平台</div>
+      <div class="check-row">
+        <label><input type="checkbox" data-platform="amazon"> Amazon</label>
+        <label><input type="checkbox" data-platform="taobao"> 淘宝/天猫</label>
+        <label><input type="checkbox" data-platform="xiaohongshu"> 小红书</label>
+        <label><input type="checkbox" data-platform="kickstarter"> Kickstarter</label>
+      </div>
       <div class="actions">
         <button id="open-web-login" class="btn primary">现在登录</button>
         <button id="test-connection" class="btn">刷新状态</button>
@@ -41,106 +62,109 @@
     </section>
 
     <section class="section">
-      <div class="section-head">
-        <h2>采集策略</h2>
-      </div>
-      <div class="form-grid">
-        <label>默认模式
-          <select id="default-mode">
-            <option value="auto">自动判断</option>
-            <option value="product">竞品</option>
-            <option value="demand">需求</option>
-          </select>
-        </label>
-        <label>AI 整理
-          <select id="ai-before-save">
-            <option value="true">默认开启，采集后自动整理</option>
-            <option value="false">默认关闭，仅采集原始字段</option>
-          </select>
-        </label>
-      </div>
-      <div class="check-row">
-        <label><input type="checkbox" data-platform="amazon"> Amazon</label>
-        <label><input type="checkbox" data-platform="taobao"> 淘宝/天猫</label>
-        <label><input type="checkbox" data-platform="xiaohongshu"> 小红书</label>
-        <label><input type="checkbox" data-platform="kickstarter"> Kickstarter</label>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <div>
-          <h2>文本模型</h2>
-          <div class="section-sub">负责分类、翻译、整理和最终结构化输出。</div>
+      <details class="advanced-details compact-details">
+        <summary>字段、AI 与高级设置</summary>
+        <div class="advanced-body">
+          <div class="quick-row">
+            <div>
+              <div class="preference-title">字段与标签</div>
+              <div class="preference-copy">插件自动同步 Web 端账号字段。需要新增或删除字段时，到 Web 端统一管理。</div>
+            </div>
+            <a id="open-web-field-settings" class="btn" href="https://loom.palecedar.site/app?screen=settings&tab=tags" target="_blank" rel="noreferrer">管理字段</a>
+          </div>
+          <div class="ai-status-grid compact-status-grid">
+            <div class="status-tile">
+              <div class="status-label">文本模型</div>
+              <div id="llm-state" class="status-pill">未检测</div>
+            </div>
+            <div class="status-tile">
+              <div class="status-label">视觉模型</div>
+              <div id="vision-llm-state" class="status-pill">未检测</div>
+            </div>
+          </div>
+          <details class="advanced-details nested-details">
+            <summary>管理 AI 模型配置</summary>
+            <div class="advanced-body">
+              <div class="model-block">
+                <div class="section-head inner-head">
+                  <div>
+                    <h3>文本模型</h3>
+                    <div class="section-sub">负责分类、翻译、整理和最终结构化输出。</div>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label>API 类型
+                    <select id="llm-api-type">
+                      <option value="openai">OpenAI 兼容</option>
+                      <option value="anthropic">Anthropic</option>
+                    </select>
+                  </label>
+                  <label>模型名称<input id="llm-model" type="text" placeholder="gpt-4.1-mini"></label>
+                  <label class="span-2">API URL<input id="llm-api-url" type="url" placeholder="https://api.openai.com/v1"></label>
+                  <label class="span-2">API Key<input id="llm-api-key" type="password" placeholder="sk-..."></label>
+                </div>
+                <div class="actions">
+                  <button id="refresh-llm" class="btn">刷新配置</button>
+                  <button id="test-llm" class="btn">测试连接</button>
+                  <button id="save-llm" class="btn primary">保存文本模型</button>
+                </div>
+              </div>
+              <div class="model-block">
+                <div class="section-head inner-head">
+                  <div>
+                    <h3>视觉模型</h3>
+                    <div class="section-sub">只负责看图提取信息，文本整理会再交给文本模型。</div>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label>API 类型
+                    <select id="llm-vision-api-type">
+                      <option value="openai">OpenAI 兼容</option>
+                      <option value="anthropic">Anthropic</option>
+                    </select>
+                  </label>
+                  <label>模型名称<input id="llm-vision-model" type="text" placeholder="gpt-4.1-mini"></label>
+                  <label class="span-2">API URL<input id="llm-vision-api-url" type="url" placeholder="https://api.openai.com/v1"></label>
+                  <label class="span-2">API Key<input id="llm-vision-api-key" type="password" placeholder="sk-..."></label>
+                </div>
+                <div class="actions">
+                  <button id="refresh-vision-llm" class="btn">刷新配置</button>
+                  <button id="test-vision-llm" class="btn">测试连接</button>
+                  <button id="save-vision-llm" class="btn primary">保存视觉模型</button>
+                </div>
+              </div>
+            </div>
+          </details>
+          <details class="advanced-details nested-details">
+            <summary>服务器与旧字段兼容</summary>
+            <div class="advanced-body">
+              <div class="section-note muted-note">
+                通常不需要修改这里。服务器地址用于测试/私有部署，旧字段映射仅用于兼容早期插件字段名。AI 自动整理已默认关闭，采集后可在侧边栏手动点击 AI 整理。
+              </div>
+              <div class="form-grid">
+                <label class="span-2">服务器地址<input id="api-base" type="url" placeholder="https://loom.palecedar.site"></label>
+              </div>
+              <div class="section-head inner-head">
+                <div>
+                  <h3>旧版本兼容字段映射</h3>
+                  <div class="section-sub">新版字段和标签请到 Web 端管理，这里只保留旧版本迁移入口。</div>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>商品名称字段<input id="map-product-name" type="text"></label>
+                <label>品牌字段<input id="map-product-brand" type="text"></label>
+                <label>品类字段<input id="map-product-category" type="text"></label>
+                <label>需求标题字段<input id="map-demand-title" type="text"></label>
+                <label>需求摘要字段<input id="map-demand-summary" type="text"></label>
+              </div>
+              <div class="actions">
+                <button id="save-settings" class="btn primary">保存高级设置</button>
+                <button id="reset-settings" class="btn">恢复默认</button>
+              </div>
+            </div>
+          </details>
         </div>
-        <span id="llm-state">未检测</span>
-      </div>
-      <div class="form-grid">
-        <label>API 类型
-          <select id="llm-api-type">
-            <option value="openai">OpenAI 兼容</option>
-            <option value="anthropic">Anthropic</option>
-          </select>
-        </label>
-        <label>模型名称<input id="llm-model" type="text" placeholder="gpt-4.1-mini"></label>
-        <label class="span-2">API URL<input id="llm-api-url" type="url" placeholder="https://api.openai.com/v1"></label>
-        <label class="span-2">API Key<input id="llm-api-key" type="password" placeholder="sk-..."></label>
-      </div>
-      <div class="actions">
-        <button id="refresh-llm" class="btn">刷新配置</button>
-        <button id="test-llm" class="btn">测试连接</button>
-        <button id="save-llm" class="btn primary">保存文本模型</button>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <div>
-          <h2>视觉模型</h2>
-          <div class="section-sub">只负责看图提取信息，文本整理会再交给文本模型。</div>
-        </div>
-        <span id="vision-llm-state">未检测</span>
-      </div>
-      <div class="form-grid">
-        <label>API 类型
-          <select id="llm-vision-api-type">
-            <option value="openai">OpenAI 兼容</option>
-            <option value="anthropic">Anthropic</option>
-          </select>
-        </label>
-        <label>模型名称<input id="llm-vision-model" type="text" placeholder="gpt-4.1-mini"></label>
-        <label class="span-2">API URL<input id="llm-vision-api-url" type="url" placeholder="https://api.openai.com/v1"></label>
-        <label class="span-2">API Key<input id="llm-vision-api-key" type="password" placeholder="sk-..."></label>
-      </div>
-      <div class="actions">
-        <button id="refresh-vision-llm" class="btn">刷新配置</button>
-        <button id="test-vision-llm" class="btn">测试连接</button>
-        <button id="save-vision-llm" class="btn primary">保存视觉模型</button>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <div>
-          <h2>兼容字段映射</h2>
-          <div class="section-sub">仅作为旧字段名兼容入口。新版的标签 / 字段 schema 管理已迁移到 Web 端 Settings。</div>
-        </div>
-        <a id="open-web-field-settings" class="btn" href="https://loom.palecedar.site/app?screen=settings&tab=tags" target="_blank" rel="noreferrer">打开 Web 字段设置</a>
-      </div>
-      <div class="form-grid">
-        <label>商品名称字段<input id="map-product-name" type="text"></label>
-        <label>品牌字段<input id="map-product-brand" type="text"></label>
-        <label>品类字段<input id="map-product-category" type="text"></label>
-        <label>需求标题字段<input id="map-demand-title" type="text"></label>
-        <label>需求摘要字段<input id="map-demand-summary" type="text"></label>
-      </div>
-      <div class="section-note muted-note">
-        标签 schema 的字段（品牌 brand / 主机 host / 品类 category / 使用场景 scenarios / 用户痛点 painpoints / 创新类型 innovation 等）在 Web 端 <strong>Settings → 标签与字段管理</strong> 里统一维护，插件会通过 <code>/api/fields</code> 自动同步。
-      </div>
-      <div class="actions">
-        <button id="save-settings" class="btn primary">保存兼容字段</button>
-        <button id="reset-settings" class="btn">恢复默认</button>
-      </div>
+      </details>
     </section>
 
     <section class="section note">

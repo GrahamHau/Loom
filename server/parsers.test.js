@@ -17,6 +17,20 @@ function mockLlmJson(payload, onRequest = () => {}) {
   });
 }
 
+function mockLlmJsonSequence(payloads, onRequest = () => {}) {
+  let index = 0;
+  vi.stubGlobal("fetch", async (_url, options) => {
+    const body = JSON.parse(options.body);
+    onRequest(body, index);
+    const payload = payloads[Math.min(index, payloads.length - 1)];
+    index += 1;
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(payload) } }] }),
+    };
+  });
+}
+
 beforeEach(() => {
   dbModule.migrate();
   dbModule.db.prepare("DELETE FROM llm_call_logs").run();
@@ -164,6 +178,152 @@ describe("parsers account fields", () => {
       category: ["L灯光类"],
     });
     expect(result.field_suggestions).toEqual([]);
+  });
+
+  it("returns Chinese selling points for Amazon raw bullets when AI organizes them", async () => {
+    mockLlmJson({
+      name: "Magnetic fill light",
+      brand: "NEEWER",
+      selling_points: ["磁吸快装", "亮度可调", "适合桌面补光"],
+      negative_keywords: [],
+      ai_summary: "适合桌面拍摄的磁吸补光灯",
+      tag_values: {},
+    });
+
+    const result = await parsers.parseProductRaw(dbModule.getLegacyUserId(), {
+      platform: "amazon",
+      data: {
+        title: "Magnetic fill light",
+        url: "https://example.test/magnetic-fill-light",
+        raw_bullets: [
+          "Magnetic mount for quick setup",
+          "Adjustable brightness for desktop shooting",
+          "Compact size for small studio spaces",
+        ],
+      },
+    });
+
+    expect(result.selling_points).toEqual(["磁吸快装", "亮度可调", "适合桌面补光"]);
+  });
+
+  it("returns Chinese visible comments for Amazon raw comments when AI organizes them", async () => {
+    let prompt = "";
+    mockLlmJson({
+      name: "Magnetic fill light",
+      brand: "NEEWER",
+      selling_points: ["磁吸快装"],
+      visible_comments: [
+        { id: "r1", user_name: "Alice", content: "磁吸安装很方便", like_count: 3, posted_at_text: "2026-05-01" },
+        { user_name: "Bob", content: "桌面补光够用，但再轻一点更好", like_count: 1, posted_at_text: "2026-05-03" },
+      ],
+      negative_keywords: [],
+      ai_summary: "适合桌面拍摄的磁吸补光灯",
+      tag_values: {},
+    }, (body) => {
+      prompt = body.messages?.map((message) => message.content).join("\n") || "";
+    });
+
+    const result = await parsers.parseProductRaw(dbModule.getLegacyUserId(), {
+      platform: "amazon",
+      data: {
+        title: "Magnetic fill light",
+        url: "https://example.test/magnetic-fill-light",
+        raw_bullets: ["Magnetic mount for quick setup"],
+        visible_comments: [
+          { user_name: "Alice", content: "Really useful magnetic mount", like_count: 3, posted_at_text: "May 1, 2026" },
+          { user_name: "Bob", content: "Brightness is good for desk shooting", like_count: 1, posted_at_text: "May 3, 2026" },
+        ],
+      },
+    });
+
+    expect(prompt).toContain("可见评论");
+    expect(prompt).toContain("Alice：Really useful magnetic mount");
+    expect(result.visible_comments).toEqual([
+      { id: "r1", user_name: "Alice", content: "磁吸安装很方便", like_count: 3, posted_at_text: "2026-05-01", location: "", is_reply: false },
+      { id: "", user_name: "Bob", content: "桌面补光够用，但再轻一点更好", like_count: 1, posted_at_text: "2026-05-03", location: "", is_reply: false },
+    ]);
+  });
+
+  it("preserves Amazon source comment ids when AI translates comments without ids", async () => {
+    mockLlmJson({
+      name: "Magnetic fill light",
+      brand: "NEEWER",
+      selling_points: ["磁吸快装"],
+      visible_comments: [
+        { user_name: "Alice", content: "磁吸安装很方便", like_count: 3 },
+        { user_name: "Bob", content: "桌面补光够用", like_count: 1 },
+      ],
+      negative_keywords: [],
+      ai_summary: "适合桌面拍摄的磁吸补光灯",
+      tag_values: {},
+    });
+
+    const result = await parsers.parseProductRaw(dbModule.getLegacyUserId(), {
+      platform: "amazon",
+      data: {
+        title: "Magnetic fill light",
+        url: "https://example.test/magnetic-fill-light",
+        raw_bullets: ["Magnetic mount for quick setup"],
+        visible_comments: [
+          { id: "review-a", user_name: "Alice", content: "Really useful magnetic mount", like_count: 3, posted_at_text: "May 1, 2026" },
+          { id: "review-b", user_name: "Bob", content: "Brightness is good for desk shooting", like_count: 1, posted_at_text: "May 3, 2026" },
+        ],
+      },
+    });
+
+    expect(result.visible_comments).toEqual([
+      { id: "review-a", user_name: "Alice", content: "磁吸安装很方便", like_count: 3, posted_at_text: "May 1, 2026", location: "", is_reply: false },
+      { id: "review-b", user_name: "Bob", content: "桌面补光够用", like_count: 1, posted_at_text: "May 3, 2026", location: "", is_reply: false },
+    ]);
+  });
+
+  it("repairs untranslated Amazon comments before returning the first AI organize result", async () => {
+    const prompts = [];
+    mockLlmJsonSequence([
+      {
+        name: "LEOFOTO tac table",
+        brand: "LEOFOTO",
+        selling_points: ["稳定支撑"],
+        visible_comments: [
+          { id: "review-a", user_name: "Hopper", content: "Lots of ways to position your optics and weather station for PRS matches", like_count: 0 },
+          { id: "review-b", user_name: "Philip East", content: "This is a great tripod table. Very easy to set up and use.", like_count: 0 },
+        ],
+        negative_keywords: [],
+        ai_summary: "适合户外装备支撑的折叠桌",
+        tag_values: {},
+      },
+      {
+        visible_comments: [
+          { id: "review-a", user_name: "Hopper", content: "可以用多种方式放置光学设备和气象站，适合 PRS 比赛。", like_count: 0 },
+          { id: "review-b", user_name: "Philip East", content: "这款三脚架桌很好，安装和使用都很方便，拧紧后非常稳定。", like_count: 0 },
+        ],
+        selling_points: ["集成 Arca 导轨", "可折叠战术桌", "稳定支撑"],
+      },
+    ], (body) => {
+      prompts.push(body.messages?.map((message) => message.content).join("\n") || "");
+    });
+
+    const result = await parsers.parseProductRaw(dbModule.getLegacyUserId(), {
+      platform: "amazon",
+      data: {
+        title: "LEOFOTO FDM-05 Foldable Tac Table",
+        url: "https://example.test/leofoto",
+        raw_bullets: ["Integrated Arca Rail", "Foldable tactical table"],
+        visible_comments: [
+          { id: "review-a", user_name: "Hopper", content: "Lots of ways to position your optics and weather station for PRS matches", like_count: 0, posted_at_text: "Reviewed in the United States on August 25, 2025" },
+          { id: "review-b", user_name: "Philip East", content: "This is a great tripod table. Very easy to set up and use.", like_count: 0, posted_at_text: "Reviewed in the United States on July 18, 2025" },
+        ],
+      },
+    });
+
+    expect(result.visible_comments).toEqual([
+      { id: "review-a", user_name: "Hopper", content: "可以用多种方式放置光学设备和气象站，适合 PRS 比赛。", like_count: 0, posted_at_text: "Reviewed in the United States on August 25, 2025", location: "", is_reply: false },
+      { id: "review-b", user_name: "Philip East", content: "这款三脚架桌很好，安装和使用都很方便，拧紧后非常稳定。", like_count: 0, posted_at_text: "Reviewed in the United States on July 18, 2025", location: "", is_reply: false },
+    ]);
+    expect(result.selling_points).toEqual(["集成 Arca 导轨", "可折叠战术桌", "稳定支撑"]);
+    expect(result.__loom_ai_warnings).toEqual([]);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("上一次 AI 结果仍有英文");
   });
 
   it("normalizes AI demand tags into default and custom fields", async () => {

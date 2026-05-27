@@ -64,16 +64,26 @@ function mapCluster(row) {
   };
 }
 
-function countSince(clusterId, days) {
-  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+function clusterReferenceTime(clusterId) {
+  const row = db.prepare(`
+    SELECT MAX(added_at) AS max_added_at
+    FROM demand_cluster_members
+    WHERE cluster_id = ?
+  `).get(clusterId);
+  const time = new Date(row?.max_added_at || "").getTime();
+  return Number.isFinite(time) ? time : Date.now();
+}
+
+function countSince(clusterId, days, referenceTime = Date.now()) {
+  const cutoff = new Date(referenceTime - days * 24 * 60 * 60 * 1000).toISOString();
   return Number(db.prepare(`
     SELECT COUNT(*) AS count FROM demand_cluster_members
     WHERE cluster_id = ? AND added_at >= ?
   `).get(clusterId, cutoff).count || 0);
 }
 
-function questionHitsSince(clusterId, days) {
-  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+function questionHitsSince(clusterId, days, referenceTime = Date.now()) {
+  const cutoff = new Date(referenceTime - days * 24 * 60 * 60 * 1000).toISOString();
   return Number(db.prepare(`
     SELECT COUNT(*) AS count FROM demand_cluster_question_hits
     WHERE cluster_id = ? AND asked_at >= ?
@@ -86,10 +96,11 @@ function clusterWithHeat(row) {
     : mapCluster(row);
   if (!cluster) return null;
   const weights = ensureWeights(cluster.workspace_id);
-  const mentions7d = countSince(cluster.id, 7);
-  const mentions30d = countSince(cluster.id, 30);
-  const mentions90d = countSince(cluster.id, 90);
-  const internalQuestions30d = questionHitsSince(cluster.id, 30);
+  const referenceTime = clusterReferenceTime(cluster.id);
+  const mentions7d = countSince(cluster.id, 7, referenceTime);
+  const mentions30d = countSince(cluster.id, 30, referenceTime);
+  const mentions90d = countSince(cluster.id, 90, referenceTime);
+  const internalQuestions30d = questionHitsSince(cluster.id, 30, Date.now());
   return {
     ...cluster,
     mentions_7d: mentions7d,

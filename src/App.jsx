@@ -903,7 +903,11 @@ function HomeScreen({ data, onNavigate }) {
   const hotKeywords = dashboard.hot_keywords || [];
   const recentNews = news.filter((item) => item.titleZh || item.original_title).slice(0, 5);
   const feishuStatus = dashboard.feishu_status || {};
-  const feishuConnected = Boolean(feishuStatus.connected);
+  const feishuProjectStatus = dashboard.feishu_project_status || {};
+  const feishuProjectConfigured = Boolean(feishuProjectStatus.configured);
+  const feishuProjectSynced = feishuProjectConfigured && Number(feishuProjectStatus.items_count || 0) > 0;
+  const feishuConnected = feishuProjectConfigured || Boolean(feishuStatus.connected);
+  const feishuProjectName = feishuProjectStatus.project_name || "飞书项目空间";
   const currentUser = data.user?.name || "";
   const hour = new Date().getHours();
   const greet = hour < 6 ? "夜深了" : hour < 12 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好";
@@ -917,7 +921,7 @@ function HomeScreen({ data, onNavigate }) {
         <div className="home-hello">
           <div className="home-hello-title">{greet}，{currentUser || "visitor"}</div>
           <div className="home-hello-sub">
-            {actionItems.length ? actionItems.join(" · ") : feishuConnected ? "没有待处理事项，看看本周行业资讯。" : "先把飞书多维表格接入，工作台才能告诉你今天该做什么。"}
+            {actionItems.length ? actionItems.join(" · ") : feishuProjectConfigured ? `已固定 ${feishuProjectName}，可以查看项目工作项和本周行业资讯。` : "先由管理员固定飞书项目空间，工作台才能告诉你今天该做什么。"}
           </div>
         </div>
 
@@ -934,21 +938,21 @@ function HomeScreen({ data, onNavigate }) {
             <div className="home-kpi-num">{products.length}</div>
             <div className="home-kpi-label">竞品快照</div>
           </button>
-          <button className={`home-kpi-card ${feishuConnected ? "" : "home-kpi-card-pending"}`} onClick={() => feishuConnected ? onNavigate("demands") : onNavigate("settings")}>
-            <div className="home-kpi-num">{feishuConnected ? decisionEvents.length : ""}</div>
-            <div className="home-kpi-label">{feishuConnected ? "近 7 天决策" : "近 7 天决策 · 待接入飞书"}</div>
+          <button className={`home-kpi-card ${feishuProjectConfigured ? "" : "home-kpi-card-pending"}`} onClick={() => feishuProjectConfigured ? onNavigate("demands") : onNavigate("settings")}>
+            <div className="home-kpi-num">{feishuProjectConfigured ? (feishuProjectStatus.items_count || decisionEvents.length || "") : ""}</div>
+            <div className="home-kpi-label">{feishuProjectConfigured ? "飞书项目工作项" : "飞书项目 · 待固定空间"}</div>
           </button>
         </div>
 
-        {!feishuConnected && (
+        {!feishuProjectConfigured && (
           <div className="home-connect-banner">
             <div className="home-connect-banner-icon">
               <Icon name="feishu" size={16} />
             </div>
             <div className="home-connect-banner-body">
-              <div className="home-connect-banner-title">接入飞书多维表格，工作台才能告诉你今天该做什么</div>
+              <div className="home-connect-banner-title">接入飞书项目空间，工作台才能告诉你今天该做什么</div>
               <div className="home-connect-banner-desc">
-                Loom 从你每周五更新的单元格里自动抽取决策。无需新增动作，按现有节奏写更新即可。
+                管理员固定项目空间后，Loom 会从产品想法登记和项目工作项里读取状态、负责人和更新时间；普通用户不需要填写空间号。
               </div>
             </div>
             <button className="home-connect-banner-cta" onClick={() => onNavigate("settings")}>去配置</button>
@@ -963,10 +967,12 @@ function HomeScreen({ data, onNavigate }) {
                 {feishuConnected && feishuStatus.last_sync_at ? (
                   <span className="home-sync-badge home-sync-ok">
                     <Icon name="check" size={10} />
-                    飞书 · {formatAgo(feishuStatus.last_sync_at)}同步
+                    飞书项目 · {formatAgo(feishuStatus.last_sync_at)}同步
                   </span>
                 ) : (
-                  <span className="home-sync-badge home-sync-pending">待接入飞书</span>
+                  <span className="home-sync-badge home-sync-pending">
+                    {feishuProjectConfigured ? "等待首次同步" : "待固定飞书项目空间"}
+                  </span>
                 )}
               </div>
               {decisionEvents.length ? (
@@ -979,21 +985,21 @@ function HomeScreen({ data, onNavigate }) {
                     </button>
                   ))}
                 </div>
-              ) : feishuConnected ? (
+              ) : feishuProjectConfigured ? (
                 <div className="home-empty-state">
-                  <Icon name="check" size={18} style={{ color: "var(--success)" }} />
-                  <div>近 7 天暂无你的决策或状态变更</div>
+                  <Icon name={feishuProjectSynced ? "check" : "sync"} size={18} style={{ color: feishuProjectSynced ? "var(--success)" : "var(--text-3)" }} />
+                  <div>{feishuProjectSynced ? "近 7 天暂无你的决策或状态变更" : `已固定 ${feishuProjectName}，等待首次同步工作项`}</div>
                 </div>
               ) : (
                 <div className="home-pending-card">
-                  <div className="home-pending-explain">接入飞书后，每周五你写完更新单元格，这里会自动出现你的决策摘要：</div>
+                  <div className="home-pending-explain">固定飞书项目空间后，这里会自动出现项目工作项里的关键状态：</div>
                   <ul className="home-pending-bullets">
-                    <li><span className="home-pending-bullet-dot" />你做出的决策（暂缓 / 立项 / 放弃）</li>
-                    <li><span className="home-pending-bullet-dot" />决策理由（从单元格自然语言抽取）</li>
-                    <li><span className="home-pending-bullet-dot" />重启暗示（例如“等模具降到 18 万再说”）</li>
+                    <li><span className="home-pending-bullet-dot" />产品想法登记和项目工作项</li>
+                    <li><span className="home-pending-bullet-dot" />当前节点、状态、负责人和更新时间</li>
+                    <li><span className="home-pending-bullet-dot" />后续用于 Ask Loom 回答“为什么延期 / 卡在哪里”</li>
                   </ul>
                   <div className="home-pending-note-2">
-                    团队全部动态见 <button className="home-link-btn home-link-inline" onClick={() => onNavigate("demands")}>需求库 · 决策时间线</button>
+                    团队全部动态见 <button className="home-link-btn home-link-inline" onClick={() => onNavigate("demands")}>需求库 · 飞书项目镜像</button>
                   </div>
                 </div>
               )}

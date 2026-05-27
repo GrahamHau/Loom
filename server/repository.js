@@ -266,6 +266,47 @@ function configuredFeishuTables(settings = {}) {
   ].filter(Boolean);
 }
 
+function feishuProjectStatus(settings = {}, workspaceId = "") {
+  const projectKey = cleanText(settings.feishu_project_default_project_key || settings.feishu_mcp_project_key);
+  const projectName = cleanText(settings.feishu_project_default_project_name || settings.feishu_mcp_project_name);
+  const tokenConfigured = Boolean(cleanText(settings.feishu_mcp_token));
+  const endpointConfigured = Boolean(cleanText(settings.feishu_mcp_url) || tokenConfigured);
+  const ideaTypeKey = cleanText(settings.feishu_project_idea_type_key);
+  let itemsCount = 0;
+  let lastSyncAt = cleanText(settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at) || null;
+  if (workspaceId && tableExists("feishu_project_items")) {
+    const columns = tableColumns("feishu_project_items");
+    const clauses = ["workspace_id = ?"];
+    const params = [workspaceId];
+    if (projectKey && columns.has("project_key")) {
+      clauses.push("project_key = ?");
+      params.push(projectKey);
+    }
+    const row = db.prepare(`
+      SELECT COUNT(*) AS count, MAX(updated_at) AS last_sync_at
+      FROM feishu_project_items
+      WHERE ${clauses.join(" AND ")}
+    `).get(...params);
+    itemsCount = Number(row?.count || 0);
+    lastSyncAt = row?.last_sync_at || lastSyncAt;
+  }
+  const configured = Boolean(tokenConfigured && projectKey);
+  return {
+    configured,
+    connected: configured,
+    source: "feishu_project",
+    project_key: projectKey,
+    project_name: projectName,
+    token_configured: tokenConfigured,
+    endpoint_configured: endpointConfigured,
+    idea_type_configured: Boolean(ideaTypeKey),
+    idea_type_key: ideaTypeKey,
+    last_sync_at: lastSyncAt,
+    items_count: itemsCount,
+    needs_admin_config: !configured,
+  };
+}
+
 function buildHotKeywords(demands = []) {
   const counts = new Map();
   for (const demand of demands) {
@@ -298,7 +339,9 @@ function buildDashboard(state, news = []) {
   const settings = state.settings || {};
   const demands = state.demands || [];
   const research = state.research || [];
+  const workspaceId = state.workspace?.workspace_id || state.workspace?.id || "";
   const tables = configuredFeishuTables(settings);
+  const projectStatus = feishuProjectStatus(settings, workspaceId);
   const feishuConnected = Boolean(
     settings.feishu_app_id &&
     settings.feishu_base_token &&
@@ -310,6 +353,7 @@ function buildDashboard(state, news = []) {
     ...demands.map((item) => item.synced_at),
     ...(state.products || []).map((item) => item.synced_at),
     ...news.map((item) => item.synced_at),
+    projectStatus.last_sync_at,
   ].filter(Boolean).sort((a, b) => dateValue(b) - dateValue(a))[0] || null;
   const activeResearch = research
     .filter((item) => !["done", "archived", "已归档", "完成"].includes(String(item.status || "").toLowerCase()))
@@ -319,7 +363,21 @@ function buildDashboard(state, news = []) {
     .filter((item) => item.synced_at || item.updated_at || item.created_at || item.date)
     .sort((a, b) => dateValue(b.synced_at || b.updated_at || b.created_at || b.date) - dateValue(a.synced_at || a.updated_at || a.created_at || a.date))
     .slice(0, 6);
-  const recentDecisions = feishuConnected ? recentDemands.map((item) => ({
+  const recentProjectItems = projectStatus.connected
+    ? listFeishuProjectItems({
+      workspace_id: workspaceId,
+      project_key: projectStatus.project_key,
+      limit: 6,
+    })
+    : [];
+  const recentDecisions = projectStatus.connected ? recentProjectItems.map((item) => ({
+    id: item.id,
+    title: item.name,
+    owner: (item.current_owners || []).map((owner) => owner.name || owner.user_name || owner.user_key).filter(Boolean).join("、") || state.user?.name || "PM",
+    status: item.current_node_name || item.status_name || item.work_item_type_name || "更新",
+    status_key: demandStatusKey(item.status_name || item.current_node_name),
+    updated_at: item.updated_at || item.created_at,
+  })) : feishuConnected ? recentDemands.map((item) => ({
     id: item.id,
     title: item.title,
     owner: item.owner || item.pm || state.user?.name || "PM",
@@ -334,13 +392,15 @@ function buildDashboard(state, news = []) {
     : [];
   return {
     feishu_status: {
-      connected: feishuConnected,
+      connected: projectStatus.connected || feishuConnected,
       last_sync_at: lastSyncAt,
       configured_tables: tables,
+      primary_source: projectStatus.connected ? "feishu_project" : (feishuConnected ? "bitable" : ""),
     },
+    feishu_project_status: projectStatus,
     active_research: activeResearch,
     my_demands_count: demands.length,
-    demands_scope_label: feishuConnected ? "我的需求库" : "需求库 · 共追踪",
+    demands_scope_label: projectStatus.connected ? "飞书项目 · 工作项" : (feishuConnected ? "我的需求库" : "需求库 · 共追踪"),
     recent_decisions: recentDecisions,
     abnormal_items: abnormalItems,
     hot_keywords: buildHotKeywords(demands),
@@ -915,6 +975,8 @@ function syncLegacyProductFields(item) {
   item.host = (values.host || splitTokenText(item.host)).join(" / ");
   item.category = (values.category || splitTokenText(item.category)).join(" / ") || item.category || "未分类";
   item.tags = values.custom_tags || cleanArray(item.tags);
+  item.comments = Number(item.comments || 0);
+  item.visible_comments = cleanVisibleComments(item.visible_comments);
   return item;
 }
 
@@ -952,6 +1014,7 @@ function cleanVisibleComments(value, limit = 80) {
       posted_at_text: cleanText(item.posted_at_text || item.time || item.date).slice(0, 120),
       location: cleanText(item.location).slice(0, 60),
       is_reply: Boolean(item.is_reply),
+      ...(item.ai_processed || item.__loom_ai_processed ? { ai_processed: true } : {}),
     };
   }).filter(Boolean).slice(0, limit);
 }
@@ -1041,6 +1104,7 @@ export function maskSettings(settings) {
   if (masked.search_tavily_api_key) masked.search_tavily_api_key = "********";
   if (masked.search_serpapi_api_key) masked.search_serpapi_api_key = "********";
   if (masked.feishu_app_secret) masked.feishu_app_secret = "********";
+  if (masked.feishu_mcp_token) masked.feishu_mcp_token = "********";
   return masked;
 }
 
@@ -1213,6 +1277,14 @@ export function bootstrap(userId) {
     state.settings.llm_vision_configured = llmVisionConfigured;
   }
   return state;
+}
+
+export function getFeishuProjectStatus(userId, workspaceId = "") {
+  const state = requireState(userId);
+  if (!state) return null;
+  const workspaces = listUserWorkspaces(userId);
+  const resolvedWorkspaceId = cleanText(workspaceId) || workspaces[0]?.workspace_id || "";
+  return feishuProjectStatus(state.settings || {}, resolvedWorkspaceId);
 }
 
 export function rawState(userId) {
@@ -1461,6 +1533,8 @@ export function createProduct(userId, input) {
       selling_points: cleanArray(input.selling_points),
       negative_keywords: cleanArray(input.negative_keywords),
       cost_estimate: cleanText(input.cost_estimate, ""),
+      comments: Number(input.comments || 0),
+      visible_comments: cleanVisibleComments(input.visible_comments),
       image: initialImage,
       thumbnail_url: initialThumbnail,
       original_image_url: cleanText(input.original_image_url, ""),
@@ -1500,6 +1574,8 @@ export function updateProduct(userId, id, patch) {
       ...(patch.selling_points !== undefined ? { selling_points: cleanArray(patch.selling_points) } : {}),
       ...(patch.negative_keywords !== undefined ? { negative_keywords: cleanArray(patch.negative_keywords) } : {}),
       ...(patch.cost_estimate !== undefined ? { cost_estimate: cleanText(patch.cost_estimate, item.cost_estimate || "") } : {}),
+      ...(patch.comments !== undefined ? { comments: Number(patch.comments || 0) } : {}),
+      ...(patch.visible_comments !== undefined ? { visible_comments: cleanVisibleComments(patch.visible_comments) } : {}),
       ...imagePatch,
       ...(patch.note !== undefined ? { note: cleanSummary(patch.note, item.note || "") } : {}),
       ...(patch.related_product_id !== undefined ? { related_product_id: cleanText(patch.related_product_id, item.related_product_id || "") } : {}),
@@ -1882,6 +1958,10 @@ export function updateSettings(userId, patch) {
       "llm_fast_model",
       "llm_strong_model",
       "llm_routing_policy_json",
+      "llm_max_concurrency",
+      "llm_min_interval_ms",
+      "llm_retry_max_attempts",
+      "llm_retry_base_ms",
       "llm_vision_api_type",
       "llm_vision_api_url",
       "llm_vision_model",
@@ -1914,8 +1994,13 @@ export function updateSettings(userId, patch) {
       "feishu_mcp_url",
       "feishu_mcp_token",
       "feishu_mcp_project_key",
+      "feishu_mcp_project_name",
+      "feishu_project_default_project_key",
+      "feishu_project_default_project_name",
+      "feishu_project_idea_type_key",
       "feishu_mcp_interval",
       "last_feishu_project_mcp_test_at",
+      "last_feishu_project_mcp_sync_at",
       "official_news_enabled",
       "rss_collect_enabled",
       "rss_collect_interval_ms",

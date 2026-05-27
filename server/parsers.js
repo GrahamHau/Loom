@@ -33,11 +33,151 @@ function commentsPrompt(comments = []) {
     .map((comment, index) => {
       const name = String(comment?.user_name || comment?.username || comment?.author || `评论${index + 1}`).trim();
       const content = String(comment?.content || "").trim();
-      return content ? `${name}：${content}` : "";
+      const id = String(comment?.id || "").trim();
+      const time = String(comment?.posted_at_text || comment?.time || comment?.date || "").trim();
+      const likes = safeNumber(comment?.like_count ?? comment?.likes) || 0;
+      const meta = [
+        `#${index + 1}`,
+        id ? `id=${id}` : "",
+        time ? `time=${time}` : "",
+        likes ? `likes=${likes}` : "",
+      ].filter(Boolean).join(" ");
+      return content ? `${meta} ${name}：${content}` : "";
     })
     .filter(Boolean)
     .slice(0, 30)
     .join("\n") || "无";
+}
+
+function compactVisibleComments(value, limit = 20) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((comment) => {
+      if (!comment || typeof comment !== "object") return null;
+      const content = String(comment.content || "").trim();
+      if (!content) return null;
+      return {
+        id: String(comment.id || "").trim(),
+        user_name: String(comment.user_name || comment.username || comment.author || "").trim(),
+        content,
+        like_count: safeNumber(comment.like_count ?? comment.likes) || 0,
+        posted_at_text: String(comment.posted_at_text || comment.time || comment.date || "").trim(),
+        location: String(comment.location || "").trim(),
+        is_reply: Boolean(comment.is_reply),
+        ...(comment.ai_processed || comment.__loom_ai_processed ? { ai_processed: true } : {}),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function latinWordCount(value) {
+  return (String(value || "").match(/[A-Za-z]{3,}/g) || []).length;
+}
+
+function cjkCharCount(value) {
+  return (String(value || "").match(/[\u3400-\u9fff]/g) || []).length;
+}
+
+function looksUntranslatedEnglish(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return latinWordCount(text) >= 4 && cjkCharCount(text) === 0;
+}
+
+function sameCommentIdentity(a, b) {
+  if (!a || !b) return false;
+  if (a.id && b.id && a.id === b.id) return true;
+  const leftUser = String(a.user_name || a.username || a.author || "").trim().toLowerCase();
+  const rightUser = String(b.user_name || b.username || b.author || "").trim().toLowerCase();
+  if (!leftUser || !rightUser || leftUser !== rightUser) return false;
+  const leftTime = String(a.posted_at_text || a.time || a.date || "").trim();
+  const rightTime = String(b.posted_at_text || b.time || b.date || "").trim();
+  if (leftTime && rightTime && leftTime === rightTime) return true;
+  return safeNumber(a.like_count ?? a.likes) === safeNumber(b.like_count ?? b.likes);
+}
+
+function alignVisibleCommentsWithSource(sourceComments, aiComments) {
+  const source = compactVisibleComments(sourceComments);
+  const translated = compactVisibleComments(aiComments);
+  if (!translated.length) return [];
+  const used = new Set();
+  return translated.map((comment, index) => {
+    const matchedIndex = source.findIndex((candidate, candidateIndex) => (
+      !used.has(candidateIndex) && sameCommentIdentity(candidate, comment)
+    ));
+    const fallbackIndex = !used.has(index) ? index : -1;
+    const sourceIndex = matchedIndex >= 0 ? matchedIndex : fallbackIndex;
+    const original = sourceIndex >= 0 ? source[sourceIndex] : null;
+    if (sourceIndex >= 0) used.add(sourceIndex);
+    return {
+      ...(original || {}),
+      ...comment,
+      id: comment.id || original?.id || "",
+      user_name: comment.user_name || original?.user_name || "",
+      like_count: comment.like_count || original?.like_count || 0,
+      posted_at_text: comment.posted_at_text || original?.posted_at_text || "",
+      location: comment.location || original?.location || "",
+      is_reply: Boolean(comment.is_reply || original?.is_reply),
+    };
+  });
+}
+
+function qualityCheckProductRaw(platform, source, result, normalized = {}) {
+  const warnings = [];
+  const comments = compactVisibleComments(normalized.visible_comments || result.visible_comments);
+  if (platform === "amazon" && comments.length && comments.some((comment) => looksUntranslatedEnglish(comment.content))) {
+    warnings.push("comments_untranslated");
+  }
+  const sellingPoints = compactArray(normalized.selling_points || result.selling_points);
+  if (platform === "amazon" && sellingPoints.length && sellingPoints.some((item) => looksUntranslatedEnglish(item))) {
+    warnings.push("selling_points_untranslated");
+  }
+  if (platform === "amazon" && compactVisibleComments(source.visible_comments).length && !comments.length) {
+    warnings.push("comments_missing");
+  }
+  return warnings;
+}
+
+async function repairProductRawQuality(userId, platform, source, current, warnings) {
+  if (platform !== "amazon" || !warnings.length) return current;
+  const result = await callLLM({
+    userId,
+    purpose: "products:parse_raw:repair",
+    system: "你是商品信息中文化修复助手。只返回 JSON，不要解释。",
+    user: `上一次 AI 结果仍有英文或缺少评论。请只修复 visible_comments 和 selling_points，保持原评论 id/user_name/posted_at_text/like_count，不要新增不存在的评论。
+
+必须：
+- visible_comments.content 必须输出中文。
+- selling_points 必须输出中文短卖点。
+- 如果某条评论无法翻译，保留 id 和 user_name，但 content 也要尽量翻译成中文。
+
+原始评论：
+${commentsPrompt(source.visible_comments)}
+
+上一次 AI 结果：
+${JSON.stringify({
+  visible_comments: current.visible_comments,
+  selling_points: current.selling_points,
+  warnings,
+})}
+
+返回 JSON：
+{
+  "visible_comments": [{"id":"输入评论id","user_name":"评论用户","content":"中文评论","like_count":0,"posted_at_text":"时间"}],
+  "selling_points": ["中文卖点"]
+}`,
+    maxTokens: 700,
+  });
+  return {
+    ...current,
+    visible_comments: compactVisibleComments(result.visible_comments).length
+      ? alignVisibleCommentsWithSource(source.visible_comments, result.visible_comments)
+      : current.visible_comments,
+    selling_points: compactArray(result.selling_points).length
+      ? compactArray(result.selling_points)
+      : current.selling_points,
+  };
 }
 
 function hostField(userId) {
@@ -83,6 +223,14 @@ function normalizeMonthlySales(value) {
     .replace(/\s*\/\s*(month|mo|mth|月)\s*$/i, "")
     .replace(/\s*(每月|月销)\s*$/i, "")
     .trim();
+}
+
+function sellingPointFallback(rawBullets = []) {
+  return compactArray(rawBullets).map((item) => {
+    const text = String(item || "").trim();
+    if (!text) return "";
+    return text.replace(/^[-*•\s]+/, "").trim();
+  }).filter(Boolean);
 }
 
 function fields(userId) {
@@ -263,6 +411,8 @@ export async function parseProductRaw(userId, { platform, data }) {
 
 规则：
 - selling_points 只能来自“原始卖点/规格”或商品名/描述中明确出现的信息，不要把“新品、旗舰店、品牌不在白名单、品类不匹配”当卖点。
+- selling_points 必须输出中文；如果原始信息是英文，请翻译或压缩成简洁中文卖点，保留原意，不要照抄英文整句。
+- visible_comments 如果有内容，也必须输出中文；保留评论原意，压缩口语噪音，不要杜撰不存在的评价，并尽量保留输入评论的 id/user_name/posted_at_text/like_count。
 - negative_keywords 只有输入里出现明确差评、缺陷、限制时才返回；没有就返回 []，不要编造。
 - 如果商品不属于摄影/影像器材，也照样提取真实商品信息，但 category 用最接近的真实品类或“其他”。
 - 如果是 Kickstarter 项目，优先保留发起人、认缴金额、目标金额、支持者数；品牌和品类仍只在信息明确时返回。
@@ -285,6 +435,7 @@ export async function parseProductRaw(userId, { platform, data }) {
   "review_count": 数字,
   "monthly_sales": "月销估算",
   "selling_points": ["卖点"],
+  "visible_comments": [{"id":"输入评论id","user_name":"评论用户","content":"中文评论","like_count":0,"posted_at_text":"时间"}],
   "negative_keywords": ["差评词"],
   "ai_summary": "50字以内中文竞品摘要",
   "tag_values": { "字段key": ["字段值"] }
@@ -305,10 +456,26 @@ URL：${source.url || ""}
 评分：${source.rating || ""} (${source.review_count || 0} 评)
 月销：${source.monthly_sales || ""}
 描述：${source.description || source.content || ""}
-原始卖点/规格：${rawBullets.join("；")}`,
-    maxTokens: 260,
+原始卖点/规格：${rawBullets.join("；")}
+可见评论：
+${commentsPrompt(source.visible_comments)}`,
+    maxTokens: 900,
   });
   const tagValues = accountTagValues(userId, "competitor", result);
+
+  const visibleComments = compactVisibleComments(result.visible_comments).length
+    ? alignVisibleCommentsWithSource(source.visible_comments, result.visible_comments)
+    : compactVisibleComments(source.visible_comments);
+  const sellingPoints = compactArray(result.selling_points).length ? compactArray(result.selling_points) : sellingPointFallback(rawBullets);
+  let normalizedProduct = {
+    visible_comments: visibleComments,
+    selling_points: sellingPoints,
+  };
+  let qualityWarnings = qualityCheckProductRaw(platform, source, result, normalizedProduct);
+  if (qualityWarnings.length) {
+    normalizedProduct = await repairProductRawQuality(userId, platform, source, normalizedProduct, qualityWarnings);
+    qualityWarnings = qualityCheckProductRaw(platform, source, result, normalizedProduct);
+  }
 
   return {
     ...source,
@@ -328,11 +495,14 @@ URL：${source.url || ""}
     review_count: safeNumber(result.review_count ?? source.review_count),
     monthly_sales: normalizeMonthlySales(result.monthly_sales || source.monthly_sales),
     thumbnail_url: source.thumbnail_url || result.image_url || "",
+    comments: safeNumber(source.comments ?? result.review_count ?? source.review_count) || 0,
+    visible_comments: normalizedProduct.visible_comments,
     tag_values: tagValues,
     field_suggestions: fieldSuggestions("competitor", result, tagValues),
-    selling_points: compactArray(result.selling_points).length ? compactArray(result.selling_points) : rawBullets,
+    selling_points: normalizedProduct.selling_points,
     negative_keywords: compactArray(result.negative_keywords),
     ai_summary: result.ai_summary || source.description || "",
+    __loom_ai_warnings: qualityWarnings,
   };
 }
 

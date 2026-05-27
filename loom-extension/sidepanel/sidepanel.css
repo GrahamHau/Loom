@@ -596,10 +596,7 @@ input,textarea,select{font-family:inherit;color:inherit}
   padding:10px 12px;
 }
 .product-taxonomy-stack > .field-select:last-child{border-bottom:0}
-.product-taxonomy-stack > .field-select.open{
-  background:var(--surface);
-  box-shadow:inset 3px 0 0 var(--accent);
-}
+.product-taxonomy-stack > .field-select.open{background:var(--surface)}
 /* 在 taxonomy-stack 里，shell 退化为透明行（不加边框包裹）*/
 .product-taxonomy-stack > .field-select .field-select-shell{
   border:0;border-radius:0;background:transparent;
@@ -651,22 +648,41 @@ textarea.ghost-input{
    但全部降为浅色调，不喧宾夺主
    ============================================================ */
 .tag-row{display:flex;flex-wrap:wrap;gap:5px}
+/* Shared chip style. Field chips, dropdown chips, and normal tag rows must look identical. */
 .tag{
   display:inline-flex;align-items:center;gap:4px;
-  padding:3px 10px;border-radius:var(--radius-full);
-  font-size:11px;font-weight:400;
+  padding:3px 8px;border-radius:6px;
+  font-size:12px;font-weight:400;letter-spacing:-0.005em;
   background:var(--surface-3);color:var(--text-2);
   border:1px solid transparent;
-  white-space:nowrap;line-height:1.4;
+  white-space:nowrap;line-height:1.45;
   max-width:100%;
+  transition:background var(--dur-fast),border-color var(--dur-fast);
 }
 .tag > span,.tag > em{
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.tag.accent{background:var(--accent-soft);color:var(--accent-text)}
-.tag.success{background:var(--success-soft);color:color-mix(in oklab,var(--success) 80%,black)}
-.tag.warn   {background:var(--warn-soft);   color:color-mix(in oklab,var(--warn) 70%,black)}
-.tag.danger {background:var(--danger-soft); color:color-mix(in oklab,var(--danger) 70%,black)}
+/* Tonal pills — each field gets its own hue, so 场景 / 痛点 / 创新 are distinguishable at a glance */
+.tag.accent{
+  background:color-mix(in srgb, var(--accent-soft) 80%, var(--surface));
+  color:var(--accent-text);
+  border-color:color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.tag.success{
+  background:color-mix(in srgb, var(--success-soft) 80%, var(--surface));
+  color:color-mix(in oklab,var(--success) 80%,black);
+  border-color:color-mix(in srgb, var(--success) 14%, transparent);
+}
+.tag.warn{
+  background:color-mix(in srgb, var(--warn-soft) 80%, var(--surface));
+  color:color-mix(in oklab,var(--warn) 70%,black);
+  border-color:color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.tag.danger{
+  background:color-mix(in srgb, var(--danger-soft) 80%, var(--surface));
+  color:color-mix(in oklab,var(--danger) 70%,black);
+  border-color:color-mix(in srgb, var(--danger) 14%, transparent);
+}
 .tag.outline{background:transparent;border:1px solid var(--border);color:var(--text-3)}
 .tag.dashed{
   background:transparent;
@@ -676,15 +692,19 @@ textarea.ghost-input{
 }
 .tag.dashed:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
 
-.tag.removable{padding-right:3px;max-width:170px}
+/* Removable chips keep the same body style; only the small × affordance is extra. */
+.tag.removable{padding-right:4px;max-width:180px;gap:4px}
 .tag.removable > button{
   border:none;background:transparent;color:inherit;
-  opacity:.55;
-  width:14px;height:14px;border-radius:var(--radius-xs);
+  opacity:0;
+  width:15px;height:15px;border-radius:4px;
   display:inline-flex;align-items:center;justify-content:center;
   font-size:13px;line-height:1;padding:0;margin-left:1px;flex-shrink:0;
+  transition:opacity 110ms ease, background 110ms ease;
 }
-.tag.removable > button:hover{opacity:1;background:rgba(0,0,0,.07)}
+.tag.removable:hover > button,
+.tag.removable:focus-within > button{opacity:.62}
+.tag.removable > button:hover{opacity:1 !important;background:rgba(0,0,0,.07)}
 
 /* ============================================================
    Field select (chip picker)
@@ -712,32 +732,73 @@ textarea.ghost-input{
   color:var(--text-2);
   background:var(--surface-3);
 }
-/* 可点击 shell — 对齐 Web 端 multi-field-shell */
+/* Shell — 飞书 multi-select style: subtle, hover hint, focused halo */
 .field-select-shell{
-  min-height:34px;
-  padding:6px 8px;
+  position:relative;
+  min-height:36px;
+  padding:5px 30px 5px 8px; /* room for the ⌄ chevron */
   border:1px solid var(--border);
-  border-radius:14px;
-  background:var(--surface-2);
+  border-radius:10px;
+  background:var(--surface);
   cursor:pointer;
-  transition:border-color var(--dur-fast),box-shadow var(--dur-fast);
+  transition:border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
   margin-top:0;
 }
+/* Chevron indicator — tells user "this opens a dropdown" */
+.field-select-shell::after{
+  content:"";
+  position:absolute;
+  right:10px;top:50%;
+  width:8px;height:8px;
+  border-right:1.4px solid var(--text-4);
+  border-bottom:1.4px solid var(--text-4);
+  transform:translateY(-70%) rotate(45deg);
+  transition:transform 140ms ease, border-color 140ms ease;
+}
+.field-select-shell:hover{
+  border-color:var(--border-strong);
+  background:var(--surface-2);
+}
+.field-select-shell:hover::after{border-color:var(--text-3)}
 .field-select.open .field-select-shell{
   border-color:var(--accent);
-  box-shadow:0 0 0 4px var(--accent-soft);
+  background:var(--surface);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.field-select.open .field-select-shell::after{
+  transform:translateY(-30%) rotate(-135deg);
+  border-color:var(--accent);
 }
 .field-selected-row{
   display:flex;flex-wrap:wrap;gap:5px;
-  min-height:20px;align-items:center;
+  min-height:22px;align-items:center;
 }
-/* 已选 token 全部中性化，对齐 Web 端 selected-token 样式 */
-.field-selected-row .tag{
-  background:var(--surface-3);
-  border:1px solid var(--border);
-  color:var(--text-2);
+.field-selected-row .tag,
+.field-picker-list .tag{
+  min-height:0;
+  flex:0 1 auto;
 }
-.field-empty{font-size:11px;color:var(--text-4)}
+/* Empty-state hint — actionable "+ 选择或新建标签" instead of passive 点击选择… */
+.field-empty{
+  font-size:12px;color:var(--text-4);letter-spacing:-0.005em;
+  display:inline-flex;align-items:center;gap:5px;
+  padding:1px 0;
+}
+.field-empty::before{
+  content:"+";
+  display:inline-flex;align-items:center;justify-content:center;
+  width:14px;height:14px;
+  border:1px dashed var(--border-strong);
+  border-radius:4px;
+  font-size:11px;font-weight:500;color:var(--text-4);
+  line-height:1;
+}
+.field-select-shell:hover .field-empty{color:var(--text-3)}
+.field-select-shell:hover .field-empty::before{
+  border-color:var(--accent);
+  color:var(--accent);
+  background:var(--accent-soft);
+}
 .field-custom-chip{
   display:inline-flex;align-items:center;
   padding:0 4px;height:14px;
@@ -747,12 +808,14 @@ textarea.ghost-input{
   flex-shrink:0;
 }
 
+/* Dropdown — 飞书 popover style: floating panel, search at top, scrollable list */
 .field-picker{
-  margin-top:8px;padding:8px;
-  border:1px solid var(--border);
-  border-radius:16px;
+  margin-top:6px;padding:6px;
+  border:1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius:12px;
   background:var(--surface);
-  box-shadow:var(--shadow-lg);
+  box-shadow:0 12px 32px rgba(15, 23, 42, 0.10),
+             0 1px 2px rgba(15, 23, 42, 0.04);
   animation:fade-down 140ms var(--ease-out);
   position:relative;z-index:13;
 }
@@ -760,46 +823,96 @@ textarea.ghost-input{
   from{opacity:0;transform:translateY(-4px)}
   to  {opacity:1;transform:none}
 }
+/* Search input — minimalist, no border, focus shows underline */
 .field-picker-search{
-  width:100%;height:30px;
-  border:1px solid var(--border);
-  border-radius:var(--radius-full);
+  width:100%;height:32px;
+  border:1px solid transparent;
+  border-radius:8px;
   background:var(--surface-2);
   color:var(--text);
-  padding:0 8px;font-size:11.5px;outline:none;
-  transition:border-color var(--dur-fast),box-shadow var(--dur-fast);
+  padding:0 10px;font-size:12px;outline:none;letter-spacing:-0.005em;
+  transition:background 140ms ease, border-color 140ms ease;
 }
-.field-picker-search:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.field-picker-search::placeholder{color:var(--text-4)}
+.field-picker-search:focus{
+  background:var(--surface);
+  border-color:color-mix(in srgb, var(--accent) 30%, var(--border));
+}
 .field-picker-list{
-  display:grid;gap:3px;
-  max-height:168px;overflow:auto;
-  margin-top:5px;
+  display:grid;gap:1px;
+  max-height:200px;overflow:auto;
+  margin-top:4px;
+  /* small custom scrollbar */
+  scrollbar-width:thin;
+  scrollbar-color:var(--border) transparent;
 }
-/* 选项行 — 对齐 Web 端 multi-option */
+.field-picker-list::-webkit-scrollbar{width:6px}
+.field-picker-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* Option row — checkbox-style on left, pill in middle, × on hover at right */
 .field-option{
-  width:100%;min-height:28px;
-  display:flex;align-items:center;gap:5px;
-  border:none;border-radius:10px;
+  width:100%;min-height:30px;
+  display:flex;align-items:center;gap:8px;
+  border:none;border-radius:7px;
   background:transparent;
-  padding:3px 6px 3px 2px;text-align:left;
-  color:var(--text-2);
-  transition:background var(--dur-fast);
+  padding:4px 6px 4px 4px;text-align:left;
+  color:var(--text-2);font-size:12px;
+  transition:background 110ms ease, box-shadow 110ms ease;
+  cursor:pointer;
+  outline:none; /* kill browser default focus ring (the "ugly blue bar") */
 }
-.field-option:hover,.field-option.selected{background:var(--surface-3)}
-.field-option.create{color:var(--accent);padding-left:6px}
+.field-option .tag{pointer-events:none}
+.field-option:hover{background:var(--surface-2)}
+.field-option:focus-visible{
+  background:var(--surface-2);
+  box-shadow:inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.field-option.selected{background:color-mix(in srgb, var(--accent-soft) 50%, var(--surface))}
+.field-option.selected:hover{background:color-mix(in srgb, var(--accent-soft) 80%, var(--surface))}
+.field-option.create{
+  color:var(--accent-text);
+  margin-top:2px;
+  border-top:1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  padding-top:7px;
+  border-radius:0 0 7px 7px;
+  font-weight:500;
+}
+.field-option.create:hover{background:var(--accent-soft)}
+
+/* Checkbox indicator (16px square with ✓ when selected) */
 .field-check{
-  width:10px;color:var(--accent);
-  font-size:11px;text-align:center;flex-shrink:0;
+  width:16px;height:16px;flex-shrink:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  border:1.5px solid var(--border-strong);
+  border-radius:4px;
+  background:var(--surface);
+  color:transparent;
+  font-size:10px;font-weight:700;line-height:1;
+  transition:background 110ms ease, border-color 110ms ease, color 110ms ease;
 }
+.field-option.selected .field-check{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff;
+}
+.field-option.create .field-check{
+  border-style:dashed;
+  border-color:color-mix(in srgb, var(--accent) 50%, var(--border));
+  color:var(--accent);
+  background:transparent;
+}
+
+/* × button — hidden by default, visible only on row hover for selected options */
 .field-option-x{
   margin-left:auto;width:18px;height:18px;
   display:inline-flex;align-items:center;justify-content:center;
   border-radius:4px;color:var(--text-4);
   font-size:14px;line-height:1;
+  opacity:0;
+  transition:opacity 110ms ease, background 110ms ease;
 }
-.field-option.selected:hover .field-option-x{
-  background:var(--surface-3);color:var(--text-2);
-}
+.field-option.selected:hover .field-option-x{opacity:.7}
+.field-option.selected .field-option-x:hover{opacity:1;background:var(--surface-3);color:var(--text-2)}
 
 /* ============================================================
    Platform card + metric inputs
