@@ -2433,7 +2433,7 @@ app.get("/api/research/:id/export.csv", requireAuth, (req, res) => {
 });
 
 app.get("/api/settings", requireAuth, (req, res) => res.json(bootstrap(currentUserId(req)).settings));
-app.patch("/api/settings", requireAuth, (req, res) => {
+app.patch("/api/settings", requireAuth, asyncHandler(async (req, res) => {
   const userId = currentUserId(req);
   const workspaceId = req.body?.workspace_id ? requestWorkspaceId(req) : "";
   const body = req.body || {};
@@ -2443,8 +2443,19 @@ app.patch("/api/settings", requireAuth, (req, res) => {
   if (workspaceId && Array.isArray(body.model_routes)) {
     body.model_routes.forEach((route) => upsertModelRoute({ ...route, workspace_id: workspaceId }));
   }
-  res.json(updateSettings(userId, body));
-});
+  const saved = updateSettings(userId, body);
+  const tokenTouched = body.feishu_mcp_token !== undefined && String(body.feishu_mcp_token || "").trim() !== "" && body.feishu_mcp_token !== "********";
+  const missingProjectBinding = !String(saved.feishu_project_default_project_key || saved.feishu_mcp_project_key || "").trim();
+  if (tokenTouched || missingProjectBinding) {
+    try {
+      await testFeishuProjectMcpForUser(userId);
+      return res.json(bootstrap(userId).settings);
+    } catch (error) {
+      if (tokenTouched) throw error;
+    }
+  }
+  res.json(saved);
+}));
 app.get("/api/fields", requireAuth, (req, res) => res.json(listFields(currentUserId(req), String(req.query.entity || ""))));
 app.get("/api/fields/catalog", requireAuth, (req, res) => res.json(listFields(currentUserId(req))));
 app.post("/api/fields/match", requireAuth, (req, res) => {
