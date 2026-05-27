@@ -6223,40 +6223,37 @@ function SettingsScreen({ data, api, refreshData }) {
             </div>
           </div>
           <div className="settings-section-body">
-            {isAdmin ? (
-              <>
-                <div className="settings-row">
-                  <div className="label">MCP Endpoint</div>
-                  <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_url || ""} onChange={(e) => updateSetting("feishu_mcp_url", e.target.value)} placeholder="可不填，默认 https://project.feishu.cn/mcp_server/v1" />
-                </div>
-                <div className="settings-row">
-                  <div className="label">X-Mcp-Token</div>
-                  <input className="input" style={{ width: "100%" }} type="password" value={settings.feishu_mcp_token || ""} onChange={(e) => updateSetting("feishu_mcp_token", e.target.value)} placeholder="只填写 token 值，不需要填写 X-Mcp-Token 这个 header 名" />
-                </div>
-                <div className="settings-row">
-                  <div className="label">固定项目空间</div>
-                  <div className="col" style={{ gap: 8, width: "100%" }}>
-                    <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_name || settings.feishu_project_default_project_name || ""} onChange={(e) => updateSetting("feishu_mcp_project_name", e.target.value)} placeholder="空间名称，测试连接后自动回填" />
-                    <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_key || settings.feishu_project_default_project_key || ""} onChange={(e) => updateSetting("feishu_mcp_project_key", e.target.value)} placeholder="管理员可选填 project_key；普通用户不需要知道" />
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="label">产品想法类型</div>
-                  <input className="input" style={{ width: "100%" }} value={settings.feishu_project_idea_type_key || ""} onChange={(e) => updateSetting("feishu_project_idea_type_key", e.target.value)} placeholder="测试连接后识别“产品想法登记”并自动回填" />
-                </div>
-              </>
-            ) : (
+            {!isAdmin && (
               <div className="settings-row">
-                <div className="label">项目空间</div>
+                <div className="label">当前状态</div>
                 <div className="col" style={{ gap: 6 }}>
-                  <div>{settings.feishu_project_default_project_name || settings.feishu_mcp_project_name || "管理员尚未固定"}</div>
-                  <div className="muted text-sm">空间、类型和字段映射由管理员维护，你只需要在调研工坊提交产品想法。</div>
+                  <div>{settings.feishu_project_default_project_name || settings.feishu_mcp_project_name || "尚未固定项目空间"}</div>
+                  <div className="muted text-sm">如果管理员还没配置好，你也可以先手动填写 token 和项目空间，先把当前账号接上。</div>
                 </div>
               </div>
             )}
             <div className="settings-row">
+              <div className="label">MCP Endpoint</div>
+              <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_url || ""} onChange={(e) => updateSetting("feishu_mcp_url", e.target.value)} placeholder="可不填，默认 https://project.feishu.cn/mcp_server/v1" />
+            </div>
+            <div className="settings-row">
+              <div className="label">X-Mcp-Token</div>
+              <input className="input" style={{ width: "100%" }} type="password" value={settings.feishu_mcp_token || ""} onChange={(e) => updateSetting("feishu_mcp_token", e.target.value)} placeholder="只填写 token 值，不需要填写 X-Mcp-Token 这个 header 名" />
+            </div>
+            <div className="settings-row">
+              <div className="label">固定项目空间</div>
+              <div className="col" style={{ gap: 8, width: "100%" }}>
+                <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_name || settings.feishu_project_default_project_name || ""} onChange={(e) => updateSetting("feishu_mcp_project_name", e.target.value)} placeholder="空间名称，测试连接后自动回填" />
+                <input className="input" style={{ width: "100%" }} value={settings.feishu_mcp_project_key || settings.feishu_project_default_project_key || ""} onChange={(e) => updateSetting("feishu_mcp_project_key", e.target.value)} placeholder="可选填 project_key；不确定时可先留空，测试连接后自动回填" />
+              </div>
+            </div>
+            <div className="settings-row">
+              <div className="label">产品想法类型</div>
+              <input className="input" style={{ width: "100%" }} value={settings.feishu_project_idea_type_key || ""} onChange={(e) => updateSetting("feishu_project_idea_type_key", e.target.value)} placeholder="测试连接后识别“产品想法登记”并自动回填" />
+            </div>
+            <div className="settings-row">
               <div className="label">同步频率</div>
-              <select className="input" style={{ maxWidth: 200 }} value={settings.feishu_mcp_interval || "manual"} onChange={(e) => updateSetting("feishu_mcp_interval", e.target.value)} disabled={!isAdmin}>
+              <select className="input" style={{ maxWidth: 200 }} value={settings.feishu_mcp_interval || "manual"} onChange={(e) => updateSetting("feishu_mcp_interval", e.target.value)}>
                 <option value="manual">仅手动</option>
                 <option value="15m">每 15 分钟</option>
                 <option value="1h">每小时</option>
@@ -6267,7 +6264,7 @@ function SettingsScreen({ data, api, refreshData }) {
             <div className="settings-row">
               <div className="label">&nbsp;</div>
               <div className="row">
-                {isAdmin ? <Btn icon="check" onClick={() => test("/api/settings/test-feishu-project-mcp", "飞书项目 MCP")}>测试并固定空间</Btn> : null}
+                <Btn icon="check" onClick={() => test("/api/settings/test-feishu-project-mcp", "飞书项目 MCP")}>{isAdmin ? "测试并固定空间" : "测试连接并回填"}</Btn>
                 {isAdmin ? <Btn variant="primary" icon="sync" onClick={syncFeishuProjectNow}>立即同步</Btn> : null}
                 {(settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at) && <span className="muted text-sm" style={{ marginLeft: 4 }}>上次:{settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at}</span>}
               </div>
