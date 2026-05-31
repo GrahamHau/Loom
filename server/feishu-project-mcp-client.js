@@ -75,13 +75,19 @@ function findTypeByName(types = [], pattern) {
 }
 
 function extractWorkItemTypes(result) {
+  const parsed = parseToolContent(result);
   const candidates = [
+    parsed?.list,
+    parsed?.data?.list,
+    parsed?.result?.list,
     result?.work_item_types,
     result?.workItemTypes,
     result?.data?.work_item_types,
     result?.data?.workItemTypes,
     result?.items,
     result?.data?.items,
+    parsed?.items,
+    parsed?.data?.items,
     Array.isArray(result) ? result : null,
   ].filter(Array.isArray);
   return candidates[0] || [];
@@ -182,6 +188,13 @@ function extractWorkItems(result) {
     .find(Array.isArray) || [];
 }
 
+function extractMqlRows(result) {
+  const parsed = parseToolContent(result);
+  const data = parsed?.data;
+  if (!data || typeof data !== "object") return [];
+  return Object.values(data).flatMap((group) => Array.isArray(group) ? group : []);
+}
+
 function extractFieldConfigs(result) {
   return nestedCandidates(result, ["fields", "field_configs", "fieldConfigList", "work_item_fields", "workItemFields"])
     .find(Array.isArray) || [];
@@ -255,6 +268,46 @@ function collectRawFields(raw = {}) {
     }
   }
   return [];
+}
+
+function normalizeMqlFieldValue(value = {}) {
+  if (value.string_value !== undefined) return String(value.string_value || "").trim();
+  if (value.long_value !== undefined) return String(value.long_value || "").trim();
+  if (value.double_value !== undefined) return String(value.double_value || "").trim();
+  if (value.key_label_value?.label !== undefined) return String(value.key_label_value.label || "").trim();
+  if (Array.isArray(value.key_label_value_list)) {
+    return value.key_label_value_list.map((item) => item?.label).filter(Boolean).join("、");
+  }
+  if (value.user_value?.name_cn !== undefined) return String(value.user_value.name_cn || "").trim();
+  return "";
+}
+
+function normalizeMqlRow(raw = {}, { projectKey = "", type = {} } = {}) {
+  const fields = Array.isArray(raw.moql_field_list) ? raw.moql_field_list : [];
+  const fieldMap = new Map(fields.map((field) => [field.key, normalizeMqlFieldValue(field.value || {})]));
+  const workItemId = firstText(fieldMap.get("work_item_id"), raw.work_item_id, raw.id);
+  const name = firstText(fieldMap.get("name"), raw.name, raw.title);
+  const typeKeyValue = typeKey(type);
+  if (!workItemId || !typeKeyValue) return null;
+  return {
+    project_key: projectKey,
+    work_item_id: workItemId,
+    work_item_type_key: typeKeyValue,
+    work_item_type_name: typeName(type),
+    name,
+    raw,
+  };
+}
+
+function buildIdeaMql(projectName, typeNameValue, limit) {
+  const safeProject = String(projectName || "").replace(/`/g, "");
+  const safeType = String(typeNameValue || "").replace(/`/g, "");
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  return [
+    "SELECT `work_item_id`,`name`",
+    `FROM \`${safeProject}\`.\`${safeType}\``,
+    `LIMIT ${safeLimit}`,
+  ].join(" ");
 }
 
 function normalizeWorkItem(raw = {}, { projectKey = "", type = {}, fieldConfigsByKey = new Map() } = {}) {
@@ -440,6 +493,28 @@ async function syncItemsForType({ client, toolNames, workspaceId, projectKey, ty
   return { tool: listTool, count };
 }
 
+async function syncItemsByMql({ client, toolNames, workspaceId, projectKey, projectName, type, limit }) {
+  if (!toolNames.includes("search_by_mql")) return { tool: "", count: 0 };
+  const mql = buildIdeaMql(projectName, typeName(type), limit);
+  const result = await client.callTool("search_by_mql", {
+    project_key: projectKey,
+    mql,
+  });
+  const rows = extractMqlRows(result);
+  let count = 0;
+  for (const row of rows) {
+    const normalized = normalizeMqlRow(row, { projectKey, type });
+    if (!normalized?.work_item_id) continue;
+    upsertFeishuProjectItem({
+      workspace_id: workspaceId,
+      project_key: projectKey,
+      ...normalized,
+    });
+    count += 1;
+  }
+  return { tool: "search_by_mql", count };
+}
+
 export class FeishuProjectMcpClient {
   constructor({ url = FEISHU_PROJECT_MCP_DEFAULT_URL, token, fetchImpl = fetch } = {}) {
     this.url = cleanText(url) || FEISHU_PROJECT_MCP_DEFAULT_URL;
@@ -604,12 +679,21 @@ export async function syncFeishuProjectMcpForUser(userId, { workspaceId = "", fe
       limit,
       fieldConfigsByKey: fieldSync.fieldConfigsByKey,
     });
-    if (itemSync.tool) usedTools.add(itemSync.tool);
-    itemCount += itemSync.count;
+    const effectiveItemSync = itemSync.count > 0 ? itemSync : await syncItemsByMql({
+      client,
+      toolNames,
+      workspaceId: resolvedWorkspaceId,
+      projectKey: settings.projectKey,
+      projectName: settings.projectName,
+      type,
+      limit,
+    });
+    if (effectiveItemSync.tool) usedTools.add(effectiveItemSync.tool);
+    itemCount += effectiveItemSync.count;
     syncedTypes.push({
       key: typeKey(type),
       name: typeName(type),
-      items: itemSync.count,
+      items: effectiveItemSync.count,
       fields: fieldSync.count,
     });
   }

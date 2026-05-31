@@ -2540,6 +2540,7 @@ function startRssScheduler() {
 
 let wechatCollecting = false;
 let lastWechatCollectDateHour = "";
+let feishuProjectSyncing = false;
 
 export function zonedDateHour(timeZone, date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -2574,6 +2575,45 @@ function startWechatScheduler() {
     } finally {
       wechatCollecting = false;
       releaseLock("wechat-scheduler");
+    }
+  }, interval).unref();
+}
+
+function feishuProjectIntervalMs(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "15m") return 15 * 60 * 1000;
+  if (normalized === "1h") return 60 * 60 * 1000;
+  if (normalized === "4h") return 4 * 60 * 60 * 1000;
+  if (normalized === "1d") return 24 * 60 * 60 * 1000;
+  return 0;
+}
+
+function startFeishuProjectScheduler() {
+  const interval = Number(process.env.FEISHU_PROJECT_SCHEDULER_CHECK_INTERVAL_MS || 5 * 60 * 1000);
+  setInterval(async () => {
+    if (feishuProjectSyncing) return;
+    if (!acquireLock("feishu-project-scheduler", Math.max(interval - 1000, 30000))) return;
+    feishuProjectSyncing = true;
+    try {
+      const now = Date.now();
+      for (const user of listAllUsers()) {
+        const state = rawState(user.id);
+        const settings = state?.settings || {};
+        const syncEveryMs = feishuProjectIntervalMs(settings.feishu_mcp_interval);
+        if (!syncEveryMs) continue;
+        if (!settings.feishu_mcp_token || !(settings.feishu_project_default_project_key || settings.feishu_mcp_project_key)) continue;
+        const lastSyncAt = new Date(settings.last_feishu_project_mcp_sync_at || settings.last_feishu_project_mcp_test_at || 0).getTime();
+        if (Number.isFinite(lastSyncAt) && lastSyncAt > 0 && now - lastSyncAt < syncEveryMs) continue;
+        const workspaceId = state?.workspace?.workspace_id || state?.workspace?.id || "";
+        try {
+          await syncFeishuProjectMcpForUser(user.id, { workspaceId, limit: 50 });
+        } catch (error) {
+          console.error(`Feishu project sync failed for ${user.id}`, error);
+        }
+      }
+    } finally {
+      feishuProjectSyncing = false;
+      releaseLock("feishu-project-scheduler");
     }
   }, interval).unref();
 }
@@ -2655,6 +2695,7 @@ if (process.env.NODE_ENV !== "test") {
   if (process.env.NODE_ENV === "production") {
     startRssScheduler();
     startWechatScheduler();
+    startFeishuProjectScheduler();
   }
 }
 

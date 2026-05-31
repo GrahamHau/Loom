@@ -904,10 +904,20 @@ function HomeScreen({ data, onNavigate }) {
   const recentNews = news.filter((item) => item.titleZh || item.original_title).slice(0, 5);
   const feishuStatus = dashboard.feishu_status || {};
   const feishuProjectStatus = dashboard.feishu_project_status || {};
-  const feishuProjectConfigured = Boolean(feishuProjectStatus.configured);
+  const feishuProjectConfigured = Boolean(
+    feishuProjectStatus.configured ||
+    data.settings?.feishu_project_default_project_key ||
+    data.settings?.feishu_mcp_project_key ||
+    data.settings?.feishu_project_default_project_name ||
+    data.settings?.feishu_mcp_project_name
+  );
   const feishuProjectSynced = feishuProjectConfigured && Number(feishuProjectStatus.items_count || 0) > 0;
   const feishuConnected = feishuProjectConfigured || Boolean(feishuStatus.connected);
-  const feishuProjectName = feishuProjectStatus.project_name || "飞书项目空间";
+  const feishuProjectName =
+    feishuProjectStatus.project_name ||
+    data.settings?.feishu_project_default_project_name ||
+    data.settings?.feishu_mcp_project_name ||
+    "飞书项目空间";
   const currentUser = data.user?.name || "";
   const hour = new Date().getHours();
   const greet = hour < 6 ? "夜深了" : hour < 12 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好";

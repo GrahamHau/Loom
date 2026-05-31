@@ -16,6 +16,7 @@ const { default: app, zonedDateHour } = await import("./index.js");
 
 let server;
 let baseUrl = "";
+const recentIso = (daysAgo = 0) => new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
 
 function extractCookie(headers) {
   const raw = headers.get("set-cookie") || "";
@@ -1652,10 +1653,10 @@ describe("news daily digest", () => {
       1,
       0,
       0,
-      "2026-05-19T08:00:00.000Z",
+      recentIso(0),
       1,
-      "2026-05-19T08:00:00.000Z",
-      "2026-05-19T08:00:00.000Z",
+      recentIso(0),
+      recentIso(0),
     );
     dbModule.db.prepare(`
       INSERT INTO news_items (
@@ -1678,10 +1679,10 @@ describe("news daily digest", () => {
       1,
       0,
       0,
-      "2026-05-19T09:00:00.000Z",
+      recentIso(0),
       1,
-      "2026-05-19T09:00:00.000Z",
-      "2026-05-19T09:00:00.000Z",
+      recentIso(0),
+      recentIso(0),
     );
 
     const response = await fetch(`${baseUrl}/api/news?page=1&limit=20&source_group=official`, {
@@ -1725,10 +1726,10 @@ describe("news daily digest", () => {
       1,
       0,
       0,
-      "2026-05-19T08:00:00.000Z",
+      recentIso(0),
       1,
-      "2026-05-19T08:00:00.000Z",
-      "2026-05-19T08:00:00.000Z",
+      recentIso(0),
+      recentIso(0),
     );
 
     const calls = [];
@@ -1809,10 +1810,10 @@ describe("news daily digest", () => {
       1,
       0,
       0,
-      "2026-05-19T08:00:00.000Z",
+      recentIso(0),
       1,
-      "2026-05-19T08:00:00.000Z",
-      "2026-05-19T08:00:00.000Z",
+      recentIso(0),
+      recentIso(0),
     );
 
     let calls = 0;

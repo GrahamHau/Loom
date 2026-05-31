@@ -2749,7 +2749,7 @@ export function updateNewsSource(userId, id, patch) {
     patch.is_active !== undefined ? (patch.is_active ? 1 : 0) : (patch.active !== undefined ? (patch.active ? 1 : 0) : current.is_active),
     patch.last_fetched_at !== undefined ? patch.last_fetched_at : current.last_fetched_at,
     patch.last_item_count !== undefined ? Number(patch.last_item_count || 0) : Number(current.last_item_count || 0),
-    patch.last_error !== undefined ? cleanText(patch.last_error, current.last_error) : current.last_error,
+    patch.last_error !== undefined ? (patch.last_error == null ? null : cleanText(patch.last_error, current.last_error)) : current.last_error,
     nowIso(),
     id,
     userId

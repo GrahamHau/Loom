@@ -931,6 +931,8 @@ describe("repository", () => {
     const updated = repo.updateNewsSource(legacyUserId, source.id, { last_fetched_at: "2026-05-11T00:00:00.000Z", last_item_count: 12, last_error: "HTTP 403" });
     expect(updated?.last_item_count).toBe(12);
     expect(updated?.last_error).toBe("HTTP 403");
+    const cleared = repo.updateNewsSource(legacyUserId, source.id, { last_error: null });
+    expect(cleared?.last_error).toBe(null);
   });
 
   it("dedupes news sources by url per user", () => {

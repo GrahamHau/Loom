@@ -1239,6 +1239,7 @@ window.LoginScreen = LoginScreen;
 function DailyDigestCard({ data, api }) {
   const today = new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
   const hasLlm = Boolean(data.settings?.llm_configured);
+  const hasNewsForDigest = Number(data.newsCounts?.all || 0) > 0 || safeArray(data.news).length > 0;
   const [digest, setDigest] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1285,7 +1286,7 @@ function DailyDigestCard({ data, api }) {
         {loading && !digest ? (
           <div className="briefing-empty">
             <Icon name="sparkles" size={16} style={{ color: "var(--accent)" }} />
-            <div className="briefing-empty-text">正在分析真实信息流...</div>
+            <div className="briefing-empty-text">{hasNewsForDigest ? "正在生成今日总结..." : "暂无可总结的信息流"}</div>
           </div>
         ) : error ? (
           <div className="briefing-empty">
@@ -2733,9 +2734,19 @@ function DemandsScreen({ data, api, refreshData, navTarget, onNavigate }) {
   const selected = demands.find((d) => d.id === selectedId);
   const feishuStatus = data.dashboard?.feishu_status || {};
   const feishuProjectStatus = data.dashboard?.feishu_project_status || {};
-  const feishuProjectConfigured = Boolean(feishuProjectStatus.configured);
+  const feishuProjectConfigured = Boolean(
+    feishuProjectStatus.configured ||
+    data.settings?.feishu_project_default_project_key ||
+    data.settings?.feishu_mcp_project_key ||
+    data.settings?.feishu_project_default_project_name ||
+    data.settings?.feishu_mcp_project_name
+  );
   const feishuConnected = feishuProjectConfigured || Boolean(feishuStatus.connected || data.settings?.feishu_app_token || data.settings?.feishu_connected || data.workspace?.feishu_app_token);
-  const feishuProjectName = feishuProjectStatus.project_name || "飞书项目空间";
+  const feishuProjectName =
+    feishuProjectStatus.project_name ||
+    data.settings?.feishu_project_default_project_name ||
+    data.settings?.feishu_mcp_project_name ||
+    "飞书项目空间";
 
   const filtered = demands.filter((d) =>
   (!filterScenario || safeArray(d.scenarios).includes(filterScenario)) && (
