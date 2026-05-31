@@ -588,4 +588,66 @@ describe("rss-service classification", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("classifies RSSHub WeChat feeds without waiting for manual LLM", async () => {
+    dbModule.migrate();
+    dbModule.db.prepare("DELETE FROM news_items").run();
+    dbModule.db.prepare("DELETE FROM news_sources").run();
+    dbModule.db.prepare("DELETE FROM users").run();
+    dbModule.db.prepare("DELETE FROM app_data").run();
+    dbModule.ensureSeed({
+      user: { name: "Graham", role: "管理员", initials: "GR" },
+      products: [],
+      demands: [],
+      news: [],
+      research: [],
+      rssSources: [],
+      settings: {},
+    });
+    const recentPubDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toUTCString();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/loom/wechat/")) {
+        return {
+          ok: true,
+          text: async () => `<?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+              <channel>
+                <title>富士数码影像</title>
+                <item>
+                  <title>618大促 | X-E5限时直降</title>
+                  <link>https://mp.weixin.qq.com/s/demo</link>
+                  <pubDate>${recentPubDate}</pubDate>
+                  <description>复古旁轴造型无反数码相机限时直降。</description>
+                </item>
+              </channel>
+            </rss>`,
+        };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+
+    try {
+      const result = await collectSource(dbModule.getLegacyUserId(), {
+        id: "wechat-rsshub-source",
+        name: "富士数码影像",
+        url: "http://rsshub:1200/loom/wechat/MzAw?limit=50",
+        type: "rss",
+        adapter_type: "rsshub_wechat",
+        authority: "watchlist",
+        source_group: "wechat-exporter",
+        active: true,
+      });
+
+      expect(result.inserted).toHaveLength(1);
+      const saved = repo.listNews(dbModule.getLegacyUserId())[0];
+      expect(saved?.type).toBeTruthy();
+      expect(saved?.classification).toMatchObject({
+        source_type: "wechat_exporter",
+        source_group: "wechat-exporter",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

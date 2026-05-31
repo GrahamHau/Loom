@@ -488,8 +488,8 @@ function newsEmptyState(tab, sampleWorkspace) {
   }
   if (tab === "official") {
     return {
-      title: sampleWorkspace ? "正在等待官方 RSS 内容" : "还没有官方 RSS 资讯",
-      body: "官方 RSS 内容同步进来后，这里会展示对应内容。",
+      title: "加载中",
+      body: sampleWorkspace ? "正在同步官方 RSS 内容。" : "正在同步官方 RSS 与公众号内容。",
     };
   }
   return {

@@ -123,6 +123,13 @@ function isWechatExporterSource(source = {}) {
   return WECHAT_EXPORTER_SOURCE_TYPES.has(String(source.type || "").toLowerCase());
 }
 
+function isWechatRssSource(source = {}) {
+  const adapter = String(source.adapter_type || "").toLowerCase();
+  const group = String(source.source_group || source.group || "").toLowerCase();
+  const url = String(source.url || "").toLowerCase();
+  return adapter === "rsshub_wechat" || group === "wechat-exporter" || url.includes("/loom/wechat/");
+}
+
 function normalizeUrlForDedupe(rawUrl) {
   const url = safeUrl(rawUrl);
   if (!url) return String(rawUrl || "").trim();
@@ -537,6 +544,14 @@ function classifyWechatExporterArticle(source, article) {
   };
 }
 
+function classifyWechatRssItem(source, item) {
+  return classifyWechatExporterArticle(source, {
+    title: item?.title || "",
+    digest: stripHtml(item?.contentSnippet || item?.summary || item?.content || ""),
+    author_name: source?.name || "",
+  });
+}
+
 async function collectWechatExporterSource(userId, source) {
   const config = parseWechatExporterSourceUrl(source);
   if (!config.authKey) throw new Error("公众号源缺少 Auth Key");
@@ -709,7 +724,9 @@ export async function collectSource(userId, source) {
   const newsItems = [];
   for (const item of items) {
     if (!(item.link || item.guid)) continue;
-    const classified = await classifyNews({ source, item });
+    const classified = isWechatRssSource(source)
+      ? classifyWechatRssItem(source, item)
+      : await classifyNews({ source, item });
     if (!classified) continue;
     const publishedAt = publishedAtOf(item);
     const articleUrl = await resolveOriginalArticleUrl(item);
