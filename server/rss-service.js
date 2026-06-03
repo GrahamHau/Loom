@@ -1,8 +1,11 @@
 import Parser from "rss-parser";
 import { callLLM } from "./ai-service.js";
 import { fetchPageImage, resolvePageUrl } from "./content-fetcher.js";
+import { isOffDomainNoise } from "./news-domain-filter.js";
 import { withNewsDedupeKeys } from "./news-dedupe.js";
 import { findReusableNewsThumbnail, listNews, listPendingNewsForLlm, updateNews, upsertNews, updateNewsSource } from "./repository.js";
+
+export { isOffDomainNoise } from "./news-domain-filter.js";
 
 const parser = new Parser({
   timeout: 20000,
@@ -21,29 +24,36 @@ const RSS_HEADERS = {
   Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
 };
 
-const NEWS_LLM_SYSTEM_PROMPT = `你是一个信息筛选助手，服务于摄影/影像器材行业（灯光、稳定器、三脚架、相机配件、收音设备、手机配件）的产品经理。
+const NEWS_LLM_SYSTEM_PROMPT = `你是服务于影像器材/泛3C配件行业产品经理的信息分析助手。我们做的品类是：三脚架/脚架、补光灯/灯光、手柄与手柄稳定器、手机夹/手机支架、麦克风、相机配件、运动相机配件、无人机配件。
 
-先把输入内容翻译/整理成中文，再判断是否属于以下两类之一：
+第一步：通读下面给出的标题与正文，把内容翻译/整理成中文（以正文内容为准做判断，不要只看标题）。
+第二步：判断价值类别。
 
-【保留 - new_product】：某品牌正式发布了新产品、新型号、新SKU，或产品重大功能更新。必须是具体产品发布，不是泛泛评论。
+【保留 - new_product】：某品牌正式发布的新产品、新型号、新SKU，或重大功能/固件更新。必须是具体产品发布，不是泛泛评论。
+【保留 - trend】：与影像器材/泛3C 配件（相机、运动相机、无人机、手机影像、直播/创作设备及其配件、上游影像/光学/电池/芯片供应链）直接相关、且有数据或事实支撑的市场报告、技术方向、消费趋势、行业重要动态。
 
-【保留 - trend】：有数据支撑的市场报告、技术方向变化、消费趋势分析、行业重要动态。
-
-【直接丢弃（keep=false）】：
-- 纯广告/促销/折扣/赠品
-- 招聘/招商/合作邀请
-- 企业社会责任/赞助活动
-- 博客游记/旅行摄影（无产品发布或趋势价值）
-- 摄影技巧教程（无产品/趋势价值）
+【直接丢弃 keep=false】（务必严格）：
+- 与我们行业无关的综合资讯：宏观经济、股市/基金/外汇/利率、楼市、能源/煤炭/有色金属、银行、政经时事等——即使写成"报告/趋势/分析"，只要和影像器材/泛3C 消费电子无关，一律丢弃
+- 营销/促销/导购：折扣、大促、限时、秒杀、福利、抽奖、赠品、到手价、众筹催单、"入手指南/值不值得买/性价比之王/必买清单/年度盘点"
+- 招聘/招商/合作邀请/赞助/CSR
+- 个人博客/游记/旅拍/摄影技巧教程（无产品发布或趋势价值）
 - 二手市场/拍卖
-- 赠品抽奖（如 "Giveaway Live Now"）
+- 纯软文：通篇夸某产品却没有"新发布"这个事实，或明显是品牌投放的导购内容
+
+判断营销软文的信号：标题或正文出现"种草/必买/盘点/推荐购买/优惠/福利/到手价/性价比/狂欢/抢购"，或通篇导购口吻而无新发布事实 → is_promotional=true 且 keep=false。
+
+summary_zh 写法（给产品经理看，禁止堆形容词，只给硬信息）：
+- 先说"谁发布了什么产品"
+- 再给 1 个最关键的差异点或规格（例：双色温2700-6500K、内置电池、磁吸快拆、折叠后仅18cm）
+- 若与我们品类（脚架/补光灯/手柄/手机夹/支架/麦克风）相关，点出"对我们的信号"（竞品在做什么、值得关注的形态/价格）
 
 严格返回 JSON，不输出任何其他内容：
 {
   "keep": true | false,
+  "is_promotional": true | false,
   "type": "new_product" | "trend" | null,
   "title_zh": "中文标题，15字以内，直接说是什么（例：神牛发布ML100Bi II双色温灯）",
-  "summary_zh": "80字以内中文摘要，提炼核心信息。",
+  "summary_zh": "80字以内中文摘要，按上面写法提炼。",
   "content_zh": "中文正文，保留原文关键信息，120-300字。",
   "story_key": "同一新闻事件的短英文key，格式 brand-product-event，例如 sony-a7r-vi-launch；不确定则为空",
   "story_event": "launch|review|leak|poll|preorder|firmware|price|trend|other",
@@ -54,7 +64,7 @@ const NEWS_LLM_INPUT_LIMIT = 1600;
 const NEWS_LLM_MAX_TOKENS = 520;
 const FETCH_TIMEOUT_MS = 30000;
 const OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE = Number(process.env.OFFICIAL_IMAGE_ENRICH_MAX_PER_SOURCE || 12);
-const RECENT_NEWS_WINDOW_DAYS = Math.max(1, Number(process.env.NEWS_RECENT_WINDOW_DAYS || 5));
+const RECENT_NEWS_WINDOW_DAYS = Math.max(1, Number(process.env.NEWS_RECENT_WINDOW_DAYS || 7));
 const GOOGLE_NEWS_HOSTS = new Set(["news.google.com", "news.url.google.com"]);
 const WECHAT_EXPORTER_SOURCE_TYPES = new Set(["wechat_exporter", "wechat-exporter", "wechat"]);
 const WECHAT_EXPORTER_MAX_PER_SOURCE = Math.max(1, Number(process.env.WECHAT_EXPORTER_MAX_PER_SOURCE || 50));
@@ -320,6 +330,7 @@ export function heuristicClassifyNews({ item }) {
   const productPattern = /\b(camera|lens|drone|gimbal|light|tripod|rig|cage|mount|microphone|monitor|stabilizer|battery|charger|accessory|iphone|ipad|macbook)\b|相机|镜头|无人机|云台|补光灯|三脚架|麦克风|监视器|稳定器|电池|充电器|配件/i;
   const trendPattern = /\b(trend|market|report|survey|forecast|analysis)\b|趋势|报告|预测|分析/i;
   const rejectPattern = /\b(giveaway|discount|coupon|hiring|career|sponsor|sponsored|travel|tutorial|how to|used market|auction)\b|赠品|抽奖|折扣|招聘|赞助|游记|教程|二手|拍卖/i;
+  const promoPattern = /\b(deal|deals|best deal|on sale|save \$|\d+% off|buying guide|should you buy|cyber monday|black friday|prime day|gift guide)\b|促销|大促|优惠|福利|限时|秒杀|到手价|抢购|狂欢|预售|众筹倒计时|种草|必买|值得买|入手指南|性价比之王|年度盘点|购买推荐|双11|双十一|618/i;
   const teaserPattern = /\b(teaser|rumou?r|expected|coming soon|next week|preview|first look|set to debut)\b|预告|爆料|传闻|即将/i;
   const weakEvidencePattern = /\b(without official|discussion|conversation|discusses|reportedly|may|could|fits the market)\b/i;
   const collectionPattern = /\b(collection|wallpaper|watch band|band)\b|系列|壁纸|表带/i;
@@ -327,6 +338,7 @@ export function heuristicClassifyNews({ item }) {
   const mediaSourcePattern = /\b(petapixel|dpreview|fstoppers|youtube|creator)\b/i;
 
   if (rejectPattern.test(lower)) return null;
+  if (promoPattern.test(lower) && !launchPattern.test(lower)) return null;
   if (collectionPattern.test(lower) && !launchPattern.test(lower)) return null;
   if (collectionPattern.test(lower) && !/\b(camera|lens|drone|gimbal|light|tripod|rig|cage|mount|microphone|monitor|stabilizer|battery|charger)\b|相机|镜头|无人机|云台|补光灯|三脚架|麦克风|监视器|稳定器|电池|充电器/i.test(lower)) {
     return null;
@@ -374,11 +386,12 @@ export function heuristicClassifyNews({ item }) {
 async function classifyNews({ source, item }) {
   const heuristic = heuristicClassifyNews({ source, item: { ...item, sourceName: source.name } });
   if (heuristic && heuristic.type !== "待判定") {
-    const requiresOfficialTranslation = isOfficialManagedSource(source);
+    // 统一过 LLM 复筛闸：所有启发式命中的条目都标记为待 LLM 处理，
+    // 让每篇都由 AI 读正文做总结+分类，而非凭关键词命中就直接收录。
     return {
       ...heuristic,
-      llmProcessed: !requiresOfficialTranslation,
-      needsTranslation: requiresOfficialTranslation || heuristic.needsTranslation,
+      llmProcessed: false,
+      needsTranslation: true,
     };
   }
   return {
@@ -738,7 +751,7 @@ export async function collectSource(userId, source) {
       original_title: stripHtml(item.title || ""),
       original_url: articleUrl || fallbackUrl,
       article_url: articleUrl || fallbackUrl,
-      original_content: stripHtml(item.contentSnippet || item.summary || item.content || "").slice(0, 2000),
+      original_content: stripHtml(item.contentEncoded || item.content || item.contentSnippet || item.summary || "").slice(0, 2000),
       published_at: publishedAt,
       date: publishedAt.slice(0, 10),
       time: "",
@@ -796,6 +809,24 @@ export async function collectDueSources(userId, sources, now = new Date()) {
   return collectSources(userId, dueSources);
 }
 
+const NEWS_LLM_CONCURRENCY = Math.max(1, Number(process.env.NEWS_LLM_CONCURRENCY || 3));
+
+async function llmClassifyNewsItem(userId, item) {
+  const content = [
+    `来源：${item.source}`,
+    `标题：${stripHtml(item.original_title || "").slice(0, 180)}`,
+    `正文：${stripHtml(item.original_content || "").slice(0, NEWS_LLM_INPUT_LIMIT)}`,
+  ].join("\n\n");
+  const result = await callLLM({
+    userId,
+    purpose: "news:process_llm",
+    system: NEWS_LLM_SYSTEM_PROMPT,
+    user: content,
+    maxTokens: NEWS_LLM_MAX_TOKENS,
+  });
+  return result;
+}
+
 export async function processNewsWithLlm(userId, limit = 20) {
   const pending = listPendingNewsForLlm(userId, limit);
   let processed = 0;
@@ -804,22 +835,30 @@ export async function processNewsWithLlm(userId, limit = 20) {
   let failed = 0;
   const errors = [];
 
-  for (const item of pending) {
-    const content = [
-      `来源：${item.source}`,
-      `标题：${stripHtml(item.original_title || "").slice(0, 180)}`,
-      `摘要：${stripHtml(item.original_content || "").slice(0, NEWS_LLM_INPUT_LIMIT)}`,
-    ].join("\n\n");
+  // 分块并发：每块同时调 NEWS_LLM_CONCURRENCY 条 LLM（慢在网络往返），
+  // 但拿到结果后按顺序写库（去重/story_key 需要顺序，避免竞态）。
+  for (let i = 0; i < pending.length; i += NEWS_LLM_CONCURRENCY) {
+    const chunk = pending.slice(i, i + NEWS_LLM_CONCURRENCY);
+    const outcomes = await Promise.all(chunk.map(async (item) => {
+      try {
+        return { item, result: await llmClassifyNewsItem(userId, item) };
+      } catch (error) {
+        return { item, error };
+      }
+    }));
 
-    try {
-      const result = await callLLM({
-        userId,
-        purpose: "news:process_llm",
-        system: NEWS_LLM_SYSTEM_PROMPT,
-        user: content,
-        maxTokens: NEWS_LLM_MAX_TOKENS,
-      });
-      if (result?.keep) {
+    for (const { item, result, error } of outcomes) {
+      if (error) {
+        failed += 1;
+        errors.push({ id: item.id, title: item.original_title || item.titleZh, message: error.message || "LLM 处理失败" });
+        continue;
+      }
+      const offDomain = isOffDomainNoise(
+        result?.title_zh || item.original_title || item.titleZh,
+        `${result?.summary_zh || ""} ${result?.content_zh || item.original_content || ""}`,
+      );
+      const keepDecision = Boolean(result?.keep) && !result?.is_promotional && !offDomain;
+      if (keepDecision) {
         const llmClassification = {
           reason: "manual_llm",
           ...(result.story_event ? { story_event: String(result.story_event).slice(0, 32) } : {}),
@@ -855,14 +894,15 @@ export async function processNewsWithLlm(userId, limit = 20) {
           is_kept: 0,
           llm_processed: 1,
           needsTranslation: false,
-          classification: { reason: "manual_llm_filtered" },
+          classification: {
+            reason: offDomain ? "off_domain_filtered" : (result?.is_promotional ? "manual_llm_filtered_promotional" : "manual_llm_filtered"),
+            ...(result?.is_promotional ? { is_promotional: true } : {}),
+            ...(offDomain ? { off_domain: true } : {}),
+          },
         });
         filtered += 1;
       }
       processed += 1;
-    } catch (error) {
-      failed += 1;
-      errors.push({ id: item.id, title: item.original_title || item.titleZh, message: error.message || "LLM 处理失败" });
     }
   }
 

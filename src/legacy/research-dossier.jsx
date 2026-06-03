@@ -698,10 +698,54 @@ ${content}
 
 /* ---------- Main modal ---------- */
 
-function ResearchDossier({ research, products, demands, onClose }) {
+function ResearchDossier({ research, products, demands, onClose, api, refreshData }) {
   const stats = useMemo(() => computeStats(products || [], demands || []), [products, demands]);
-  const insight = useMemo(() => buildHeroInsight(stats), [stats]);
+  const ruleInsight = useMemo(() => buildHeroInsight(stats), [stats]);
   const bodyRef = useRef(null);
+
+  // ---- AI 增强层（语义聚类 / 卖点提炼 / 机会洞察 / 一句话洞察）----
+  const [dossierAi, setDossierAi] = useState(research?.dossier_ai || null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const autoRanRef = useRef(false);
+
+  const runAnalyze = async () => {
+    if (!api || !research?.id || aiBusy) return;
+    setAiBusy(true); setAiError("");
+    try {
+      const result = await api(`/api/research/${research.id}/dossier-analyze`, { method: "POST" });
+      setDossierAi(result);
+      await refreshData?.();
+    } catch (error) {
+      setAiError(error?.message || "AI 分析失败");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  // 首次打开档案时，若还没有 AI 结果且有关联数据，自动跑一次（失败则静默回退规则版）。
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    if (dossierAi || !api || !research?.id) return;
+    if (!(products?.length || demands?.length)) return;
+    autoRanRef.current = true;
+    runAnalyze();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // AI 痛点聚类优先；否则回退到规则聚合的 topPains。
+  const aiClusters = Array.isArray(dossierAi?.painpoint_clusters) ? dossierAi.painpoint_clusters : [];
+  const effectivePains = aiClusters.length
+    ? aiClusters.map((cluster) => [cluster.label, cluster.count || cluster.members?.length || 0])
+    : stats.topPains;
+  const usingAiPains = aiClusters.length > 0;
+  const insight = (dossierAi?.hero_insight || "").trim() || ruleInsight;
+  const aiOpps = Array.isArray(dossierAi?.opportunities) ? dossierAi.opportunities : [];
+  const aiCommon = dossierAi?.selling_points?.common || [];
+  const aiDiff = dossierAi?.selling_points?.differentiated || [];
+  const sufficiency = dossierAi?.data_sufficiency
+    || { products: stats.productsTotal, demands: stats.demandsTotal, ok: stats.productsTotal >= 3 && stats.demandsTotal >= 5 };
+  const showSampleWarning = !sufficiency.ok;
 
   // Reveal animation
   const [revealed, setRevealed] = useState(false);
@@ -744,6 +788,23 @@ function ResearchDossier({ research, products, demands, onClose }) {
             <section className="dossier-hero">
               <div className="dossier-hero-eyebrow">调研档案 · {research?.date || "—"}</div>
               <h1 className="dossier-hero-title">{research?.title || `${stats.dominantCategory} 品类全景`}</h1>
+
+              {showSampleWarning && (
+                <div className="dossier-sample-warning">
+                  <Icon name="alert-triangle" size={13} />
+                  <span>样本偏少（{sufficiency.products} 竞品 / {sufficiency.demands} 用户声音），以下分析仅供参考，建议补充关联对象后重新生成。</span>
+                </div>
+              )}
+              {aiBusy && (
+                <div className="dossier-ai-status">
+                  <span className="dossier-ai-spinner" /> AI 正在做语义聚类与机会洞察…
+                </div>
+              )}
+              {!aiBusy && aiError && (
+                <div className="dossier-ai-status dossier-ai-status-error">
+                  <Icon name="alert-triangle" size={12} /> AI 增强暂不可用，已回退到规则版分析。
+                </div>
+              )}
 
               <div className="dossier-bento">
                 {/* Big card: 主流价格带 + AI 洞察 + sparkbars */}
@@ -790,14 +851,58 @@ function ResearchDossier({ research, products, demands, onClose }) {
 
                 {/* Bottom right 2: 高频痛点 */}
                 <div className="dossier-bento-card dossier-bento-small">
-                  <div className="dossier-bento-small-num">{stats.topPains.length}</div>
-                  <div className="dossier-bento-small-label">已聚合痛点</div>
-                  {stats.topPains[0] && (
-                    <div className="dossier-bento-small-meta">最高频 · {stats.topPains[0][0]}</div>
+                  <div className="dossier-bento-small-num">{effectivePains.length}</div>
+                  <div className="dossier-bento-small-label">{usingAiPains ? "AI 聚类痛点" : "已聚合痛点"}</div>
+                  {effectivePains[0] && (
+                    <div className="dossier-bento-small-meta">最高频 · {effectivePains[0][0]}</div>
                   )}
                 </div>
               </div>
             </section>
+
+            {/* AI 洞察 — 机会点 + 卖点格局（仅在有 AI 结果时出现） */}
+            {(aiOpps.length > 0 || aiCommon.length > 0 || aiDiff.length > 0) && (
+              <section className="dossier-section dossier-ai-section">
+                <div className="dossier-section-head">
+                  <div className="dossier-section-eyebrow dossier-ai-eyebrow">✦ AI 洞察</div>
+                  <h2 className="dossier-section-title">机会点与卖点格局</h2>
+                  <p className="dossier-section-sub">基于关联竞品与用户声音，由 AI 做语义归并后给出的机会判断与卖点提炼，供产品经理拍板参考。</p>
+                </div>
+                <div className="dossier-section-body">
+                  {aiOpps.length > 0 && (
+                    <div className="dossier-opp-cards">
+                      {aiOpps.map((opp, i) => (
+                        <div key={i} className="dossier-opp-card">
+                          <div className="dossier-opp-rank">{String(i + 1).padStart(2, "0")}</div>
+                          <div className="dossier-opp-title">{opp.title}</div>
+                          <div className="dossier-opp-rationale">{opp.rationale}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(aiCommon.length > 0 || aiDiff.length > 0) && (
+                    <div className="dossier-selling-grid" style={{ marginTop: aiOpps.length ? 18 : 0 }}>
+                      <div className="dossier-selling-col">
+                        <div className="dossier-selling-col-label">通用卖点 · 入场门槛</div>
+                        <div className="dossier-selling-chips">
+                          {aiCommon.length ? aiCommon.map((s, i) => (
+                            <span key={i} className="dossier-selling-chip dossier-selling-chip-common">{s}</span>
+                          )) : <span className="dossier-empty-inline">—</span>}
+                        </div>
+                      </div>
+                      <div className="dossier-selling-col">
+                        <div className="dossier-selling-col-label">差异卖点 · 潜在破局点</div>
+                        <div className="dossier-selling-chips">
+                          {aiDiff.length ? aiDiff.map((s, i) => (
+                            <span key={i} className="dossier-selling-chip dossier-selling-chip-unique">{s}</span>
+                          )) : <span className="dossier-empty-inline">—</span>}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
 
             {/* 01 竞品全景 (price × rating) */}
             <section className="dossier-section">
@@ -887,10 +992,13 @@ function ResearchDossier({ research, products, demands, onClose }) {
               <div className="dossier-section-head">
                 <div className="dossier-section-eyebrow">06 — 痛点热力</div>
                 <h2 className="dossier-section-title">用户最常抱怨什么</h2>
-                <p className="dossier-section-sub">从 {stats.demandsTotal} 条用户声音中聚合，按提及次数排序。</p>
+                <p className="dossier-section-sub">
+                  从 {stats.demandsTotal} 条用户声音中聚合，按提及次数排序。
+                  {usingAiPains ? " 已由 AI 把同义碎词归并成痛点簇。" : ""}
+                </p>
               </div>
               <div className="dossier-section-body">
-                <PainBars topPains={stats.topPains} />
+                <PainBars topPains={effectivePains} />
               </div>
             </section>
 
@@ -950,6 +1058,11 @@ function ResearchDossier({ research, products, demands, onClose }) {
           </div>
           <div className="dossier-modal-footer-actions">
             <button type="button" className="dossier-hero-back" onClick={onClose}>关闭</button>
+            {api && (
+              <button type="button" className="dossier-hero-back" onClick={runAnalyze} disabled={aiBusy}>
+                <Icon name="sparkles" size={12} /> {aiBusy ? "AI 分析中…" : (dossierAi ? "AI 重新分析" : "AI 分析")}
+              </button>
+            )}
             <button type="button" className="dossier-hero-export" onClick={handleExport}>
               <Icon name="download" size={12} /> 导出 HTML
             </button>

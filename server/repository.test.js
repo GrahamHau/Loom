@@ -1260,6 +1260,26 @@ describe("repository", () => {
     expect(state.news.map((item) => item.original_url)).not.toContain("https://sample.test/stale");
   });
 
+  it("hides off-domain macro news at read time even when a sample copy was kept", () => {
+    const visitor = repo.ensureLegacyWorkspace();
+    repo.upsertNews(visitor.id, [{
+      source_id: "sample-news-rss-36kr",
+      source: "36Kr",
+      original_url: "https://sample.test/off-domain-macro",
+      original_title: "日元汇率走弱带动公募基金关注银行利率",
+      titleZh: "日元汇率走弱带动公募基金关注银行利率",
+      summary: "宏观经济、外汇、公募基金和银行利率变化。",
+      contentZh: "宏观经济、外汇、公募基金和银行利率变化，与影像器材或泛3C配件无关。",
+      type: "行业趋势",
+      published_at: new Date().toISOString(),
+      llmProcessed: true,
+      classification: { reason: "manual_llm" },
+    }]);
+
+    const state = repo.bootstrap(visitor.id);
+    expect(state.news.map((item) => item.original_url)).not.toContain("https://sample.test/off-domain-macro");
+  });
+
   it("populates visitor workspace with Pocket 3 sample data by default", () => {
     const visitor = repo.ensureLegacyWorkspace();
     const state = repo.bootstrap(visitor.id);

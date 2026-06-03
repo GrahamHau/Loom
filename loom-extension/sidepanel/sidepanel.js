@@ -53,6 +53,11 @@ const PLATFORM_WAITING_COPY = {
   xiaohongshu: "请点进某一条小红书笔记后自动采集",
   kickstarter: "请进入 Kickstarter 项目详情页后自动采集",
 };
+// ⚠️ 离线兜底：必须与服务端 canonical 保持一致
+//   - 标签组：server/tag-config.js 的 DEFAULT_TAG_GROUPS
+//   - 字段：  server/field-config.js 的 DEFAULT_FIELDS（标签字段部分）
+// 插件未打包、无法运行时 import 服务端定义，故在此镜像一份。
+// 改动其一就要同步另一处；server/plugin-field-sync.test.js 会在二者不一致时失败。
 const DEFAULT_TAG_GROUPS = [
   { key: "competitor_brands", name: "竞品品牌", tone: "outline", tags: ["Ulanzi", "DJI", "Insta360", "SmallRig", "NEEWER", "Tilta", "K&F CONCEPT", "Godox", "Nanlite", "Zhiyun", "智云", "Aputure", "Rode", "RODE"] },
   { key: "camera_brands", name: "主机", tone: "outline", tags: ["Osmo Pocket 3", "Osmo Pocket 4", "Osmo Pocket 4P", "Osmo Action 5 Pro", "Osmo Action 4", "Osmo Mobile 7P", "Osmo Mobile 7", "DJI Mini 4 Pro", "DJI Air 3S", "DJI Flip", "DJI Neo", "Insta360 Ace Pro 2", "Insta360 Ace Pro", "Insta360 X5", "Insta360 GO 3", "Insta360 GO 3S", "Insta360 X4", "Insta360 Flow 2 Pro", "Insta360 Flow 2", "Insta360 Flow Pro", "Insta360 Luna"] },

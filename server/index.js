@@ -38,6 +38,7 @@ import { matchFieldKey, matchFieldOption, normalizeTagValues } from "./field-mat
 import { collectDueSources, collectSources, processNewsWithLlm } from "./rss-service.js";
 import { generateDailyNewsDigest } from "./news-digest-service.js";
 import { analyzeResearch } from "./research-service.js";
+import { analyzeDossier } from "./dossier-ai-service.js";
 import { buildResearchExportCsv } from "./research-export-service.js";
 import { buildFeishuProjectIdeaDraft } from "./feishu-project-submit-service.js";
 import { submitFeedbackToFeishu, syncFeishuForUser, testFeishuForUser } from "./feishu-service.js";
@@ -2423,6 +2424,11 @@ app.post("/api/research/:id/analyze", requireAuth, asyncHandler(async (req, res)
   const item = await analyzeResearch(currentUserId(req), req.params.id);
   if (!item) return res.status(404).json({ error: "research_not_found" });
   res.json(item);
+}));
+app.post("/api/research/:id/dossier-analyze", requireAuth, asyncHandler(async (req, res) => {
+  const result = await analyzeDossier(currentUserId(req), req.params.id);
+  if (!result) return res.status(404).json({ error: "research_not_found" });
+  res.json(result);
 }));
 app.get("/api/research/:id/export.csv", requireAuth, (req, res) => {
   const result = buildResearchExportCsv(currentUserId(req), req.params.id);

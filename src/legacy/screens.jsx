@@ -1236,6 +1236,160 @@ function LoginScreen({ onLogin, onDemoLogin, onFeishuLogin, error, providers = {
 window.LoginScreen = LoginScreen;
 
 // ============ NEWS ============
+function buildWeeklyDigest(news = []) {
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const items = safeArray(news)
+    .filter((n) => {
+      const time = new Date(n.published_at || n.date || 0).getTime();
+      return Number.isFinite(time) && time >= cutoff;
+    })
+    .sort((a, b) => new Date(b.published_at || b.date || 0).getTime() - new Date(a.published_at || a.date || 0).getTime());
+  const isLaunch = (n) => String(n.type || "").includes("新品");
+  const launches = items.filter(isLaunch);
+  const trends = items.filter((n) => !isLaunch(n));
+  const brandCounts = {};
+  for (const n of items) {
+    const brand = guessBrand(n);
+    if (brand && brand.length <= 16) brandCounts[brand] = (brandCounts[brand] || 0) + 1;
+  }
+  const topBrands = Object.entries(brandCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const events = launches.length ? launches.slice(0, 5) : items.slice(0, 5);
+  return { items, launches, trends, topBrands, total: items.length, events };
+}
+
+function compactNewsText(value = "", limit = 42) {
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/[。！？!?].*$/g, "")
+    .trim();
+  return text.length > limit ? `${text.slice(0, limit)}...` : text;
+}
+
+function productNameFromNews(news = {}) {
+  const title = String(news.titleZh || news.original_title || "").trim();
+  const patterns = [
+    /(?:正式)?(?:发布|推出|上线|更新|宣布|发布了|推出了|发布新|推出新|上市|推)\s*([^，。,.]{2,32})/,
+    /^([^，。,.]{2,32})(?:正式)?(?:发布|推出|上线|更新|上市|推)/,
+  ];
+  for (const pattern of patterns) {
+    const match = title.match(pattern);
+    if (match?.[1]) return match[1].replace(/^(正式|全新|新款|新品)\s*/, "").trim();
+  }
+  return title.replace(/^(正式|全新|新款|新品)\s*/, "").slice(0, 32);
+}
+
+function productBrandFromNews(news = {}) {
+  const explicit = String(news.brand || "").trim();
+  if (explicit) return explicit;
+  const title = String(news.titleZh || news.original_title || "").trim();
+  const match = title.match(/^([A-Za-z0-9][A-Za-z0-9&.+-]*(?:\s+[A-Za-z0-9][A-Za-z0-9&.+-]*){0,2}|[\u4e00-\u9fa5A-Za-z0-9]{2,12})(?:正式)?(?:发布|推出|上线|更新|宣布|发布了|推出了|发布新|推出新|上市|推)/);
+  return match?.[1]?.trim() || "";
+}
+
+function signalTextFromNews(news = {}) {
+  const text = `${news.titleZh || news.original_title || ""} ${news.summary || ""} ${news.contentZh || ""}`;
+  if (/灯|补光|light|vortex|godox|nanlite|aputure/i.test(text)) return "灯光新品继续分化，轻量创作和专业影视灯要分开看。";
+  if (/Pocket|Osmo|Action|图传|快拆|手腕带|背带|支架|夹|strap|mount/i.test(text)) return "Pocket/相机小配件仍有上新窗口，重点看快拆、防丢和无线化。";
+  if (/对讲|通信|无线|DECT|直播|影视拍摄/i.test(text)) return "拍摄团队的现场协作设备在升级，辅助设备值得继续跟踪。";
+  if (/三脚架|脚架|tripod|支撑/i.test(text)) return "支撑类产品仍围绕便携、稳固和快拆结构迭代。";
+  if (/相机|镜头|投影|camera|lens|projector/i.test(text)) return "影像设备更新带动配件生态，留意适配件和拍摄场景变化。";
+  return "这是本周可记住的明确事件，后续看是否形成同品类连续上新。";
+}
+
+function SignalEventList({ items, onOpen }) {
+  if (!items.length) return null;
+  return (
+    <div className="signal-events">
+      <div className="digest-section-head">
+        <span className="insight-kind insight-kind--launch">本周明确事件</span>
+        <span className="insight-source-count">{items.length} 条</span>
+      </div>
+      {items.map((n, index) => {
+        const brand = productBrandFromNews(n);
+        const product = productNameFromNews(n);
+        const summary = n.summary || n.contentZh || n.original_content || "";
+        return (
+          <div
+            key={n.id}
+            className="signal-event"
+            role="button"
+            tabIndex={0}
+            onClick={() => onOpen(n)}
+            onKeyDown={(e) => { if (e.key === "Enter") onOpen(n); }}>
+            <div className="signal-event-index">{String(index + 1).padStart(2, "0")}</div>
+            <div className="signal-event-main">
+              <div className="signal-event-title">
+                <b>{brand || "本周资讯"}</b>{brand ? " " : ""}发布/推出 {product}
+              </div>
+              <div className="signal-event-detail">{compactNewsText(summary || n.titleZh || n.original_title)}</div>
+              <div className="signal-event-signal">信号：{signalTextFromNews(n)}</div>
+              <div className="signal-event-meta">
+                {brand ? <span>{brand}</span> : null}
+                <span>{formatRelativeTime(n.published_at || n.date)}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function WeeklyBoardCard({ data, news }) {
+  const boardNews = safeArray(news).length ? news : data.news;
+  const digest = useMemo(() => buildWeeklyDigest(boardNews), [boardNews]);
+  const fmt = (d) => d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+  const rangeLabel = `${fmt(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000))} – ${fmt(new Date())}`;
+  const openItem = (n) => {
+    const url = n.original_url || n.url;
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
+  if (!digest.total) return null;
+  return (
+    <div className="briefing-card weekly-board-card">
+      <div className="briefing-card-head weekly-board-head">
+        <div className="weekly-board-titleblock">
+          <div className="weekly-board-kicker">
+            <Icon name="rss" size={13} style={{ color: "var(--accent)" }} />
+            <span>近 7 天行业看板</span>
+          </div>
+          <div className="weekly-board-range">{rangeLabel}</div>
+        </div>
+        <div className="weekly-board-note">新品与趋势 · 来自官方 RSS</div>
+      </div>
+      <div className="digest-stats">
+        <div className="digest-stat"><b>{digest.total}</b><span>条动态</span></div>
+        <div className="digest-stat"><b>{digest.launches.length}</b><span>个新品事件</span></div>
+        <div className="digest-stat"><b>{digest.topBrands.length}</b><span>活跃品牌</span></div>
+      </div>
+      {digest.topBrands.length > 0 && (
+        <div className="digest-brands">
+          {digest.topBrands.map(([brand, count]) => (
+            <span key={brand} className="digest-brand-pill">{brand}<i>{count}</i></span>
+          ))}
+        </div>
+      )}
+      <div className="briefing-card-body weekly-board-body">
+        <SignalEventList items={digest.events} onOpen={openItem} />
+        {digest.trends.length > 0 && (
+          <div className="trend-brief">
+            <div className="digest-section-head">
+              <span className="insight-kind insight-kind--trend">趋势低优先级</span>
+              <span className="insight-source-count">{digest.trends.length} 条</span>
+            </div>
+            {digest.trends.slice(0, 3).map((item) => (
+              <button key={item.id} className="trend-brief-row" onClick={() => openItem(item)}>
+                <span>{compactNewsText(item.titleZh || item.original_title, 36)}</span>
+                <i>{guessBrand(item) || formatRelativeTime(item.published_at || item.date)}</i>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DailyDigestCard({ data, api }) {
   const today = new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
   const hasLlm = Boolean(data.settings?.llm_configured);
@@ -1343,6 +1497,7 @@ function InsightItem({ item }) {
 function NewsScreen({ data, api, refreshData, navTarget }) {
   const [tab, setTab] = useState("official");
   const [items, setItems] = useState([]);
+  const [officialBoardItems, setOfficialBoardItems] = useState([]);
   const [counts, setCounts] = useState(data.newsCounts || { all: 0, official: 0, wechat: 0, trend: 0, starred: 0 });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -1355,42 +1510,13 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   const loadMoreRef = useRef(null);
   const initialBatchSize = 18;
   const [visibleCount, setVisibleCount] = useState(initialBatchSize);
-  const hasLlm = Boolean(data.settings?.llm_configured);
-  const [sidebarWidth, setSidebarWidth] = useState(hasLlm ? 300 : 260);
-  const draggingRef = useRef(false);
-  const dragStartXRef = useRef(0);
-  const dragStartWidthRef = useRef(0);
-
-  const onResizerMouseDown = (e) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    dragStartXRef.current = e.clientX;
-    dragStartWidthRef.current = sidebarWidth;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    const onMouseMove = (moveEvent) => {
-      if (!draggingRef.current) return;
-      const delta = moveEvent.clientX - dragStartXRef.current;
-      const next = Math.min(480, Math.max(220, dragStartWidthRef.current + delta));
-      setSidebarWidth(next);
-    };
-    const onMouseUp = () => {
-      draggingRef.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-  };
 
   useEffect(() => {
     setCounts(data.newsCounts || { all: 0, official: data.newsCounts?.all || 0, wechat: 0, trend: 0, starred: 0 });
     if (!api) {
       const groups = buildNewsGroups(data.news, data.settings?.tag_groups);
       setItems(groups);
+      setOfficialBoardItems(groups);
       setCounts(newsGroupCounts(groups));
     }
   }, [api, data.news, data.newsCounts, data.settings?.tag_groups]);
@@ -1468,7 +1594,10 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     const result = await api(`/api/news?${params.toString()}`);
     let groups = buildNewsGroups(result.items || result, data.settings?.tag_groups);
     setItems(groups);
-    if (nextTab === "official") setCounts((current) => ({ ...current, ...newsGroupCounts(groups), official: groups.length }));
+    if (nextTab === "official") {
+      setOfficialBoardItems(groups);
+      setCounts((current) => ({ ...current, ...newsGroupCounts(groups), official: groups.length }));
+    }
     if (result.counts) setCounts((current) => ({ ...current, ...result.counts, all: result.counts.all ?? current.all }));
   };
 
@@ -1543,14 +1672,6 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
   return (
     <>
       <div className="news-layout">
-        <div className="news-sidebar" style={{ width: sidebarWidth }}>
-          <DailyDigestCard data={data} api={api} />
-        </div>
-
-        <div className="news-sidebar-resizer" onMouseDown={onResizerMouseDown}>
-          <div className="news-sidebar-resizer-dots" />
-        </div>
-
         <div className="news-feed-col">
           <div className="news-tabs">
             {[
@@ -1660,6 +1781,9 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
           </div>
         </div>
 
+        <div className="news-sidebar">
+          <WeeklyBoardCard data={data} news={officialBoardItems} />
+        </div>
       </div>
       {deleteTarget && <DeleteItemsConfirmModal entityLabel="资讯" items={[deleteTarget]} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteOne} />}
       {sourceModalTarget && <NewsSourceModal group={sourceModalTarget} onClose={() => setSourceModalTarget(null)} onOpen={openOriginal} />}
@@ -3784,6 +3908,8 @@ function ResearchScreen({ data, api, refreshData }) {
             research={dossierTarget}
             products={dossierProducts}
             demands={dossierDemands}
+            api={api}
+            refreshData={refreshData}
             onClose={() => setDossierTargetId(null)}
           />
         }
@@ -5344,6 +5470,8 @@ function ResearchDetail({ data, api, refreshData, research, onBack }) {
             research={research}
             products={products}
             demands={demands}
+            api={api}
+            refreshData={refreshData}
             onClose={() => setDossierOpen(false)}
           />
         }

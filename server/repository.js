@@ -22,6 +22,7 @@ import { ensureWorkspaceSampleDocuments } from "./sample-document-seed.js";
 import { normalizeFields, normalizeSettingsFields } from "./field-config.js";
 import { normalizeDemandInputTags, normalizeProductInputTags } from "./field-matcher.js";
 import { isCrossSourceNewsStoryKey, isSpecificNewsStoryKey, withNewsDedupeKeys } from "./news-dedupe.js";
+import { isOffDomainNoise } from "./news-domain-filter.js";
 import { buildEmptyState } from "./seed.js";
 import { DEFAULT_NEWS_SOURCES, isRecentSampleNews, isSampleWorkspace, sampleSourceId, SAMPLE_NEWS_MAX_AGE_HOURS, SAMPLE_NEWS_SOURCES } from "./sample-workspace.js";
 
@@ -1229,10 +1230,15 @@ function isVisibleNewsItem(item) {
   if (!item) return false;
   const publishedAt = parseIsoTime(item.published_at || item.date);
   if (publishedAt && Date.now() - publishedAt > STREAM_NEWS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000) return false;
+  if (isOffDomainNoise(
+    item.titleZh || item.original_title || "",
+    `${item.summary || ""} ${item.contentZh || item.original_content || ""}`,
+  )) return false;
   const sourceId = String(item.source_id || "");
+  if (item.is_kept === 0) return false;
   if (sourceId.startsWith("sample-news-")) return Boolean(item.type);
   if (!item.type) return false;
-  if (item.classification?.reason === "manual_llm_filtered") return false;
+  if (/filtered|scrubbed|off_domain|promotional/.test(item.classification?.reason || "")) return false;
   if (item.needsTranslation) return false;
   if (item.contentZh === "" && item.summary === "" && item.titleZh === item.original_title) return false;
   return true;
@@ -1761,6 +1767,7 @@ export function updateResearch(userId, id, patch) {
       ...(patch.matched_products !== undefined && patch.products === undefined ? { products: cleanRecordList(patch.matched_products) } : {}),
       ...(patch.matched_demands !== undefined && patch.demands === undefined ? { demands: cleanRecordList(patch.matched_demands) } : {}),
       ...(patch.analysis !== undefined ? { analysis: Array.isArray(patch.analysis) ? patch.analysis.slice(0, 20) : patch.analysis } : {}),
+      ...(patch.dossier_ai !== undefined ? { dossier_ai: patch.dossier_ai } : {}),
       ...(patch.feishu_project_idea !== undefined ? researchFeishuProjectIdeaPatch(patch.feishu_project_idea) : {}),
       updated_at: nowIso(),
     };

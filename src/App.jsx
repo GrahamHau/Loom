@@ -26,7 +26,6 @@ const NAV = [
   { key: "demands", label: "需求库", icon: "bar-chart" },
   { key: "products", label: "竞品库", icon: "boxes" },
   { key: "research", label: "调研工坊", icon: "compass" },
-  { key: "library", label: "知识库", icon: "file-text" },
 ];
 
 const TITLES = {
@@ -898,26 +897,8 @@ function HomeScreen({ data, onNavigate }) {
   const news = data.news || [];
   const activeResearch = dashboard.active_research || research.filter((item) => item.status !== "done" && item.status !== "archived").slice(0, 5);
   const myDemandsCount = dashboard.my_demands_count ?? demands.length;
-  const decisionEvents = dashboard.recent_decisions || [];
-  const abnormalItems = dashboard.abnormal_items || [];
   const hotKeywords = dashboard.hot_keywords || [];
   const recentNews = news.filter((item) => item.titleZh || item.original_title).slice(0, 5);
-  const feishuStatus = dashboard.feishu_status || {};
-  const feishuProjectStatus = dashboard.feishu_project_status || {};
-  const feishuProjectConfigured = Boolean(
-    feishuProjectStatus.configured ||
-    data.settings?.feishu_project_default_project_key ||
-    data.settings?.feishu_mcp_project_key ||
-    data.settings?.feishu_project_default_project_name ||
-    data.settings?.feishu_mcp_project_name
-  );
-  const feishuProjectSynced = feishuProjectConfigured && Number(feishuProjectStatus.items_count || 0) > 0;
-  const feishuConnected = feishuProjectConfigured || Boolean(feishuStatus.connected);
-  const feishuProjectName =
-    feishuProjectStatus.project_name ||
-    data.settings?.feishu_project_default_project_name ||
-    data.settings?.feishu_mcp_project_name ||
-    "飞书项目空间";
   const currentUser = data.user?.name || "";
   const hour = new Date().getHours();
   const greet = hour < 6 ? "夜深了" : hour < 12 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好";
@@ -931,7 +912,7 @@ function HomeScreen({ data, onNavigate }) {
         <div className="home-hello">
           <div className="home-hello-title">{greet}，{currentUser || "visitor"}</div>
           <div className="home-hello-sub">
-            {actionItems.length ? actionItems.join(" · ") : feishuProjectConfigured ? `已固定 ${feishuProjectName}，可以查看项目工作项和本周行业资讯。` : "先由管理员固定飞书项目空间，工作台才能告诉你今天该做什么。"}
+            {actionItems.length ? actionItems.join(" · ") : "采集竞品与用户声音，发起调研，一键生成调研档案。"}
           </div>
         </div>
 
@@ -948,69 +929,35 @@ function HomeScreen({ data, onNavigate }) {
             <div className="home-kpi-num">{products.length}</div>
             <div className="home-kpi-label">竞品快照</div>
           </button>
-          <button className={`home-kpi-card ${feishuProjectConfigured ? "" : "home-kpi-card-pending"}`} onClick={() => feishuProjectConfigured ? onNavigate("demands") : onNavigate("settings")}>
-            <div className="home-kpi-num">{feishuProjectConfigured ? (feishuProjectStatus.items_count || decisionEvents.length || "") : ""}</div>
-            <div className="home-kpi-label">{feishuProjectConfigured ? "飞书项目工作项" : "飞书项目 · 待固定空间"}</div>
+          <button className="home-kpi-card" onClick={() => onNavigate("news")}>
+            <div className="home-kpi-num">{news.length}</div>
+            <div className="home-kpi-label">行业资讯</div>
           </button>
         </div>
-
-        {!feishuProjectConfigured && (
-          <div className="home-connect-banner">
-            <div className="home-connect-banner-icon">
-              <Icon name="feishu" size={16} />
-            </div>
-            <div className="home-connect-banner-body">
-              <div className="home-connect-banner-title">接入飞书项目空间，工作台才能告诉你今天该做什么</div>
-              <div className="home-connect-banner-desc">
-                管理员固定项目空间后，Loom 会从产品想法登记和项目工作项里读取状态、负责人和更新时间；普通用户不需要填写空间号。
-              </div>
-            </div>
-            <button className="home-connect-banner-cta" onClick={() => onNavigate("settings")}>去配置</button>
-          </div>
-        )}
 
         <div className="home-grid">
           <div className="home-main-stack">
             <section className="home-section home-section-main">
               <div className="home-section-head">
-                <h2 className="home-section-title">我的近期动态</h2>
-                {feishuConnected && feishuStatus.last_sync_at ? (
-                  <span className="home-sync-badge home-sync-ok">
-                    <Icon name="check" size={10} />
-                    飞书项目 · {formatAgo(feishuStatus.last_sync_at)}同步
-                  </span>
-                ) : (
-                  <span className="home-sync-badge home-sync-pending">
-                    {feishuProjectConfigured ? "等待首次同步" : "待固定飞书项目空间"}
-                  </span>
-                )}
+                <h2 className="home-section-title">最近采集的竞品</h2>
+                <button className="home-section-link" onClick={() => onNavigate("products")}>竞品库 <Icon name="chevron-right" size={11} /></button>
               </div>
-              {decisionEvents.length ? (
+              {products.length ? (
                 <div className="home-decision-list">
-                  {decisionEvents.slice(0, 6).map((item) => (
-                    <button key={item.id} className="home-decision-row" onClick={() => onNavigate("demands")}>
-                      <span className={`home-pending-status home-status-${item.status_key || "review"}`}>{item.status || "更新"}</span>
-                      <span className="home-pending-name">{item.title || "未命名需求"}</span>
-                      <span className="home-pending-meta">{item.owner || "PM"} · {formatAgo(item.updated_at) || "最近"}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : feishuProjectConfigured ? (
-                <div className="home-empty-state">
-                  <Icon name={feishuProjectSynced ? "check" : "sync"} size={18} style={{ color: feishuProjectSynced ? "var(--success)" : "var(--text-3)" }} />
-                  <div>{feishuProjectSynced ? "近 7 天暂无你的决策或状态变更" : `已固定 ${feishuProjectName}，等待首次同步工作项`}</div>
+                  {products.slice(0, 6).map((item) => {
+                    const platform = (item.platforms && item.platforms[0]) || {};
+                    return (
+                      <button key={item.id} className="home-decision-row" onClick={() => onNavigate("products")}>
+                        <span className="home-pending-name">{item.name || "未命名竞品"}</span>
+                        <span className="home-pending-meta">{item.category || "未分类"}{platform.price ? ` · ${platform.price}` : ""}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
-                <div className="home-pending-card">
-                  <div className="home-pending-explain">固定飞书项目空间后，这里会自动出现项目工作项里的关键状态：</div>
-                  <ul className="home-pending-bullets">
-                    <li><span className="home-pending-bullet-dot" />产品想法登记和项目工作项</li>
-                    <li><span className="home-pending-bullet-dot" />当前节点、状态、负责人和更新时间</li>
-                    <li><span className="home-pending-bullet-dot" />后续用于 Ask Loom 回答“为什么延期 / 卡在哪里”</li>
-                  </ul>
-                  <div className="home-pending-note-2">
-                    团队全部动态见 <button className="home-link-btn home-link-inline" onClick={() => onNavigate("demands")}>需求库 · 飞书项目镜像</button>
-                  </div>
+                <div className="home-empty-state">
+                  <Icon name="boxes" size={18} style={{ color: "var(--text-3)" }} />
+                  <div>还没有采集竞品，用 Chrome 插件采集后会出现在这里</div>
                 </div>
               )}
             </section>
@@ -1090,30 +1037,6 @@ function HomeScreen({ data, onNavigate }) {
               )}
             </section>
 
-            {feishuConnected && (
-              <section className="home-section home-section-side">
-                <div className="home-section-head">
-                  <h2 className="home-section-title">异常监测</h2>
-                  <span className="home-section-meta">卡 3 周 / 暂停 4 周以上</span>
-                </div>
-                {abnormalItems.length ? (
-                  <div className="home-research-list">
-                    {abnormalItems.slice(0, 5).map((item) => (
-                      <button key={item.id} className="home-research-row" onClick={() => onNavigate("demands")}>
-                        <Icon name="calendar" size={13} style={{ color: "var(--warn)", flexShrink: 0 }} />
-                        <span className="home-research-title">{item.title}</span>
-                        <Tag tone="outline">{item.reason}</Tag>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="home-empty-state small">
-                    <Icon name="check" size={16} style={{ color: "var(--success)" }} />
-                    <div style={{ color: "var(--text-3)", fontSize: 13 }}>暂无需关注的卡顿项</div>
-                  </div>
-                )}
-              </section>
-            )}
           </div>
         </div>
       </div>
