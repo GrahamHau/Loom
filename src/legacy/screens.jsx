@@ -1256,7 +1256,8 @@ function buildWeeklyDigest(news = []) {
   const events = launches.length ? launches.slice(0, 5) : items.slice(0, 5);
   const launchMentions = uniqueLaunchMentions(launches);
   const representativeLaunchMentions = representativeLaunches(launchMentions);
-  return { items, launches, trends, topBrands, total: items.length, events, launchMentions, representativeLaunchMentions };
+  const briefLines = buildWeeklyBriefLines(items, launches, trends);
+  return { items, launches, trends, topBrands, total: items.length, events, launchMentions, representativeLaunchMentions, briefLines };
 }
 
 function compactNewsText(value = "", limit = 42) {
@@ -1296,6 +1297,47 @@ function signalTextFromNews(news = {}) {
   if (/三脚架|脚架|tripod|支撑/i.test(text)) return "支撑类产品仍围绕便携、稳固和快拆结构迭代。";
   if (/相机|镜头|投影|camera|lens|projector/i.test(text)) return "影像设备更新带动配件生态，留意适配件和拍摄场景变化。";
   return "这是本周可记住的明确事件，后续看是否形成同品类连续上新。";
+}
+
+function newsTopic(news = {}) {
+  const text = `${news.titleZh || news.original_title || ""} ${news.summary || ""} ${news.contentZh || ""}`;
+  if (/镜头|变形|定焦|变焦|光学|lens|anamorphic|prime/i.test(text)) return { key: "lens", label: "镜头与光学", note: "关注卡口、焦段和拍摄风格变化" };
+  if (/灯|补光|柔光|LED|light|vortex|fixture|soft/i.test(text)) return { key: "lighting", label: "灯光与现场设备", note: "关注小型化、供电和布光效率" };
+  if (/相机|摄像机|PTZ|无反|即时|camera|camcorder|mirrorless/i.test(text)) return { key: "camera", label: "影像主机", note: "关注新机形态和配件生态外溢" };
+  if (/对讲|通信|无线|图传|监视器|收音|麦克风|intercom|wireless|monitor|audio|microphone/i.test(text)) return { key: "workflow", label: "拍摄协作", note: "关注小团队现场协作和无线化" };
+  if (/背包|旅行包|收纳|支架|快拆|夹|三脚架|云台|吸盘|配件|bag|case|mount|tripod|gimbal|clamp|accessory/i.test(text)) return { key: "accessory", label: "配件与收纳", note: "关注便携、快拆和场景化套装" };
+  if (/软件|调色|剪辑|后期|更新|app|software|edit|color|grading/i.test(text)) return { key: "software", label: "后期与软件", note: "关注工作流效率和订阅变化" };
+  return { key: "other", label: "其他信号", note: "继续观察是否形成连续动态" };
+}
+
+function buildWeeklyBriefLines(items = [], launches = [], trends = []) {
+  const topicMap = new Map();
+  for (const item of safeArray(items)) {
+    const topic = newsTopic(item);
+    const current = topicMap.get(topic.key) || { ...topic, count: 0, launches: 0, items: [] };
+    current.count += 1;
+    if (String(item.type || "").includes("新品")) current.launches += 1;
+    current.items.push(item);
+    topicMap.set(topic.key, current);
+  }
+  const topics = [...topicMap.values()]
+    .filter((item) => item.key !== "other")
+    .sort((a, b) => b.launches - a.launches || b.count - a.count)
+    .slice(0, 3);
+  const dominant = topics[0];
+  const headline = dominant
+    ? `${dominant.label}是本周最强主线`
+    : launches.length ? "本周新品发布密度较高" : "本周以行业观察为主";
+  const summary = launches.length
+    ? `近 7 天抓到 ${items.length} 条动态，其中新品${approxCountText(launches.length)}。${topics.length ? `信号集中在${topics.map((item) => item.label).join("、")}。` : "新品分布较散，先看后续是否连续。"}`
+    : `近 7 天抓到 ${items.length} 条动态，暂未形成明确新品高峰，主要用于观察趋势延续性。`;
+  const follow = dominant
+    ? `优先跟进${dominant.label}：${dominant.note}。`
+    : "优先保留高频出现的品牌、品类和场景词，等下一轮采集确认。";
+  const watch = trends.length
+    ? `趋势侧有 ${trends.length} 条补充信号，可用于判断新品背后的需求是否扩大。`
+    : "趋势侧信号较少，当前判断主要来自新品发布。";
+  return { headline, summary, topics, follow, watch };
 }
 
 function launchMentionFromNews(news = {}) {
@@ -1343,26 +1385,67 @@ function WeeklyBoardConclusion({ digest, onOpen }) {
   const leadText = digest.launches.length
     ? `本周发布新品${approxCountText(digest.launches.length)}${mentions.length ? `，${mentions.slice(0, 4).join("、")}。` : "。"}`
     : `本周没有抓到明确新品发布，主要是 ${digest.trends.length} 条行业趋势。`;
-  const opportunity = digest.launches.length
-    ? "优先看能带来配件、收纳、快拆、供电、协作通信需求的新品；这些更容易转化为 Loom 后续调研和选品线索。"
-    : "本周先观察趋势连续性，暂不把单条资讯当成明确机会。";
+  const todayLabel = new Date().toLocaleDateString("zh-CN", { month: "numeric", day: "numeric", weekday: "short" });
   return (
     <div className="weekly-conclusion">
-      <div className="weekly-conclusion-label">本周结论</div>
-      <div className="weekly-conclusion-text">{leadText}</div>
-      {digest.launchMentions.length > 0 && (
-        <div className="weekly-launch-chips">
-          {digest.representativeLaunchMentions.map(({ item, mention }) => (
-            <button key={item.id} type="button" className="weekly-launch-chip" onClick={() => onOpen(item)}>
-              {mention}
-            </button>
-          ))}
+      <section className="brief-section brief-section-hero">
+        <div className="brief-eyebrow">
+          <span>每日简报</span>
+          <i>{todayLabel} 更新</i>
         </div>
+        <h2>{digest.briefLines.headline}</h2>
+        <p>{digest.briefLines.summary}</p>
+      </section>
+
+      <section className="brief-section">
+        <div className="brief-section-title">本周一句话</div>
+        <div className="weekly-conclusion-text">{leadText}</div>
+      </section>
+
+      {digest.briefLines.topics.length > 0 && (
+        <section className="brief-section">
+          <div className="brief-section-title">三条主线</div>
+          <div className="brief-topic-list">
+            {digest.briefLines.topics.map((topic) => (
+              <div key={topic.key} className="brief-topic-row">
+                <div>
+                  <b>{topic.label}</b>
+                  <span>{topic.note}</span>
+                </div>
+                <em>{topic.launches || topic.count}</em>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
-      <div className="weekly-opportunity">
-        <span>机会判断</span>
-        <p>{opportunity}</p>
-      </div>
+
+      {digest.representativeLaunchMentions.length > 0 && (
+        <section className="brief-section">
+          <div className="brief-section-title">代表新品</div>
+          <div className="brief-launch-list">
+            {digest.representativeLaunchMentions.map(({ item, mention }, index) => (
+              <button key={item.id} type="button" className="brief-launch-row" onClick={() => onOpen(item)}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <b>{mention}</b>
+                  <p>{compactNewsText(item.summary || item.contentZh || item.original_content || item.titleZh, 54)}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="brief-section brief-section-grid">
+        <div className="weekly-opportunity">
+          <span>机会判断</span>
+          <p>{digest.briefLines.follow}</p>
+        </div>
+        <div className="weekly-opportunity weekly-opportunity-muted">
+          <span>继续观察</span>
+          <p>{digest.briefLines.watch}</p>
+        </div>
+      </section>
     </div>
   );
 }
