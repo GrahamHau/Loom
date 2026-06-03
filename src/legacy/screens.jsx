@@ -1254,7 +1254,9 @@ function buildWeeklyDigest(news = []) {
   }
   const topBrands = Object.entries(brandCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
   const events = launches.length ? launches.slice(0, 5) : items.slice(0, 5);
-  return { items, launches, trends, topBrands, total: items.length, events };
+  const launchMentions = uniqueLaunchMentions(launches);
+  const representativeLaunchMentions = representativeLaunches(launchMentions);
+  return { items, launches, trends, topBrands, total: items.length, events, launchMentions, representativeLaunchMentions };
 }
 
 function compactNewsText(value = "", limit = 42) {
@@ -1296,41 +1298,71 @@ function signalTextFromNews(news = {}) {
   return "这是本周可记住的明确事件，后续看是否形成同品类连续上新。";
 }
 
-function SignalEventList({ items, onOpen }) {
-  if (!items.length) return null;
+function launchMentionFromNews(news = {}) {
+  const brand = productBrandFromNews(news) || guessBrand(news);
+  const product = productNameFromNews(news).replace(/\s+/g, " ").trim();
+  if (brand && product) return `${brand}发布${product}`;
+  return compactNewsText(news.titleZh || news.original_title, 26);
+}
+
+function uniqueLaunchMentions(items = []) {
+  const seen = new Set();
+  const result = [];
+  for (const item of safeArray(items)) {
+    const mention = launchMentionFromNews(item);
+    const key = mention.toLowerCase();
+    if (!mention || seen.has(key)) continue;
+    seen.add(key);
+    result.push({ item, mention });
+  }
+  return result;
+}
+
+function representativeLaunches(entries = []) {
+  return [...safeArray(entries)]
+    .map((entry, index) => {
+      const text = `${entry.mention || ""} ${entry.item?.titleZh || ""} ${entry.item?.summary || ""}`;
+      let score = 80 - index;
+      if (productBrandFromNews(entry.item) && productNameFromNews(entry.item)) score += 24;
+      if (/相机|镜头|图传|监视器|麦克风|收音|灯|补光|对讲|通信|支架|快拆|云台|三脚架|背包|收纳|配件|camera|lens|light|monitor|audio|wireless|mount|tripod|gimbal|bag|case/i.test(text)) score += 28;
+      if (/发布|推出|上市|开售|亮相|launch|debut|release|announc/i.test(text)) score += 18;
+      if (/评测|教程|摄影奖|比赛|访谈|纪录|review|contest|award|interview/i.test(text)) score -= 30;
+      return { ...entry, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
+}
+
+function approxCountText(count) {
+  if (count >= 20) return `约 ${Math.max(5, Math.ceil(count / 5) * 5)} 条`;
+  return `${count} 条`;
+}
+
+function WeeklyBoardConclusion({ digest, onOpen }) {
+  const mentions = digest.representativeLaunchMentions.map((entry) => entry.mention);
+  const leadText = digest.launches.length
+    ? `本周发布新品${approxCountText(digest.launches.length)}${mentions.length ? `，${mentions.slice(0, 4).join("、")}。` : "。"}`
+    : `本周没有抓到明确新品发布，主要是 ${digest.trends.length} 条行业趋势。`;
+  const opportunity = digest.launches.length
+    ? "优先看能带来配件、收纳、快拆、供电、协作通信需求的新品；这些更容易转化为 Loom 后续调研和选品线索。"
+    : "本周先观察趋势连续性，暂不把单条资讯当成明确机会。";
   return (
-    <div className="signal-events">
-      <div className="digest-section-head">
-        <span className="insight-kind insight-kind--launch">本周明确事件</span>
-        <span className="insight-source-count">{items.length} 条</span>
+    <div className="weekly-conclusion">
+      <div className="weekly-conclusion-label">本周结论</div>
+      <div className="weekly-conclusion-text">{leadText}</div>
+      {digest.launchMentions.length > 0 && (
+        <div className="weekly-launch-chips">
+          {digest.representativeLaunchMentions.map(({ item, mention }) => (
+            <button key={item.id} type="button" className="weekly-launch-chip" onClick={() => onOpen(item)}>
+              {mention}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="weekly-opportunity">
+        <span>机会判断</span>
+        <p>{opportunity}</p>
       </div>
-      {items.map((n, index) => {
-        const brand = productBrandFromNews(n);
-        const product = productNameFromNews(n);
-        const summary = n.summary || n.contentZh || n.original_content || "";
-        return (
-          <div
-            key={n.id}
-            className="signal-event"
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpen(n)}
-            onKeyDown={(e) => { if (e.key === "Enter") onOpen(n); }}>
-            <div className="signal-event-index">{String(index + 1).padStart(2, "0")}</div>
-            <div className="signal-event-main">
-              <div className="signal-event-title">
-                <b>{brand || "本周资讯"}</b>{brand ? " " : ""}发布/推出 {product}
-              </div>
-              <div className="signal-event-detail">{compactNewsText(summary || n.titleZh || n.original_title)}</div>
-              <div className="signal-event-signal">信号：{signalTextFromNews(n)}</div>
-              <div className="signal-event-meta">
-                {brand ? <span>{brand}</span> : null}
-                <span>{formatRelativeTime(n.published_at || n.date)}</span>
-              </div>
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -1370,21 +1402,7 @@ function WeeklyBoardCard({ data, news }) {
         </div>
       )}
       <div className="briefing-card-body weekly-board-body">
-        <SignalEventList items={digest.events} onOpen={openItem} />
-        {digest.trends.length > 0 && (
-          <div className="trend-brief">
-            <div className="digest-section-head">
-              <span className="insight-kind insight-kind--trend">趋势低优先级</span>
-              <span className="insight-source-count">{digest.trends.length} 条</span>
-            </div>
-            {digest.trends.slice(0, 3).map((item) => (
-              <button key={item.id} className="trend-brief-row" onClick={() => openItem(item)}>
-                <span>{compactNewsText(item.titleZh || item.original_title, 36)}</span>
-                <i>{guessBrand(item) || formatRelativeTime(item.published_at || item.date)}</i>
-              </button>
-            ))}
-          </div>
-        )}
+        <WeeklyBoardConclusion digest={digest} onOpen={openItem} />
       </div>
     </div>
   );

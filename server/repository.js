@@ -1236,12 +1236,34 @@ function isVisibleNewsItem(item) {
   )) return false;
   const sourceId = String(item.source_id || "");
   if (item.is_kept === 0) return false;
-  if (sourceId.startsWith("sample-news-")) return Boolean(item.type);
   if (!item.type) return false;
   if (/filtered|scrubbed|off_domain|promotional/.test(item.classification?.reason || "")) return false;
   if (item.needsTranslation) return false;
-  if (item.contentZh === "" && item.summary === "" && item.titleZh === item.original_title) return false;
+  if (isLikelyUntranslatedNewsItem(item)) return false;
+  if (sourceId.startsWith("sample-news-")) return Boolean(item.type);
   return true;
+}
+
+function isLikelyUntranslatedNewsItem(item = {}) {
+  const titleZh = cleanText(item.titleZh || "");
+  const originalTitle = cleanText(item.original_title || "");
+  const summaryZh = cleanText(item.summary || "");
+  const contentZh = cleanText(item.contentZh || "");
+  const titleSameAsOriginal = titleZh && originalTitle && titleZh.toLowerCase() === originalTitle.toLowerCase();
+  if (titleSameAsOriginal && isLikelyEnglishOnlyText(titleZh)) return true;
+  if (summaryZh && isLikelyEnglishOnlyText(summaryZh) && !contentZh) return true;
+  const translatedText = `${titleZh} ${summaryZh} ${contentZh}`.trim();
+  if (!translatedText) return true;
+  const hasHan = /[\u4e00-\u9fff]/.test(translatedText);
+  if (hasHan) return false;
+  return isLikelyEnglishOnlyText(translatedText);
+}
+
+function isLikelyEnglishOnlyText(text = "") {
+  const value = cleanText(text);
+  if (!value || /[\u4e00-\u9fff]/.test(value)) return false;
+  const latinWords = value.match(/[A-Za-z]{3,}/g) || [];
+  return latinWords.length >= 3;
 }
 
 export function visibleNewsItems(userId) {

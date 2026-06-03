@@ -2610,8 +2610,70 @@ a.platform-card-link:hover {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px;
+  padding: 16px;
+  gap: 16px;
+}
+.weekly-conclusion {
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+}
+.weekly-conclusion-label {
+  width: fit-content;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+.weekly-conclusion-text {
+  font-size: 18px;
+  line-height: 1.52;
+  font-weight: 680;
+  color: var(--text);
+  letter-spacing: 0;
+}
+.weekly-launch-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.weekly-launch-chip {
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 70%, var(--bg));
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.weekly-launch-chip:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.weekly-opportunity {
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 44%, var(--surface));
+  border-radius: 16px;
+  padding: 13px 14px;
+}
+.weekly-opportunity span {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-text);
+  margin-bottom: 6px;
+}
+.weekly-opportunity p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-2);
 }
 .digest-section-head {
   display: flex;

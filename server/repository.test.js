@@ -1240,7 +1240,8 @@ describe("repository", () => {
         source: "配件竞品新品 - Google News",
         original_url: "https://sample.test/recent",
         original_title: "Recent camera accessory launch",
-        titleZh: "Recent camera accessory launch",
+        titleZh: "近期相机配件发布",
+        summary: "用于验证近期样例资讯仍会展示。",
         type: "新品发布",
         published_at: new Date().toISOString(),
       },
@@ -1249,7 +1250,8 @@ describe("repository", () => {
         source: "配件竞品新品 - Google News",
         original_url: "https://sample.test/stale",
         original_title: "Old camera accessory launch",
-        titleZh: "Old camera accessory launch",
+        titleZh: "过期相机配件发布",
+        summary: "用于验证过期样例资讯会被隐藏。",
         type: "新品发布",
         published_at: "2025-01-01T00:00:00.000Z",
       },
@@ -1278,6 +1280,45 @@ describe("repository", () => {
 
     const state = repo.bootstrap(visitor.id);
     expect(state.news.map((item) => item.original_url)).not.toContain("https://sample.test/off-domain-macro");
+  });
+
+  it("hides sample news that was filtered or still untranslated", () => {
+    const visitor = repo.ensureLegacyWorkspace();
+    repo.upsertNews(visitor.id, [
+      {
+        source_id: "sample-news-google-accessory-launches",
+        source: "PetaPixel",
+        original_url: "https://sample.test/filtered-english-news",
+        original_title: "Sony World Photography Awards Makes Changes for Annual Contest",
+        titleZh: "Sony World Photography Awards Makes Changes for Annual Contest",
+        summary: "Less than two months after the announcement, the contest changed its rules.",
+        contentZh: "",
+        type: "行业趋势",
+        published_at: new Date().toISOString(),
+        llmProcessed: true,
+        needsTranslation: false,
+        classification: { reason: "manual_llm_filtered" },
+      },
+      {
+        source_id: "sample-news-google-accessory-launches",
+        source: "PetaPixel",
+        original_url: "https://sample.test/untranslated-english-news",
+        original_title: "China Lucky New Color C200 Film Has Arrived in the US",
+        titleZh: "China Lucky New Color C200 Film Has Arrived in the US",
+        summary: "The all-new color emulsion is now available in the United States.",
+        contentZh: "正文已经有中文，但标题和摘要仍然是英文，前端可见区域不应展示。",
+        type: "新品发布",
+        published_at: new Date().toISOString(),
+        llmProcessed: true,
+        needsTranslation: false,
+        classification: { reason: "manual_llm" },
+      },
+    ]);
+
+    const state = repo.bootstrap(visitor.id);
+    const urls = state.news.map((item) => item.original_url);
+    expect(urls).not.toContain("https://sample.test/filtered-english-news");
+    expect(urls).not.toContain("https://sample.test/untranslated-english-news");
   });
 
   it("populates visitor workspace with Pocket 3 sample data by default", () => {
