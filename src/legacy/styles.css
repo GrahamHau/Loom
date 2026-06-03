@@ -2506,8 +2506,7 @@ a.platform-card-link:hover {
   display: flex;
   flex-direction: column;
   border-radius: 24px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, white) 0%, var(--bg) 100%);
+  background: var(--bg);
 }
 .weekly-board-head {
   align-items: flex-start;
@@ -2627,11 +2626,10 @@ a.platform-card-link:hover {
   gap: 10px;
 }
 .brief-section-hero {
-  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border: 1px solid var(--border);
   border-radius: 18px;
   padding: 16px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 52%, var(--surface)) 0%, var(--surface) 100%);
+  background: var(--surface);
 }
 .brief-eyebrow {
   display: flex;
@@ -2674,8 +2672,8 @@ a.platform-card-link:hover {
   letter-spacing: 0;
 }
 .weekly-opportunity {
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-  background: color-mix(in srgb, var(--accent-soft) 44%, var(--surface));
+  border: 1px solid var(--border);
+  background: var(--surface);
   border-radius: 16px;
   padding: 13px 14px;
 }
