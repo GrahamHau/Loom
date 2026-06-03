@@ -1571,21 +1571,6 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
     }
   };
 
-  const processLlm = async () => {
-    setBusy(true);setNotice("");
-    try {
-      const result = await api("/api/news/process-llm", { method: "POST", body: JSON.stringify({ limit: 20 }) });
-      const errorText = result.errors?.length ? `；失败 ${result.failed || 0} 条：${result.errors.map((item) => item.message).join(" / ")}` : "";
-      setNotice(`LLM 处理完成：处理 ${result.processed || 0} 条，保留 ${result.kept || 0} 条，过滤 ${result.filtered || 0} 条，剩余 ${result.remaining || 0} 条${errorText}`);
-      await refreshData?.();
-      await loadNews(tab);
-    } catch (error) {
-      setNotice(error.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const loadNews = async (nextTab = tab) => {
     if (!api) return;
     const params = new URLSearchParams({ page: "1", limit: "100" });
@@ -1692,7 +1677,6 @@ function NewsScreen({ data, api, refreshData, navTarget }) {
               <Btn size="sm" variant="ghost" className="select-trigger" onClick={() => setSelectMode(true)}>选择</Btn>
               }
               <Btn size="sm" variant="ghost" icon="filter">筛选</Btn>
-              <Btn size="sm" variant="ghost" icon="sparkles" onClick={processLlm} disabled={busy}>{busy ? "处理中..." : "LLM处理"}</Btn>
             </div>
           </div>
 
