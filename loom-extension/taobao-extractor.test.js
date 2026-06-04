@@ -147,4 +147,36 @@ describe("taobao content extractor", () => {
     expect(result.discount_price).toBe("¥69.6");
     expect(result.original_price).toBe("");
   });
+
+  it("does not absorb the promotion end-date digits into the original price", () => {
+    // “优惠前 ¥678” 紧挨着 “6月14日”，textContent 拼成 ¥6786月14日，不能吞成 6786
+    const topPriceBand = new FakeElement(
+      {},
+      { className: "beltPrice--i5j_t2w4", textContent: "券后 ¥339 优惠前 ¥6786月14日 24点 结束", rect: { width: 490, height: 78, top: 271 } }
+    );
+
+    const extract = loadTaobaoExtractor({
+      selectorMap: {
+        "[class*='beltPrice']": [topPriceBand],
+      },
+    });
+
+    const result = extract();
+
+    expect(result.discount_price).toBe("¥339");
+    expect(result.original_price).toBe("¥678");
+  });
+
+  it("uses the plain-number reservePrice from scripts as the original price", () => {
+    const extract = loadTaobaoExtractor({
+      scripts: [
+        { textContent: JSON.stringify({ item: { title: "异泽桌面拓展坞" }, price: { priceText: "¥339", reservePrice: "678" } }) },
+      ],
+    });
+
+    const result = extract();
+
+    expect(result.price).toBe("¥339");
+    expect(result.original_price).toBe("¥678");
+  });
 });

@@ -10,6 +10,7 @@ const EMPTY_PLATFORM_AI = {
   api_type: "openai",
   api_url: "",
   model: "",
+  vision_model: "",
   api_key: "",
   allow_all_users: false,
   allow_future_users: false,
@@ -551,6 +552,14 @@ function PlatformAiPanel({ config, users, onSave }) {
               value={draft.model || ""}
               onChange={(event) => patch({ model: event.target.value })}
               placeholder="gpt-4.1-mini"
+            />
+          </label>
+          <label>
+            <span>视觉 Model（读图整理，选填）</span>
+            <input
+              value={draft.vision_model || ""}
+              onChange={(event) => patch({ vision_model: event.target.value })}
+              placeholder="doubao-1-5-vision-pro-32k-250115"
             />
           </label>
           <label>

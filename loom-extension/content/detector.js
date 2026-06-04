@@ -78,18 +78,34 @@
       return true;
     }
 
-    try {
-      const data = extractor();
-      debugEvent("collect:extract", {
-        platform,
-        title: data?.title || data?.name || "",
-        hasImage: Boolean(data?.image || data?.thumbnail_url),
-      });
-      sendResponse({ ok: true, platform, data: { url: window.location.href, platform, ...data } });
-    } catch (error) {
-      debugEvent("collect:error", { platform, error: error.message || "extract_failed" });
-      sendResponse({ ok: false, platform, data: null, error: error.message || "extract_failed" });
-    }
+    // loadDetail：AI 整理前由插件控制自动下滑（限位），把懒加载的详情图加载出来再抽取。
+    const loadDetail = Boolean(msg?.options?.loadDetail);
+    const detailLoader = window.__loom_detail_loaders?.[platform];
+
+    (async () => {
+      try {
+        if (loadDetail && typeof detailLoader === "function") {
+          try {
+            await detailLoader();
+            debugEvent("collect:detail-loaded", { platform });
+          } catch (loaderError) {
+            // 下滑失败不阻断抽取，退化为只抓当前已加载的图
+            debugEvent("collect:detail-load-error", { platform, error: loaderError?.message || "detail_load_failed" });
+          }
+        }
+        const data = await extractor();
+        debugEvent("collect:extract", {
+          platform,
+          title: data?.title || data?.name || "",
+          hasImage: Boolean(data?.image || data?.thumbnail_url),
+          detailImages: Array.isArray(data?.detail_images) ? data.detail_images.length : 0,
+        });
+        sendResponse({ ok: true, platform, data: { url: window.location.href, platform, ...data } });
+      } catch (error) {
+        debugEvent("collect:error", { platform, error: error.message || "extract_failed" });
+        sendResponse({ ok: false, platform, data: null, error: error.message || "extract_failed" });
+      }
+    })();
     return true;
   });
 

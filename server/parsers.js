@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { callLLM, callRoutedLLM } from "./ai-service.js";
+import { callLLM, callRoutedLLM, callVisionLLM, isVisionLLMConfigured } from "./ai-service.js";
 import { fetchPageContent } from "./content-fetcher.js";
 import { buildSearchContext } from "./search-service.js";
 import { rawState } from "./repository.js";
@@ -231,6 +231,56 @@ function sellingPointFallback(rawBullets = []) {
     if (!text) return "";
     return text.replace(/^[-*•\s]+/, "").trim();
   }).filter(Boolean);
+}
+
+// 追加去重：保留原顺序，按归一化文本（去空格/标点/大小写）丢掉重复项。
+function appendUniqueSellingPoints(base = [], extra = [], limit = 16) {
+  const normalize = (value) => String(value || "")
+    .toLowerCase()
+    .replace(/[\s，。、；;,.!！?？·・\-—_/]+/g, "")
+    .trim();
+  const result = [];
+  const seen = new Set();
+  for (const item of [...base, ...extra]) {
+    const text = String(item || "").trim();
+    if (!text) continue;
+    const key = normalize(text);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+// 亚马逊详情页（A+ 长图）常含 listing bullet 没有的卖点 —— 用视觉模型补抽，
+// 仅返回图里明确出现的中文卖点，失败/未配视觉时返回 []，绝不阻断文本整理。
+async function extractAmazonDetailSellingPoints(userId, { source = {}, detailImages = [] }) {
+  if (!detailImages.length || !isVisionLLMConfigured(userId)) return [];
+  try {
+    const result = await callVisionLLM({
+      userId,
+      purpose: "products:amazon_detail_selling_points",
+      system: "你是亚马逊商品详情图（A+ 长图）的视觉信息提取助手，服务于摄影配件品牌产品经理。只根据图片提取可见信息，严格返回 JSON，不要解释。",
+      user: `从亚马逊商品详情图中提取“详情页里出现、但 listing 五点描述里通常没有”的核心卖点。
+
+规则：
+- selling_points 必须是图里明确可见的卖点，输出简洁中文（英文要翻译/压缩成中文，保留原意）。
+- 聚焦功能、规格、材质、使用场景、兼容性等差异化卖点；不要把“品牌故事、好评、促销、物流、售后承诺”当卖点。
+- 不确定或图里看不清就返回 []，不要编造。
+- 最多 8 条。
+
+商品名：${source.name || source.title || ""}
+已知 listing 卖点：${compactArray(source.raw_bullets).join("；")}
+
+返回 JSON：{"selling_points":["详情图卖点"]}`,
+      imageUrls: detailImages,
+      maxTokens: 360,
+    });
+    return compactArray(result?.selling_points);
+  } catch {
+    return [];
+  }
 }
 
 function fields(userId) {
@@ -475,6 +525,18 @@ ${commentsPrompt(source.visible_comments)}`,
   if (qualityWarnings.length) {
     normalizedProduct = await repairProductRawQuality(userId, platform, source, normalizedProduct, qualityWarnings);
     qualityWarnings = qualityCheckProductRaw(platform, source, result, normalizedProduct);
+  }
+
+  // 亚马逊：在 listing 卖点之后，追加详情图（A+）视觉识别出的额外卖点。
+  if (platform === "amazon") {
+    const detailImages = compactUrlArray(source.detail_images);
+    const detailSellingPoints = await extractAmazonDetailSellingPoints(userId, { source, detailImages });
+    if (detailSellingPoints.length) {
+      normalizedProduct.selling_points = appendUniqueSellingPoints(
+        normalizedProduct.selling_points,
+        detailSellingPoints,
+      );
+    }
   }
 
   return {

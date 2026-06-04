@@ -38,7 +38,7 @@ function getSettings(userId, kind = "text") {
   const envPrefix = isVision ? "LLM_VISION_" : "LLM_";
   const openAiPrefix = isVision ? "OPENAI_VISION_" : "OPENAI_";
   const userConfigured = Boolean(settings[`${prefix}api_url`] && settings[`${prefix}model`] && settings[`${prefix}api_key`]);
-  const platformSettings = !isVision && !userConfigured ? platformAiSettingsForUser(userId) : null;
+  const platformSettings = !userConfigured ? platformAiSettingsForUser(userId, kind) : null;
   return {
     ...settings,
     ...(platformSettings || {}),
@@ -96,9 +96,11 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS)
 
 function chatCompletionsUrl(url) {
   const trimmed = String(url || "").replace(/\/+$/, "");
+  if (!trimmed) return trimmed;
   if (trimmed.endsWith("/chat/completions")) return trimmed;
-  if (trimmed.endsWith("/v1")) return `${trimmed}/chat/completions`;
-  return trimmed;
+  // OpenAI 兼容端点统一补 /chat/completions：
+  // 既覆盖 OpenAI 的 /v1，也覆盖火山方舟 Ark/豆包的 /api/v3 等任意 base。
+  return `${trimmed}/chat/completions`;
 }
 
 function stripJsonFence(text) {
