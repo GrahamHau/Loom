@@ -175,4 +175,55 @@ describe("sidepanel comment helpers", () => {
     });
     expect(active.competitor).toEqual(["brand", "host", "category"]);
   });
+
+  it("applies synchronous AI organize tags without polling a background job", async () => {
+    const sandbox = loadSidepanelHelpers();
+    const requests = [];
+    sandbox.fetch = async (url, options = {}) => {
+      requests.push(String(url));
+      if (String(url).endsWith("/api/products/parse-raw")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            name: "Pocket 3 cage",
+            tag_values: {
+              brand: ["Ulanzi"],
+              host: ["Osmo Pocket 3"],
+              category: ["C配件类"],
+            },
+            selling_points: ["磁吸快拆"],
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+    Object.assign(sandbox.__loomState, {
+      apiBase: "https://loom.test",
+      token: "token",
+      mode: "product",
+      page: {
+        platform: "kickstarter",
+        data: { title: "Pocket 3 cage", visible_comments: [] },
+      },
+      pageSignature: "sig",
+      fields: [
+        { key: "brand", legacyKey: "competitor_brands", name: "品牌", entities: ["competitor"], multi: true },
+        { key: "host", legacyKey: "camera_brands", name: "主机", entities: ["competitor"], multi: true },
+        { key: "category", legacyKey: "product_categories", name: "品类", entities: ["competitor"], multi: true },
+      ],
+    });
+
+    await sandbox.processRaw();
+
+    expect(requests).toContain("https://loom.test/api/products/parse-raw");
+    expect(requests.some((url) => url.includes("/api/ai-organize/jobs/"))).toBe(false);
+    expect(sandbox.__loomState.processed.__loom_ai_processed).toBe(true);
+    expect(sandbox.__loomState.form.tag_values).toMatchObject({
+      brand: ["Ulanzi"],
+      host: ["Osmo Pocket 3"],
+      category: ["C配件类"],
+    });
+    expect(sandbox.__loomState.activeTagFields.competitor).toEqual(["brand", "host", "category"]);
+  });
 });

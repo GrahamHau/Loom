@@ -16,7 +16,6 @@ const DEFAULT_MODE_KEY = "loom_default_mode";
 const AI_BEFORE_SAVE_KEY = "loom_ai_before_save";
 const AI_BEFORE_SAVE_UPDATED_AT_KEY = "loom_ai_before_save_updated_at";
 const AUTO_AI_ENABLED = false;
-const AI_ORGANIZE_WAIT_MS = 12000;
 const LLM_NOTICE_DISMISSED_KEY = "loom_llm_notice_dismissed";
 const DRAFT_STATE_KEY = "loom_sidepanel_draft_state_v1";
 const URL_WATCH_INTERVAL_MS = 1600;
@@ -760,36 +759,9 @@ async function processRaw() {
   try {
     const data = await api(endpoint, {
       method: "POST",
-      body: JSON.stringify({ platform: state.page.platform, data: state.page.data, wait_ms: AI_ORGANIZE_WAIT_MS }),
+      body: JSON.stringify({ platform: state.page.platform, data: state.page.data }),
     });
-    if (data?.queued) {
-      state.processed = { ...state.page.data, __loom_ai_processed: false, __loom_ai_job_id: data.job_id };
-      state.form = buildDraft(state.mode, state.processed);
-      state.activeTagFields = activeTagFieldsForDraft(state.mode, state.form, state.processed);
-      state.tagPicker = null;
-      state.formDirty = false;
-      state.message = data.message || "AI 整理耗时较长，已进入后端队列；可以先保存继续采集。";
-      debugEvent("parse-raw:queued", { endpoint, jobId: data.job_id || "" });
-      return;
-    }
-    const visibleComments = alignAiCommentsWithSource(state.page.data?.visible_comments, data.visible_comments);
-    state.processed = {
-      ...state.page.data,
-      ...data,
-      visible_comments: visibleComments,
-      __loom_ai_processed: true,
-    };
-    state.aiProcessedSignature = state.pageSignature;
-    state.form = buildDraft(state.mode, state.processed);
-    state.activeTagFields = activeTagFieldsForDraft(state.mode, state.form, state.processed);
-    autoOpenTagPickerForProcessed(state.mode, state.form, state.processed);
-    state.formDirty = false;
-    state.message = aiQualityWarningText(state.processed) || `AI 结构化完成。${aiFieldSuggestionText(state.processed)}`.trim();
-    debugEvent("parse-raw:ok", {
-      endpoint,
-      title: state.processed?.title || state.processed?.name || "",
-      tagCount: safeArray(state.processed?.tags).length + safeArray(state.processed?.scenarios).length + safeArray(state.processed?.painpoints).length,
-    });
+    applyAiOrganizeResult(data, endpoint);
   } catch (error) {
     state.processed = { ...state.page.data, __loom_ai_processed: false };
     state.aiProcessedSignature = "";
@@ -1098,6 +1070,37 @@ async function api(path, options = {}) {
     throw error;
   }
   return data;
+}
+
+function tagValueDebug(processed) {
+  const entries = Object.entries(processed?.tag_values || {})
+    .map(([key, value]) => [key, safeArray(value).filter(Boolean).length])
+    .filter(([, count]) => count > 0);
+  return {
+    tagValueKeys: entries.map(([key]) => key),
+    tagValueCount: entries.reduce((sum, [, count]) => sum + count, 0),
+  };
+}
+
+function applyAiOrganizeResult(data, endpoint = "") {
+  const visibleComments = alignAiCommentsWithSource(state.page?.data?.visible_comments, data.visible_comments);
+  state.processed = {
+    ...state.page.data,
+    ...data,
+    visible_comments: visibleComments,
+    __loom_ai_processed: true,
+  };
+  state.aiProcessedSignature = state.pageSignature;
+  state.form = buildDraft(state.mode, state.processed);
+  state.activeTagFields = activeTagFieldsForDraft(state.mode, state.form, state.processed);
+  autoOpenTagPickerForProcessed(state.mode, state.form, state.processed);
+  state.formDirty = false;
+  state.message = aiQualityWarningText(state.processed) || `AI 结构化完成。${aiFieldSuggestionText(state.processed)}`.trim();
+  debugEvent("parse-raw:ok", {
+    endpoint,
+    title: state.processed?.title || state.processed?.name || "",
+    ...tagValueDebug(state.processed),
+  });
 }
 
 async function pingApiBase(apiBase) {

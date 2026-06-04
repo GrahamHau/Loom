@@ -7,7 +7,7 @@ import { timingSafeEqual } from "node:crypto";
 import signature from "cookie-signature";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureSeed, readJson, writeJson } from "./db.js";
+import { ensureSeed, writeJson } from "./db.js";
 import { isAdmin, isOwner } from "./access-control.js";
 import adminRouter from "./admin-routes.js";
 import { AppError, isLLMConfigured, isVisionLLMConfigured, testLLM, testVisionLLM } from "./ai-service.js";
@@ -333,12 +333,6 @@ function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
 
-function boundedWaitMs(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.min(Math.max(Math.round(n), 1), 15000);
-}
-
 function aiOrganizeJobKey(id) {
   return `ai_organize_job:${id}`;
 }
@@ -391,53 +385,6 @@ function runSavedAiOrganizeJob({ job, userId, mode, platform, data, targetId }) 
     const result = await parseDemandRaw(userId, { platform, data });
     return updateDemand(userId, targetId, { ...result, __loom_ai_processed: true });
   });
-}
-
-function respondWithAiPipeline({ req, res, userId, mode, platform, runner }) {
-  const waitMs = boundedWaitMs(req.body?.wait_ms ?? req.body?.waitMs);
-  if (!waitMs) return runner().then((result) => res.json(result));
-  let settled = false;
-  const task = runner();
-  task.then((result) => {
-    if (!settled) {
-      settled = true;
-      res.json(result);
-    }
-    return result;
-  }).catch((error) => {
-    if (!settled) {
-      settled = true;
-      throw error;
-    }
-  }).catch((error) => {
-    writeJson(`ai_organize_error:${Date.now()}`, {
-      user_id: userId,
-      mode,
-      platform,
-      error: error?.message || "ai_organize_failed",
-      created_at: new Date().toISOString(),
-    });
-  });
-  setTimeout(() => {
-    if (settled) return;
-    settled = true;
-    const job = queueAiOrganizeJob({
-      userId,
-      mode,
-      platform,
-      input: req.body || {},
-    });
-    runAiOrganizeJob(job, () => task);
-    res.status(202).json({
-      status: "queued",
-      queued: true,
-      job_id: job.id,
-      mode,
-      platform,
-      message: "AI 整理耗时较长，已进入后端队列。",
-    });
-  }, waitMs);
-  return null;
 }
 
 function handleError(error, _req, res, _next) {
@@ -1961,14 +1908,7 @@ app.post("/api/products/parse-url", requireAuth, asyncHandler(async (req, res) =
 }));
 app.post("/api/products/parse-raw", requireAuth, asyncHandler(async (req, res) => {
   const userId = currentUserId(req);
-  return respondWithAiPipeline({
-    req,
-    res,
-    userId,
-    mode: "product",
-    platform: req.body?.platform || "",
-    runner: () => parseProductRaw(userId, req.body || {}),
-  });
+  res.json(await parseProductRaw(userId, req.body || {}));
 }));
 
 app.get("/api/demands", requireAuth, (req, res) => res.json(rawState(currentUserId(req)).demands));
@@ -2030,14 +1970,7 @@ app.post("/api/demands/parse-url", requireAuth, asyncHandler(async (req, res) =>
 }));
 app.post("/api/demands/parse-raw", requireAuth, asyncHandler(async (req, res) => {
   const userId = currentUserId(req);
-  return respondWithAiPipeline({
-    req,
-    res,
-    userId,
-    mode: "demand",
-    platform: req.body?.platform || "",
-    runner: () => parseDemandRaw(userId, req.body || {}),
-  });
+  res.json(await parseDemandRaw(userId, req.body || {}));
 }));
 
 app.get("/api/demand-clusters", requireAuth, (req, res) => {

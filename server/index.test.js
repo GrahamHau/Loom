@@ -346,7 +346,7 @@ describe("AI organize pipeline", () => {
     return { cookie: extractCookie(response.headers), body: await response.json() };
   }
 
-  it("queues Xiaohongshu demand organize work when inline parsing exceeds the wait budget", async () => {
+  it("returns parse-raw results synchronously even when an old wait budget is sent", async () => {
     const { cookie, body: loginBody } = await login();
     repo.updateSettings(loginBody.user.id, {
       llm_api_url: "https://llm.test/v1",
@@ -356,7 +356,29 @@ describe("AI organize pipeline", () => {
     const realFetch = globalThis.fetch;
     vi.stubGlobal("fetch", async (url, options) => {
       if (String(url).startsWith(baseUrl)) return realFetch(url, options);
-      return new Promise(() => {});
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                title: "Pocket3 夜拍补光",
+                summary: "用户想给 Pocket3 找轻便补光方案",
+                host: "Osmo Pocket 3",
+                tags_scenario: ["夜间拍摄"],
+                tags_painpoint: ["光线不足"],
+                tags_innovation: "功能创新",
+                tags_category: [],
+                tag_values: {
+                  scenarios: ["夜间拍摄"],
+                  painpoints: ["光线不足"],
+                  innovation: ["功能创新"],
+                },
+              }),
+            },
+          }],
+        }),
+      };
     });
 
     const response = await fetch(`${baseUrl}/api/demands/parse-raw`, {
@@ -375,19 +397,19 @@ describe("AI organize pipeline", () => {
     });
     const body = await response.json();
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
     expect(body).toMatchObject({
-      status: "queued",
-      queued: true,
-      mode: "demand",
-      platform: "xiaohongshu",
+      title: "Pocket3 夜拍补光",
+      host: "Osmo Pocket 3",
+      tag_values: {
+        scenarios: ["夜间拍摄"],
+        painpoints: ["光线不足"],
+        innovation: ["功能创新"],
+        host: ["Osmo Pocket 3"],
+      },
     });
-    expect(body.job_id).toBeTruthy();
-    const job = dbModule.db.prepare("SELECT * FROM app_data WHERE key = ?").get(`ai_organize_job:${body.job_id}`);
-    expect(job).toBeTruthy();
-    const payload = JSON.parse(job.value);
-    expect(["pending", "running"]).toContain(payload.status);
-    expect(payload.input.data.title).toBe("Pocket3 夜拍补光");
+    const jobs = dbModule.db.prepare("SELECT key FROM app_data WHERE key LIKE 'ai_organize_job:%'").all();
+    expect(jobs).toHaveLength(0);
   });
 
   it("queues background organize work when extension saves raw demand without AI", async () => {
