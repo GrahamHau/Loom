@@ -225,6 +225,50 @@ describe("ai-service routing", () => {
     expect(calls[0].authorization).toBe("Bearer platform-key");
   });
 
+  it("routes platform AI vision through vision_model on an Ark /api/v3 base", async () => {
+    const userId = "platform-ai-vision";
+    dbModule.db.prepare(`
+      INSERT INTO users (
+        id, email, name, initials, role, role_code, status, auth_provider, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run(userId, "vision@example.com", "Vision User", "VU", "成员", "member", "active", "password");
+    dbModule.saveUserState(userId, {
+      user: { id: userId, name: "Vision User", auth_provider: "password" },
+      settings: {},
+    });
+    dbModule.writeJson("platform_ai_organize_config", {
+      enabled: true,
+      api_type: "openai",
+      api_url: "https://ark.cn-beijing.volces.com/api/v3",
+      model: "doubao-1-5-pro-32k-250115",
+      vision_model: "doubao-1-5-vision-pro-32k-250115",
+      api_key: "ark-key",
+      allow_all_users: true,
+    });
+    const calls = [];
+    vi.stubGlobal("fetch", async (url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url: String(url), model: body.model });
+      return mockResponse({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+    });
+
+    await aiService.callRoutedLLM({
+      userId,
+      purpose: "platform-ai:routed",
+      system: "system",
+      user: "user",
+      imageUrls: ["https://img.example/a.jpg"],
+      visionSystem: "vision system",
+      visionUser: "vision user",
+    });
+
+    // 第一段读图走 vision_model，第二段文本走 model，两段都补 /api/v3/chat/completions
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toBe("https://ark.cn-beijing.volces.com/api/v3/chat/completions");
+    expect(calls[0].model).toBe("doubao-1-5-vision-pro-32k-250115");
+    expect(calls[1].model).toBe("doubao-1-5-pro-32k-250115");
+  });
+
   it("does not use platform AI config for users outside the allow list", async () => {
     const userId = "platform-ai-denied";
     dbModule.db.prepare(`

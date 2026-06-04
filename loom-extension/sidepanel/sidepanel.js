@@ -23,7 +23,6 @@ const EDIT_IDLE_GUARD_MS = 4000;
 const BOOTSTRAP_CACHE_MS = 30000;
 const COMMENT_COLLECT_INTERVAL_MS = 2500;
 const COMMENT_COLLECT_MAX_MS = 15000;
-const TAOBAO_IMAGE_LOAD_HINT = "下滑加载所有图片后，再使用AI整理";
 const LEGACY_KEY_MAP = {
   pmcopilot_api_base: API_BASE_KEY,
   pmcopilot_token: TOKEN_KEY,
@@ -295,10 +294,6 @@ function clearEditGuard() {
   lastUserEditAt = 0;
 }
 
-function taobaoImageLoadHint(result = state.page) {
-  return result?.platform === "taobao" ? TAOBAO_IMAGE_LOAD_HINT : "";
-}
-
 function resetAiProcessedFlag(value) {
   if (!value || typeof value !== "object") return value;
   return { ...value, __loom_ai_processed: false };
@@ -493,7 +488,7 @@ async function loadCurrentPage(defaultMode = "auto") {
       state.form = buildDraft(state.mode, state.processed);
       state.activeTagFields = {};
       state.formDirty = false;
-      state.message = taobaoImageLoadHint(result) || "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
+      state.message = "已完成基础采集，可直接保存；如需摘要和标签，再点 AI 整理。";
     }
     debugEvent("collect:read-ok", {
       platform: result.platform,
@@ -598,7 +593,7 @@ function isXhsResultForTab(result, tabUrl) {
   return content.length >= 2 && title.length >= 2;
 }
 
-async function readInjectedPageData(tabOrId, platform) {
+async function readInjectedPageData(tabOrId, platform, options = {}) {
   const tabId = typeof tabOrId === "object" ? tabOrId.id : tabOrId;
   const tabUrl = typeof tabOrId === "object" ? tabOrId.url || "" : "";
   const attempts = platform === "xiaohongshu" ? 8 : 1;
@@ -606,7 +601,7 @@ async function readInjectedPageData(tabOrId, platform) {
   let stableSignature = "";
   let stableCount = 0;
   for (let index = 0; index < attempts; index += 1) {
-    const result = await chrome.tabs.sendMessage(tabId, { type: "LOOM_GET_PAGE_DATA" });
+    const result = await chrome.tabs.sendMessage(tabId, { type: "LOOM_GET_PAGE_DATA", options });
     lastResult = result;
     if (platform !== "xiaohongshu") return result;
     if (isXhsResultForTab(result, tabUrl)) {
@@ -749,8 +744,35 @@ async function resyncAuthWhenIdle(payload = {}) {
   await syncAuthFromWebSession({ silent: false, force: true });
 }
 
+// 亚马逊/淘宝：AI 整理前由插件控制自动下滑（限位）加载懒加载的详情图，再用最新数据整理。
+async function loadDetailImagesBeforeOrganize() {
+  const platform = state.page?.platform;
+  if (!["amazon", "taobao"].includes(platform)) return;
+  try {
+    const tab = state.tab?.id ? state.tab : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+    if (!tab?.id) return;
+    state.message = "正在加载详情图…";
+    renderMain();
+    await ensureContentScriptsInjected(tab.id, platform);
+    const result = await readInjectedPageData(tab, platform, { loadDetail: true });
+    if (result?.ok && result.data) {
+      state.page.data = { ...state.page.data, ...result.data };
+      debugEvent("parse-raw:detail-loaded", {
+        platform,
+        detailImages: Array.isArray(result.data.detail_images) ? result.data.detail_images.length : 0,
+      });
+    }
+  } catch (error) {
+    // 自动下滑失败不阻断整理，退化为用已抓到的图
+    debugEvent("parse-raw:detail-load-error", { error: error.message || "detail_load_failed" });
+  }
+}
+
 async function processRaw() {
   if (!state.page?.data) return;
+  if (["amazon", "taobao"].includes(state.page.platform)) {
+    await loadDetailImagesBeforeOrganize();
+  }
   if (["xiaohongshu", "amazon"].includes(state.page.platform)) {
     await collectVisibleComments({ silent: true });
   }
@@ -825,7 +847,7 @@ async function reloadCurrentPage() {
       state.form = buildDraft(state.mode, state.processed);
       state.activeTagFields = {};
       state.formDirty = false;
-      state.message = taobaoImageLoadHint(result) || "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
+      state.message = "页面已重新抓取，可直接保存；如需摘要和标签，再点 AI 整理。";
     }
     debugEvent("collect:reload-ok", {
       platform: result.platform,
@@ -1589,15 +1611,9 @@ function renderMain() {
   const canProduct = PRODUCT_PLATFORMS.has(platform);
   const canDemand = DEMAND_PLATFORMS.has(platform) || platform === "kickstarter";
   const aiLabel = aiActionLabel();
-  const taobaoHint = taobaoImageLoadHint(state.page);
   document.getElementById("app").innerHTML = `
     <div class="shell">
       ${headerHtml({ platform, mode: state.mode, loading: state.reloading })}
-      ${taobaoHint ? `
-        <div class="cl-top-notice taobao-image-notice">
-          <div class="cl-top-notice-copy">${escapeHtml(taobaoHint)}</div>
-        </div>
-      ` : ""}
       <div class="cl-top-actions">
         <button class="btn top-action" id="save-top" ${state.busy ? "disabled" : ""}>保存</button>
         <button class="btn top-action ${state.processingAi ? "is-processing" : ""}" id="process-top" ${state.busy ? "disabled" : ""}>${aiLabel}</button>

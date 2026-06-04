@@ -1,5 +1,52 @@
 (function registerAmazonExtractor() {
   window.__loom_extractors = window.__loom_extractors || {};
+  window.__loom_detail_loaders = window.__loom_detail_loaders || {};
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // A+ 详情区（懒加载长图所在）。优先按这些容器定位，找不到再兜底温和滚两屏。
+  const AMAZON_DETAIL_SELECTOR = "#aplus_feature_div, #aplus, #productDescription, #dpx-aplus-product-description_feature_div";
+
+  function amazonDetailImages() {
+    const httpOnly = (url) => typeof url === "string" && /^https?:\/\//i.test(url);
+    // 主图集（多角度）藏在 #landingImage 的 data-a-dynamic-image，始终在、不用滚动
+    const landing = document.querySelector("#landingImage");
+    let gallery = [];
+    try {
+      const dyn = landing?.getAttribute("data-a-dynamic-image");
+      if (dyn) gallery = Object.keys(JSON.parse(dyn));
+    } catch {
+      /* ignore */
+    }
+    // A+ 长图（懒加载，靠自动下滑触发后才有真实 src）
+    const aplus = Array.from(document.querySelectorAll("#aplus_feature_div img, #aplus img, #productDescription img"))
+      .map((img) => img.getAttribute("data-src") || img.src || "")
+      .filter(httpOnly);
+    return [...gallery, ...aplus].filter((url, index, all) => all.indexOf(url) === index).slice(0, 12);
+  }
+
+  // 插件控制的自动下滑（限位）：只滚过 A+ 详情区那一段触发懒加载，
+  // 滚到该区末尾即停（不滚到页面底部的评论/推荐/页脚），结束后回到原位。
+  window.__loom_detail_loaders.amazon = async function loadAmazonDetail() {
+    const startY = window.scrollY;
+    const detail = document.querySelector(AMAZON_DETAIL_SELECTOR);
+    if (detail) {
+      const top = window.scrollY + detail.getBoundingClientRect().top;
+      const end = top + detail.offsetHeight;
+      for (let y = top - window.innerHeight / 2; y <= end; y += window.innerHeight * 0.9) {
+        window.scrollTo(0, Math.max(0, y));
+        await sleep(300);
+      }
+      await sleep(500);
+    } else {
+      // 没定位到 A+：温和滚两屏兜底，绝不滚到底
+      window.scrollTo(0, window.innerHeight * 2);
+      await sleep(700);
+    }
+    window.scrollTo(0, startY);
+    await sleep(150);
+  };
+
   window.__loom_extractors.amazon = function extractAmazon() {
     const text = (selector) => document.querySelector(selector)?.textContent?.trim() || "";
     const attr = (selector, name) => document.querySelector(selector)?.getAttribute(name) || "";
@@ -122,6 +169,7 @@
       review_count: Number.parseInt(reviewText.replace(/[^0-9]/g, ""), 10) || 0,
       monthly_sales: monthlySales,
       thumbnail_url: attr("#landingImage", "src") || attr("#imgBlkFront", "src"),
+      detail_images: amazonDetailImages(),
       raw_bullets: rawBullets,
       comments: visibleComments.length || (Number.parseInt(reviewText.replace(/[^0-9]/g, ""), 10) || 0),
       visible_comments: visibleComments,

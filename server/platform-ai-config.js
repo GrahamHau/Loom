@@ -28,6 +28,9 @@ function storedConfig() {
     api_url: cleanText(config.api_url),
     model: cleanText(config.model),
     api_key: cleanText(config.api_key),
+    // 视觉模型（读图整理用，可选）。复用同一 api_type/api_url/api_key，只换模型 id；
+    // 留空则需求整理读图自动跳过（退化为纯文本整理）。
+    vision_model: cleanText(config.vision_model),
     allow_all_users: Boolean(config.allow_all_users),
     allow_future_users: Boolean(config.allow_future_users),
     allowed_user_ids: uniqueList(config.allowed_user_ids),
@@ -61,6 +64,7 @@ export function updatePlatformAiConfig(actorUser, input = {}) {
     api_type: cleanText(input.api_type, previous.api_type || "openai"),
     api_url: cleanText(input.api_url, previous.api_url),
     model: cleanText(input.model, previous.model),
+    vision_model: input.vision_model === undefined ? previous.vision_model : cleanText(input.vision_model),
     api_key: apiKeyInput === "********" ? previous.api_key : apiKeyInput,
     allow_all_users: input.allow_all_users === undefined ? previous.allow_all_users : Boolean(input.allow_all_users),
     allow_future_users: input.allow_future_users === undefined ? previous.allow_future_users : Boolean(input.allow_future_users),
@@ -82,9 +86,21 @@ export function isPlatformAiAllowedForUser(userId) {
   return false;
 }
 
-export function platformAiSettingsForUser(userId) {
+export function platformAiSettingsForUser(userId, kind = "text") {
   if (!isPlatformAiAllowedForUser(userId)) return null;
   const config = storedConfig();
+  // 视觉走平台配置时复用同一端点/key，只换 vision_model；未配 vision_model 则不接管视觉
+  // （返回 null → 读图自动跳过，退化为纯文本整理）。
+  if (kind === "vision") {
+    if (!config.vision_model) return null;
+    return {
+      llm_api_type: config.api_type || "openai",
+      llm_api_url: config.api_url,
+      llm_model: config.vision_model,
+      llm_api_key: config.api_key,
+      __platform_ai_organize: true,
+    };
+  }
   return {
     llm_api_type: config.api_type || "openai",
     llm_api_url: config.api_url,

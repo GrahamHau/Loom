@@ -326,6 +326,59 @@ describe("parsers account fields", () => {
     expect(prompts[1]).toContain("上一次 AI 结果仍有英文");
   });
 
+  it("appends Amazon detail-image selling points after the listing selling points", async () => {
+    const userId = dbModule.getLegacyUserId();
+    repo.updateSettings(userId, {
+      llm_vision_api_url: "https://vision.test/v1",
+      llm_vision_model: "vision-test",
+      llm_vision_api_key: "vision-secret",
+    });
+    const calls = [];
+    mockLlmJsonSequence(
+      [
+        { name: "桌面补光灯", selling_points: ["磁吸快装", "亮度可调"], ai_summary: "桌面补光灯" },
+        { selling_points: ["Type-C 快充", "亮度可调", "CRI 95 高显色"] },
+      ],
+      (body) => calls.push(body),
+    );
+
+    const result = await parsers.parseProductRaw(userId, {
+      platform: "amazon",
+      data: {
+        name: "Desk Light",
+        raw_bullets: ["Magnetic mount", "Adjustable brightness"],
+        detail_images: ["https://img.test/a1.jpg", "https://img.test/a2.jpg"],
+      },
+    });
+
+    // 第二段是视觉调用：用 vision 模型读详情图
+    expect(calls).toHaveLength(2);
+    expect(calls[1].model).toBe("vision-test");
+    expect(calls[1].messages[1].content.filter((part) => part.type === "image_url")).toHaveLength(2);
+    // listing 卖点在前，详情图卖点追加在后，重复项（“亮度可调”）去重
+    expect(result.selling_points).toEqual(["磁吸快装", "亮度可调", "Type-C 快充", "CRI 95 高显色"]);
+  });
+
+  it("keeps Amazon listing selling points unchanged when no detail images are present", async () => {
+    const userId = dbModule.getLegacyUserId();
+    repo.updateSettings(userId, {
+      llm_vision_api_url: "https://vision.test/v1",
+      llm_vision_model: "vision-test",
+      llm_vision_api_key: "vision-secret",
+    });
+    const calls = [];
+    mockLlmJson({ name: "桌面补光灯", selling_points: ["磁吸快装", "亮度可调"], ai_summary: "桌面补光灯" }, (body) => calls.push(body));
+
+    const result = await parsers.parseProductRaw(userId, {
+      platform: "amazon",
+      data: { name: "Desk Light", raw_bullets: ["Magnetic mount"], detail_images: [] },
+    });
+
+    // 没详情图就不触发视觉调用，只有一段文本整理
+    expect(calls).toHaveLength(1);
+    expect(result.selling_points).toEqual(["磁吸快装", "亮度可调"]);
+  });
+
   it("normalizes AI demand tags into default and custom fields", async () => {
     const userId = dbModule.getLegacyUserId();
     const scene = repo.createField(userId, {

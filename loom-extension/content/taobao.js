@@ -1,5 +1,57 @@
 (function registerTaobaoExtractor() {
   window.__loom_extractors = window.__loom_extractors || {};
+  window.__loom_detail_loaders = window.__loom_detail_loaders || {};
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // 定位“图文详情/宝贝详情”区域（懒加载长图所在），复用抽取器同款选择器与判定。
+  function findTaobaoDetailRoot() {
+    const explicit = [
+      "#description",
+      "#J_DivItemDesc",
+      "#J_Desc",
+      "[class*='item-desc']",
+      "[class*='ItemDesc']",
+      "[class*='description']",
+      "[class*='Description']",
+      "[class*='desc-root']",
+      "[class*='DescRoot']",
+      "[class*='detail-content']",
+      "[class*='DetailContent']",
+    ]
+      .flatMap((selector) => [...document.querySelectorAll(selector)])
+      .filter((node) => visibleElement(node) && looksLikeDetailRoot(node));
+    if (explicit.length) return explicit[0];
+    return [...document.querySelectorAll("section, article, div")]
+      .find((node) => visibleElement(node) && looksLikeDetailRoot(node)) || null;
+  }
+
+  // 插件控制的自动下滑（限位）：只滚过“图文详情”那一段触发懒加载长图，
+  // 滚到该区末尾即停（不滚到页面底部的评价/推荐/页脚），结束后回到原位。
+  window.__loom_detail_loaders.taobao = async function loadTaobaoDetail() {
+    const startY = window.scrollY;
+    const detail = findTaobaoDetailRoot();
+    if (detail) {
+      // 先把详情区滚进视口（触发它本身的渲染），再分段滚过它
+      detail.scrollIntoView({ block: "start" });
+      await sleep(400);
+      const top = window.scrollY + detail.getBoundingClientRect().top;
+      const end = top + detail.offsetHeight;
+      for (let y = top; y <= end; y += window.innerHeight * 0.9) {
+        window.scrollTo(0, Math.max(0, y));
+        await sleep(350);
+      }
+      await sleep(600);
+    } else {
+      // 没定位到详情区：温和滚三屏兜底，绝不滚到底
+      for (let i = 1; i <= 3; i += 1) {
+        window.scrollTo(0, window.innerHeight * i);
+        await sleep(450);
+      }
+    }
+    window.scrollTo(0, startY);
+    await sleep(150);
+  };
 
   function text(selector, root = document) {
     return root.querySelector(selector)?.textContent?.trim() || "";
@@ -40,6 +92,13 @@
     return cleanPrice(value).replace(/^¥/, "");
   }
 
+  // 脚本里的价格字段（如 reservePrice）通常是纯数字字符串/数字，没有 ¥ 或关键字，
+  // parsePrimaryPrice/parseOriginalPrice 都匹配不到 —— 这里按纯数字取第一个价格。
+  function looseNumberPrice(value) {
+    const match = String(value ?? "").match(/[0-9]+(?:\.[0-9]+)?/);
+    return match ? match[0] : "";
+  }
+
   function priceNumber(value) {
     return String(value || "").replace(/[^\d.]/g, "");
   }
@@ -50,12 +109,18 @@
     return Boolean(left && right && left === right);
   }
 
+  // 优先用 innerText：真实 DOM 会在相邻块/列之间插入换行或空格，避免把「¥678」与
+  // 后面的「6月14日」拼成「6786」。textContent 不插分隔符，仅作兜底（测试环境）。
+  function renderedText(node) {
+    return String(node?.innerText || node?.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
   function visibleText(selector, root = document) {
     const nodes = root.querySelectorAll(selector);
     for (const node of nodes) {
       if (!(node instanceof Element)) continue;
       const rect = node.getBoundingClientRect();
-      const value = node.textContent?.replace(/\s+/g, " ").trim() || "";
+      const value = renderedText(node);
       if (!value || rect.width <= 0 || rect.height <= 0) continue;
       return value;
     }
@@ -65,13 +130,13 @@
   function parsePrimaryPrice(value) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     if (!text) return "";
-    const couponMatch = text.match(/券后\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    const couponMatch = text.match(/券后\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i);
     if (couponMatch?.[1]) return couponMatch[1];
-    const arriveMatch = text.match(/到手(?:价)?\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    const arriveMatch = text.match(/到手(?:价)?\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i);
     if (arriveMatch?.[1]) return arriveMatch[1];
-    const activityMatch = text.match(/活动价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    const activityMatch = text.match(/活动价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i);
     if (activityMatch?.[1]) return activityMatch[1];
-    const plainMatch = text.match(/[¥￥]\s*([0-9]+(?:\.[0-9]+)?)/);
+    const plainMatch = text.match(/[¥￥]\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/);
     if (plainMatch?.[1]) return plainMatch[1];
     return "";
   }
@@ -79,9 +144,9 @@
   function parseOriginalPrice(value) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     if (!text) return "";
-    const beforeDiscountMatch = text.match(/优惠前\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    const beforeDiscountMatch = text.match(/优惠前\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i);
     if (beforeDiscountMatch?.[1]) return beforeDiscountMatch[1];
-    const originalMatch = text.match(/(?:原价|划线价)\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i);
+    const originalMatch = text.match(/(?:原价|划线价)\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i);
     if (originalMatch?.[1]) return originalMatch[1];
     return "";
   }
@@ -91,7 +156,7 @@
       .filter((node) => node instanceof Element)
       .map((node) => {
         const rect = node.getBoundingClientRect();
-        const value = node.textContent?.replace(/\s+/g, " ").trim() || "";
+        const value = renderedText(node);
         return { node, rect, value };
       })
       .filter(({ rect, value }) => value && rect.width > 0 && rect.height > 0 && rect.top >= 0)
@@ -151,11 +216,11 @@
   function findPriceFromText() {
     const bodyText = document.body?.innerText || "";
     const patterns = [
-      /券后价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
-      /活动价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
-      /到手价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
-      /售价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
-      /¥\s*([0-9]+(?:\.[0-9]+)?)/,
+      /券后价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i,
+      /活动价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i,
+      /到手价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i,
+      /售价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i,
+      /¥\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/,
     ];
     for (const pattern of patterns) {
       const match = bodyText.match(pattern);
@@ -170,9 +235,9 @@
     if (originalFromBand) return originalFromBand;
     const bodyText = document.body?.innerText || "";
     const patterns = [
-      /优惠前\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
-      /原价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
-      /划线价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)/i,
+      /优惠前\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i,
+      /原价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i,
+      /划线价\s*[¥￥]?\s*([0-9]+(?:\.[0-9]+)?)(?![月日号点年时分秒])/i,
     ];
     for (const pattern of patterns) {
       const match = bodyText.match(pattern);
@@ -596,7 +661,7 @@
       || attr("[data-price]", "data-price")
     );
     const rawOriginalPrice = cleanPrice(
-      parsePrimaryPrice(originalPriceFromScripts)
+      looseNumberPrice(originalPriceFromScripts)
       || findOriginalPriceFromText()
     );
     const discountPrice = cleanPrice(
