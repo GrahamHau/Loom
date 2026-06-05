@@ -227,7 +227,7 @@ async function requestLLM(settings, { userId, kind = "text", purpose = "unknown"
         ],
         temperature,
         max_tokens: maxTokens,
-        response_format: responseFormat === "json" ? { type: "json_object" } : undefined,
+        response_format: responseFormat === "json" && settings.llm_supports_json_object !== false ? { type: "json_object" } : undefined,
       }),
     }, timeoutMs, policy));
 

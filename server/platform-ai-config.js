@@ -31,6 +31,9 @@ function storedConfig() {
     // 视觉模型（读图整理用，可选）。复用同一 api_type/api_url/api_key，只换模型 id；
     // 留空则需求整理读图自动跳过（退化为纯文本整理）。
     vision_model: cleanText(config.vision_model),
+    // 该端点/模型是否支持 OpenAI 的 response_format:{type:"json_object"}。
+    // 火山方舟 Ark Coding plan 的豆包模型不支持 → 设 false，改由提示词产出 JSON。
+    supports_json_object: config.supports_json_object !== false,
     allow_all_users: Boolean(config.allow_all_users),
     allow_future_users: Boolean(config.allow_future_users),
     allowed_user_ids: uniqueList(config.allowed_user_ids),
@@ -65,6 +68,7 @@ export function updatePlatformAiConfig(actorUser, input = {}) {
     api_url: cleanText(input.api_url, previous.api_url),
     model: cleanText(input.model, previous.model),
     vision_model: input.vision_model === undefined ? previous.vision_model : cleanText(input.vision_model),
+    supports_json_object: input.supports_json_object === undefined ? previous.supports_json_object : Boolean(input.supports_json_object),
     api_key: apiKeyInput === "********" ? previous.api_key : apiKeyInput,
     allow_all_users: input.allow_all_users === undefined ? previous.allow_all_users : Boolean(input.allow_all_users),
     allow_future_users: input.allow_future_users === undefined ? previous.allow_future_users : Boolean(input.allow_future_users),
@@ -98,6 +102,7 @@ export function platformAiSettingsForUser(userId, kind = "text") {
       llm_api_url: config.api_url,
       llm_model: config.vision_model,
       llm_api_key: config.api_key,
+      llm_supports_json_object: config.supports_json_object,
       __platform_ai_organize: true,
     };
   }
@@ -106,6 +111,7 @@ export function platformAiSettingsForUser(userId, kind = "text") {
     llm_api_url: config.api_url,
     llm_model: config.model,
     llm_api_key: config.api_key,
+    llm_supports_json_object: config.supports_json_object,
     __platform_ai_organize: true,
   };
 }
