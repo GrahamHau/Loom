@@ -223,6 +223,44 @@ describe("ai-service routing", () => {
     expect(String(calls[0].url)).toBe("https://platform.example/v1/chat/completions");
     expect(calls[0].body.model).toBe("platform-model");
     expect(calls[0].authorization).toBe("Bearer platform-key");
+    // 默认（未设 supports_json_object）仍发 response_format
+    expect(calls[0].body.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("omits response_format when platform config marks the model as not supporting json_object", async () => {
+    const userId = "platform-ai-nojson";
+    dbModule.db.prepare(`
+      INSERT INTO users (
+        id, email, name, initials, role, role_code, status, auth_provider, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run(userId, "nojson@example.com", "NoJson User", "NJ", "成员", "member", "active", "password");
+    dbModule.saveUserState(userId, {
+      user: { id: userId, name: "NoJson User", auth_provider: "password" },
+      products: [], demands: [], news: [], research: [], rssSources: [], settings: {},
+    });
+    dbModule.writeJson("platform_ai_organize_config", {
+      enabled: true,
+      api_type: "openai",
+      api_url: "https://ark.cn-beijing.volces.com/api/coding/v3",
+      model: "doubao-seed-2-0-lite-260215",
+      api_key: "ark-key",
+      supports_json_object: false,
+      allow_all_users: true,
+    });
+    const calls = [];
+    vi.stubGlobal("fetch", async (url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push({ url, body });
+      return mockResponse({ choices: [{ message: { content: "```json\n{\"ok\":true}\n```" } }] });
+    });
+
+    const result = await aiService.callLLM({ userId, purpose: "platform-ai:nojson", system: "s", user: "返回json" });
+
+    expect(String(calls[0].url)).toBe("https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions");
+    expect(calls[0].body.model).toBe("doubao-seed-2-0-lite-260215");
+    expect("response_format" in calls[0].body).toBe(false);
+    // 围栏 JSON 仍被 parseJsonObject 正确解析
+    expect(result).toEqual({ ok: true });
   });
 
   it("routes platform AI vision through vision_model on an Ark /api/v3 base", async () => {
