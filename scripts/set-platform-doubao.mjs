@@ -4,11 +4,12 @@
 // 可选环境变量覆盖默认值：
 //   ARK_BASE_URL   默认 https://ark.cn-beijing.volces.com/api/coding/v3（Coding plan 编程套餐端点）
 //   DOUBAO_MODEL          默认 doubao-seed-2-0-lite-260215（文本）
-//   DOUBAO_VISION_MODEL   默认 doubao-seed-2-0-pro-260215（视觉/多模态）
+//   DOUBAO_VISION_MODEL   默认 doubao-seed-2-0-lite-260215（lite 即多模态，更快，够用）
 //   DATABASE_PATH  指定要写入的 sqlite（默认走 .env / db.js 的解析结果）
 //
-// 注：Ark Coding plan 的豆包模型不支持 response_format:{type:"json_object"}，
-// 故 supports_json_object=false，改由提示词产出 JSON（parseJsonObject 兼容 ``` 围栏）。
+// 注：① Ark Coding plan 的豆包模型不支持 response_format:{type:"json_object"}，
+//      故 supports_json_object=false，改由提示词产出 JSON（parseJsonObject 兼容 ``` 围栏）。
+//     ② disable_thinking=true 关闭思考模式 → 更快、更省 token、延迟更稳。
 //
 // 写入哪个库就对哪个库生效：本地调试写本地快照库；线上生效请在生产服务器上
 // 指向生产 DATABASE_PATH 运行（或直接在管理后台「AI 整理」页填同样的值）。
@@ -26,9 +27,10 @@ const config = {
   api_type: "openai",
   api_url: (process.env.ARK_BASE_URL || "https://ark.cn-beijing.volces.com/api/coding/v3").trim(),
   model: (process.env.DOUBAO_MODEL || "doubao-seed-2-0-lite-260215").trim(),
-  vision_model: (process.env.DOUBAO_VISION_MODEL || "doubao-seed-2-0-pro-260215").trim(),
+  vision_model: (process.env.DOUBAO_VISION_MODEL || "doubao-seed-2-0-lite-260215").trim(),
   api_key: apiKey,
   supports_json_object: false,
+  disable_thinking: true,
   allow_all_users: true,
   allow_future_users: true,
 };

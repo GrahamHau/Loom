@@ -228,6 +228,9 @@ async function requestLLM(settings, { userId, kind = "text", purpose = "unknown"
         temperature,
         max_tokens: maxTokens,
         response_format: responseFormat === "json" && settings.llm_supports_json_object !== false ? { type: "json_object" } : undefined,
+        // 关闭思考模式（火山方舟豆包 seed 系列）：更快、更省 token、延迟更稳。仅在配置开启时下发，
+        // 不影响不识别该参数的其他提供商（个人 gpt 等不会带上）。
+        ...(settings.llm_disable_thinking ? { thinking: { type: "disabled" } } : {}),
       }),
     }, timeoutMs, policy));
 
