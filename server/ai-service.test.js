@@ -223,8 +223,9 @@ describe("ai-service routing", () => {
     expect(String(calls[0].url)).toBe("https://platform.example/v1/chat/completions");
     expect(calls[0].body.model).toBe("platform-model");
     expect(calls[0].authorization).toBe("Bearer platform-key");
-    // 默认（未设 supports_json_object）仍发 response_format
+    // 默认（未设 supports_json_object）仍发 response_format；未开 disable_thinking 不带 thinking
     expect(calls[0].body.response_format).toEqual({ type: "json_object" });
+    expect("thinking" in calls[0].body).toBe(false);
   });
 
   it("omits response_format when platform config marks the model as not supporting json_object", async () => {
@@ -245,6 +246,7 @@ describe("ai-service routing", () => {
       model: "doubao-seed-2-0-lite-260215",
       api_key: "ark-key",
       supports_json_object: false,
+      disable_thinking: true,
       allow_all_users: true,
     });
     const calls = [];
@@ -259,6 +261,8 @@ describe("ai-service routing", () => {
     expect(String(calls[0].url)).toBe("https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions");
     expect(calls[0].body.model).toBe("doubao-seed-2-0-lite-260215");
     expect("response_format" in calls[0].body).toBe(false);
+    // 关闭思考模式：下发 thinking:{type:"disabled"}
+    expect(calls[0].body.thinking).toEqual({ type: "disabled" });
     // 围栏 JSON 仍被 parseJsonObject 正确解析
     expect(result).toEqual({ ok: true });
   });
