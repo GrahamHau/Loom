@@ -338,7 +338,8 @@ export async function callRoutedLLM({
     imageUrls: images,
     responseFormat: visionResponseFormat,
     temperature,
-    maxTokens: Math.min(Number(maxTokens || 300), 400),
+    // 思考型视觉模型（如豆包 seed-2.0-pro）会先消耗推理 token，预算太小会把 JSON 输出截断 → 给足余量。
+    maxTokens: Math.min(Math.max(Number(maxTokens || 400), 800), 1500),
   });
   const visionText = visionResponseFormat === "json"
     ? JSON.stringify(visionResult, null, 2)
