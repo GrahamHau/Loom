@@ -275,7 +275,8 @@ async function extractAmazonDetailSellingPoints(userId, { source = {}, detailIma
 
 返回 JSON：{"selling_points":["详情图卖点"]}`,
       imageUrls: detailImages,
-      maxTokens: 360,
+      // 思考型视觉模型（豆包 seed-2.0-pro）先耗推理 token，预算给足以免卖点 JSON 被截断。
+      maxTokens: 800,
     });
     return compactArray(result?.selling_points);
   } catch {
