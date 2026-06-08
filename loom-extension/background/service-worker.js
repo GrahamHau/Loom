@@ -46,9 +46,16 @@ function normalizeApiBase(value) {
   }
 }
 
+const AI_BEFORE_SAVE_UPDATED_AT_KEY = "loom_ai_before_save_updated_at";
+
 chrome.runtime.onInstalled.addListener(async () => {
-  const current = await chrome.storage.local.get([...Object.keys(DEFAULTS), ...Object.keys(LEGACY_KEY_MAP)]);
+  const current = await chrome.storage.local.get([...Object.keys(DEFAULTS), ...Object.keys(LEGACY_KEY_MAP), AI_BEFORE_SAVE_UPDATED_AT_KEY]);
   const next = {};
+  // 一次性迁移：存量用户被老默认存成 false 且从未在设置里手动改过（无 updated_at 标记）→ 翻成默认开。
+  // 用户显式关过的（有 updated_at）保持不动，尊重其选择。
+  if (current.loom_ai_before_save === false && current[AI_BEFORE_SAVE_UPDATED_AT_KEY] === undefined) {
+    next.loom_ai_before_save = true;
+  }
   if (current.loom_api_base !== undefined) {
     const normalized = normalizeApiBase(current.loom_api_base);
     if (normalized !== current.loom_api_base) next.loom_api_base = normalized;
