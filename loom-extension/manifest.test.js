@@ -21,8 +21,9 @@ describe("loom extension manifest", () => {
     const sidepanel = readFileSync(new URL("./sidepanel/sidepanel.js", import.meta.url), "utf8");
     const background = readFileSync(new URL("./background/service-worker.js", import.meta.url), "utf8");
 
-    expect(background).toContain("loom_ai_before_save: false");
-    expect(sidepanel).toContain("const AUTO_AI_ENABLED = false");
+    // 采集后自动 AI 整理已默认开启（产品决策）；其余开销仍按下方常量限位。
+    expect(background).toContain("loom_ai_before_save: true");
+    expect(sidepanel).toContain("const AUTO_AI_ENABLED = true");
     expect(sidepanel).toContain("const URL_WATCH_INTERVAL_MS = 1600");
     expect(sidepanel).toContain("const BOOTSTRAP_CACHE_MS = 30000");
     expect(sidepanel).toContain("const COMMENT_COLLECT_INTERVAL_MS = 2500");

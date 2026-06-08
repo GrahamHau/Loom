@@ -117,8 +117,29 @@ describe("sidepanel comment helpers", () => {
     expect(sandbox.__storage.loom_ai_before_save).toBe(false);
   });
 
-  it("never auto-runs AI after capture even if old settings say enabled", async () => {
+  it("auto-runs AI after capture when enabled (default on)", async () => {
     const sandbox = loadSidepanelHelpers({ loom_ai_before_save: true });
+    let autoRuns = 0;
+    sandbox.__setRunAiProcessForTest(async () => {
+      autoRuns += 1;
+    });
+    Object.assign(sandbox.__loomState, {
+      page: { platform: "xiaohongshu", data: { title: "小红书详情" } },
+      form: { title: "小红书详情" },
+      processed: { __loom_ai_processed: false },
+      llmConfigured: true,
+      processingAi: false,
+      busy: false,
+      formDirty: false,
+    });
+
+    await sandbox.maybeAutoProcessAfterCapture();
+
+    expect(autoRuns).toBe(1);
+  });
+
+  it("does not auto-run AI when the user explicitly disabled it", async () => {
+    const sandbox = loadSidepanelHelpers({ loom_ai_before_save: false });
     let autoRuns = 0;
     sandbox.__setRunAiProcessForTest(async () => {
       autoRuns += 1;
