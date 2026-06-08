@@ -15,7 +15,7 @@ const USER_KEY = "loom_user";
 const DEFAULT_MODE_KEY = "loom_default_mode";
 const AI_BEFORE_SAVE_KEY = "loom_ai_before_save";
 const AI_BEFORE_SAVE_UPDATED_AT_KEY = "loom_ai_before_save_updated_at";
-const AUTO_AI_ENABLED = false;
+const AUTO_AI_ENABLED = true;
 const LLM_NOTICE_DISMISSED_KEY = "loom_llm_notice_dismissed";
 const DRAFT_STATE_KEY = "loom_sidepanel_draft_state_v1";
 const URL_WATCH_INTERVAL_MS = 1600;
@@ -1171,9 +1171,9 @@ async function clearAuthState() {
 async function maybeAutoProcessAfterCapture() {
   if (!AUTO_AI_ENABLED) return;
   const settings = await getStoredSettings();
-  const explicitAutoAi = normalizeBooleanSetting(settings?.[AI_BEFORE_SAVE_KEY], false);
+  // 默认开启「采集后自动整理」（未显式设置时按 true）；亚马逊/淘宝会在整理时自动下滑读详情图。
+  const explicitAutoAi = normalizeBooleanSetting(settings?.[AI_BEFORE_SAVE_KEY], true);
   if (!explicitAutoAi) return;
-  if (state.page?.platform === "taobao") return;
   if (!state.page?.data || !state.form) return;
   if (!state.llmConfigured || state.processingAi || state.busy) return;
   if (state.formDirty) return;

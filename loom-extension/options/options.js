@@ -13,7 +13,7 @@ const LOOM_WEB_HOSTS = new Set([
 const DEFAULTS = {
   loom_api_base: DEFAULT_API_BASE,
   loom_default_mode: "auto",
-  loom_ai_before_save: false,
+  loom_ai_before_save: true,
   llm_api_type: "openai",
   llm_api_url: "",
   llm_model: "",
@@ -168,8 +168,8 @@ async function load() {
   syncWebLinks(data.loom_api_base || DEFAULTS.loom_api_base);
   document.getElementById("default-mode").value = data.loom_default_mode || "auto";
   const aiBeforeSave = accountSettings.extension_ai_before_save !== undefined
-    ? normalizeBooleanSetting(accountSettings.extension_ai_before_save, false)
-    : normalizeBooleanSetting(data.loom_ai_before_save, false);
+    ? normalizeBooleanSetting(accountSettings.extension_ai_before_save, true)
+    : normalizeBooleanSetting(data.loom_ai_before_save, true);
   setAutoAiControl(aiBeforeSave);
   document.querySelectorAll("[data-platform]").forEach((input) => {
     input.checked = data.loom_platforms?.[input.dataset.platform] !== false;

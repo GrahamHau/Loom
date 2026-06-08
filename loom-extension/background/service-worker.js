@@ -7,7 +7,7 @@ const LEGACY_API_BASE_HOSTS = new Set([
 const DEFAULTS = {
   loom_api_base: DEFAULT_API_BASE,
   loom_default_mode: "auto",
-  loom_ai_before_save: false,
+  loom_ai_before_save: true,
   loom_platforms: {
     amazon: true,
     taobao: true,

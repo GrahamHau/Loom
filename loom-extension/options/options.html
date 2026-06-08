@@ -27,7 +27,7 @@
       <div class="section-head">
         <div>
           <h2>常用设置</h2>
-          <div class="section-sub">平时只需要确认登录状态、默认模式和支持平台。AI 整理在侧边栏手动触发。</div>
+          <div class="section-sub">平时只需要确认登录状态、默认模式和支持平台。AI 整理默认采集后自动运行。</div>
         </div>
         <span id="connection-state">未检测</span>
       </div>
@@ -43,8 +43,8 @@
         </label>
         <div class="manual-ai-note">
           <div class="status-label">AI 整理</div>
-          <div class="status-value">手动触发</div>
-          <div class="status-copy">采集后在侧边栏点 AI 整理，避免进入页面时自动占用。</div>
+          <div class="status-value">默认自动</div>
+          <div class="status-copy">默认开启：采集后自动 AI 整理（亚马逊/淘宝会自动下滑读详情图）。可在上方开关关闭，改为手动点。</div>
         </div>
       </div>
       <div class="section-mini-title">支持平台</div>
@@ -139,7 +139,7 @@
             <summary>服务器与旧字段兼容</summary>
             <div class="advanced-body">
               <div class="section-note muted-note">
-                通常不需要修改这里。服务器地址用于测试/私有部署，旧字段映射仅用于兼容早期插件字段名。AI 自动整理已默认关闭，采集后可在侧边栏手动点击 AI 整理。
+                通常不需要修改这里。服务器地址用于测试/私有部署，旧字段映射仅用于兼容早期插件字段名。AI 自动整理已默认开启，采集后会自动整理；如需手动可在上方关闭。
               </div>
               <div class="form-grid">
                 <label class="span-2">服务器地址<input id="api-base" type="url" placeholder="https://loom.palecedar.site"></label>
@@ -168,7 +168,7 @@
     </section>
 
     <section class="section note">
-      插件默认先做快速采集。用户可以直接保存到 Web 版，也可以手动点击 AI 整理后再保存。
+      插件采集后默认自动 AI 整理再保存；也可在上方关闭自动、改为手动点击 AI 整理。
     </section>
   </main>
   <script src="../shared/auth-errors.js"></script>
